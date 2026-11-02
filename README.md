@@ -18,7 +18,9 @@ Everything below runs on NEAR testnet and costs nothing.
 
 1. **Install.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm install`. You see the install finish with no errors.
 2. **Configure.** Run `cp .env.example .env` and fill in an owner and an agent testnet account. You see both account ids printed by `npm run check-env`.
-3. **Sign up as a founder.** With your own testnet account, run `near contract call-function as-transaction keel.testnet create_vault json-args '{"name":"<company>"}' prepaid-gas '300 Tgas' attached-deposit '2.62 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `"<company>.keel.testnet"` returned: your company's own vault, owned by you, with Keel's agent key already on it and no policy. Both caps are 0 and the allowlist is empty, so every payment needs your approval. The deposit is the `min_vault_deposit` shown by `get_config` on `keel.testnet`; it pays the vault's storage and stays in the vault. Run it again with another name for each company you run; `get_vaults_for_owner` lists them all.
+3. **Sign up as a founder in the app.** Run `cd web && npm install && npm run dev`, open the address it prints and click **Connect wallet**. You see the NEAR wallet picker. Sign in with a testnet account, type your company name and click **Create**. You see your company in the sidebar with Keel's agent connected and no limits. Without a wallet, open `/?view=keel-owner.testnet` to see a founder's companies read-only. Details are in [web/README.md](web/README.md).
+
+   **Or from the command line.** With your own testnet account, run `near contract call-function as-transaction keel.testnet create_vault json-args '{"name":"<company>"}' prepaid-gas '300 Tgas' attached-deposit '2.62 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `"<company>.keel.testnet"` returned: your company's own vault, owned by you, with Keel's agent key already on it and no policy. Both caps are 0 and the allowlist is empty, so every payment needs your approval. The deposit is the `min_vault_deposit` shown by `get_config` on `keel.testnet`; it pays the vault's storage and stays in the vault. Run it again with another name for each company you run; `get_vaults_for_owner` lists them all.
 4. **Set your policy.** As the owner, call `update_policy` on your vault with your own caps and payees and 1 yoctoNEAR attached, for example `near contract call-function as-transaction <company>.keel.testnet update_policy json-args '{"update":{"per_payment_cap":"100000000","daily_cap":"500000000","allow":["<payee>.testnet"]},"reason":"initial policy"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `get_policy` return your values. The examples below assume 100 USDC per payment and 500 per day.
 5. **Pay under the cap.** Run `npm run agent -- --once`. You see Keel pay Northwind Hosting 80 USDC alone, with a transaction hash and the rule it checked.
 6. **Go over the cap.** Run `npm run scenario:shortfall`. You see Keel file proposal #1 to move 8,000 USDC to Payroll, with its reasons. The vault has moved nothing yet.
@@ -153,7 +155,7 @@ NEAR Intents has no testnet, so cross-chain moves run on mainnet through a secon
 | `agent/memory.json` | Human overrides and rule-draft history |
 | `config/treasury.json` | Wallets, minimums, payees and upcoming bills |
 | `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair), and the planned demo scripts |
-| `web/` | Dashboard and public ledger page |
+| `web/` | The app: wallet sign-in, one vault per company, company switcher and Overview (Vite, React, TypeScript, NEAR Connect) |
 | `test-token/` | Keel Test USDC, a NEP-141 token with 6 decimals for testnet only |
 
 | `.env` variable | Purpose |
@@ -178,6 +180,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 
 - [near-sdk 5.30](https://crates.io/crates/near-sdk) and [near-contract-standards 5.30](https://crates.io/crates/near-contract-standards) for the contracts
 - [cargo-near 0.22](https://crates.io/crates/cargo-near) to build them, [near-cli-rs 0.30](https://www.npmjs.com/package/near-cli-rs) to deploy and call them
+- [NEAR Connect 0.11](https://www.npmjs.com/package/@hot-labs/near-connect) for wallet sign-in, with [React 19](https://react.dev), [Vite 8](https://vite.dev) and TypeScript 5.9 for the app
 
 Parts of this project are written with AI coding agents (Claude Code).
 
