@@ -64,7 +64,7 @@ export class Chain {
   async view<T>(contractId: string, method: string, args: object = {}): Promise<T> {
     const r = await this.rpc<{ result: number[] }>("query", {
       request_type: "call_function",
-      finality: "final",
+      finality: "optimistic",
       account_id: contractId,
       method_name: method,
       args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),

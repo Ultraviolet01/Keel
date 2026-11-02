@@ -99,7 +99,8 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   say("observe", `balance ${money(balance)}, ${proposals.filter((p) => p.status === "pending").length} proposals waiting, ${open.length} open bills`);
 
   // Forecast
-  const days = forecast(balance, open, o.today);
+  // Blocklisted payees are never paid, so they do not count against the balance.
+  const days = forecast(balance, open.filter((b) => !policy.blocklist.includes(b.payee)), o.today);
   const short = firstShortfall(days);
   say("forecast", short ? `short ${money(-short.balance)} on ${short.date}` : `covered for the next ${days.length} days (ends at ${money(days.at(-1)!.balance)})`);
 
@@ -124,7 +125,9 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
       priorPayments: paidBefore,
     });
     const spike = isSpike(bill.amount, approvalsFor(bill.payee, proposals));
-    const vault = await chain.checkPayment(vaultId, bill.payee, bill.amount);
+    const raw = await chain.checkPayment(vaultId, bill.payee, bill.amount);
+    // The vault reports amounts in raw units; show them as tokens.
+    const vault = { ...raw, reason: raw.reason.replace(/\b\d{4,}\b/g, (n) => money(BigInt(n))) };
     const action = decide({ bill, policy, balance: available, counterparty, spike, vaultBand: vault.band, vaultReason: vault.reason });
     const label = `${bill.memo ?? bill.id}: ${money(bill.amount)} to ${bill.payee}, due ${bill.due}`;
     say("check", `${label}. Counterparty ${counterparty.verdict} (${counterparty.reasons.join("; ")}). Vault says ${vault.band.replace("_", " ")}`);
