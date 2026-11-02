@@ -5,11 +5,13 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 ## Run it
 
 1. Run `npm install` in this folder.
-2. Make sure Keel's agent key file exists (`node ../scripts/new-agent-key.mjs`; path in `AGENT_KEY_FILE`, default `~/.near-credentials/keel-agent-key.json`).
-3. Run `npm run agent -- --once --dry-run`. You see one line per step for every vault on `keel.testnet`: balance, forecast, and what Keel would do with each bill, with nothing signed.
+2. Run `npm run agent -- --once --dry-run`. You see one line per step for every vault on `keel.testnet`: balance, forecast, and what Keel would do with each bill, with nothing signed. Vaults created before the agent key moved onto the vault (`kora`, `lumen`) are skipped. No key or `.env` is needed for a dry run.
+3. To sign, Keel's agent key file must exist (`node ../scripts/new-agent-key.mjs` creates one; path in `AGENT_KEY_FILE`, default `~/.near-credentials/keel-agent-key.json`). Only Keel's operator holds the key that the factory puts on every vault. Without it, any run that would sign stops and suggests `--dry-run`.
 4. Run `npm run agent` to keep it running, one round every 5 minutes. Options: `--once`, `--dry-run`, `--vault <id>`, `--interval <seconds>`, `--lookahead <days>`.
 
 ## Demo: one full loop in a few seconds
+
+Anyone can run `npm run demo -- --dry-run` to see the decisions below without signing. The steps here are for Keel's operator, who holds the agent key.
 
 1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=harbor.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
 2. Run `npm run demo`. You see, for the four bills in `../config/bills.json`:
@@ -20,9 +22,13 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 3. Open the app's Approvals page for the vault. You see the two proposals waiting, with Keel's reasons.
 4. Run `npm run demo` again. You see Keel report Northwind as already paid by the vault and Atlas and payroll as already proposed, and nothing is signed. The vault pays each bill once, so a fresh demo needs a fresh vault.
 
+## Stress suites
+
+`stress/live.ts` (`npm run stress`) and `stress/spam.ts` (`npm run stress:flood`) attack a throwaway vault with the agent key, the owner's key and an outsider's key. They need those keys and spend testnet NEAR, so only Keel's operator runs them. Results are in the root README under Security.
+
 ## How it decides
 
-All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` (`npm test`, 12 tests):
+All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` and `src/fuzz.test.ts` (`npm test`, 22 tests, about 37,000 generated cases):
 
 | Step | Rule |
 | --- | --- |
@@ -45,13 +51,13 @@ A bill with `"chain": "base"` in `config/bills.json` is paid on Base. Keel tries
 
 If no route works, Keel records nothing and tries again on the next run. Offers that expire before the owner approves are proposed again.
 
-**Try the fallback:** run `npm run agent -- --once --dry-run --vault vega.keel.testnet`. You see the Base bill skip 1Click (`runs on mainnet only`) and fall back to Chain Signatures. Until someone funds the vault's Base Sepolia address, the result is `holds 0 USDC, needs 25 USDC; top it up`.
+**Try the fallback:** run `npm run agent -- --once --dry-run --vault vega.keel.testnet`. You see the 3 USDC Base bill skip 1Click (`runs on mainnet only`) and fall back to Chain Signatures: `Would propose paying from the vault's own base address 0x69aa0e… via NEAR Chain Signatures`. If the vault's Base address holds too little USDC or no ETH for gas, Keel says how much is missing and waits instead.
 
 **After the owner approves**, the vault stores the signed transaction (`evm_signed.raw_tx`, `evm_signed.tx_hash`). On its next run Keel broadcasts it on Base and follows the receipt until it lands.
 
 ### NEAR Intents 1Click
 
-`src/intents.ts` talks to the 1Click API: token list, quotes, deposit and status. 1Click runs on mainnet only.
+`src/intents.ts` talks to the 1Click API: token list, quotes, deposit and status. 1Click runs on mainnet only; if it is down, the commands below print its HTTP status.
 
 1. Run `npm run intents -- tokens USDC`. You see USDC on every chain 1Click supports, with its `assetId`.
 2. Run `npm run intents -- quote --to base --amount 5`. You see a dry quote (nothing is sent): how much USDC arrives on Base, the minimum, and the time estimate.

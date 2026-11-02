@@ -123,7 +123,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
 
   // Observe
   const policy = await chain.policy(vaultId);
-  if (!("agent_key" in policy) || policy.agent_key !== chain.agentPublicKey()) {
+  if (!("agent_key" in policy) || policy.agent_key !== (await chain.agentPublicKey())) {
     say("observe", "skipped: this vault does not hold Keel's current agent key");
     return;
   }
@@ -171,6 +171,15 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
           say("reconcile", `${id}: NEAR's MPC network did not sign #${p.id}`);
         } else if (p.status === "signed" && p.evm_signed && p.evm) {
           const { raw_tx, tx_hash } = p.evm_signed;
+          if (!h.evmTx) {
+            // Already on chain (for example after a restart): just record it.
+            const landed = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
+            if (landed) {
+              if (!o.dryRun) Object.assign(h, { evmTx: tx_hash, chainId: p.evm.chain_id, swap: landed });
+              say("reconcile", `${id}: #${p.id} already ${landed === "SUCCESS" ? "paid" : "reverted"} on ${chainInfo(p.evm.chain_id).name}`);
+              continue;
+            }
+          }
           if (!h.evmTx && o.dryRun) {
             say("reconcile", `${id}: #${p.id} is signed; would broadcast it (dry run)`);
             continue;

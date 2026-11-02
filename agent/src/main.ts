@@ -42,7 +42,11 @@ async function round() {
   saveState(state);
 }
 
-console.log(`Keel agent on ${cfg.network}, factory ${cfg.factoryId}, agent key ${chain.agentPublicKey().slice(0, 16)}…${dryRun ? ", dry run" : ""}`);
+if (!dryRun && !chain.canSign()) {
+  console.error(`Signing needs Keel's agent key file (${cfg.agentKeyFile}), which only Keel's operator has. Add --dry-run to see every decision without signing.`);
+  process.exit(1);
+}
+console.log(`Keel agent on ${cfg.network}, factory ${cfg.factoryId}, agent key ${(await chain.agentPublicKey()).slice(0, 16)}…${dryRun ? ", dry run" : ""}`);
 await round();
 if (!once) {
   setInterval(() => round().catch((e) => console.error(e)), intervalSec * 1000);

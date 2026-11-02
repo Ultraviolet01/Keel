@@ -25,7 +25,8 @@ if (cmd === "tokens") {
     originAsset: from.assetId,
     destinationAsset: to.assetId,
     amount,
-    recipient: opt("recipient", "0x000000000000000000000000000000000000dEaD")!,
+    // 1Click rejects burn addresses; default to vega.keel.testnet's Base address. A dry quote sends nothing.
+    recipient: opt("recipient", "0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed")!,
     refundTo: opt("refund", "keel.near")!,
     deadline: deadlineFromNow(Number(opt("minutes", "30"))),
   });

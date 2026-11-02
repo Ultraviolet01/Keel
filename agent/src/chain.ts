@@ -115,12 +115,27 @@ export class Chain {
     });
   }
 
-  agentPublicKey(): string {
-    return this.key().public_key;
+  /** True when Keel's private agent key is on this machine, so it can sign. */
+  canSign(): boolean {
+    return existsSync(this.cfg.agentKeyFile);
+  }
+
+  /**
+   * Keel's agent public key: from the local key file, or, without it, the one
+   * the factory adds to every vault. Dry runs need only this.
+   */
+  async agentPublicKey(): Promise<string> {
+    if (this.canSign()) return this.key().public_key;
+    return (await this.view<{ agent_key: string }>(this.cfg.factoryId, "get_config")).agent_key;
   }
 
   private key() {
-    if (!this.agentKey) this.agentKey = JSON.parse(readFileSync(this.cfg.agentKeyFile, "utf8"));
+    if (!this.agentKey) {
+      if (!this.canSign()) {
+        throw new Error(`signing needs Keel's agent key file (${this.cfg.agentKeyFile}); without it, run with --dry-run`);
+      }
+      this.agentKey = JSON.parse(readFileSync(this.cfg.agentKeyFile, "utf8"));
+    }
     return this.agentKey!;
   }
 

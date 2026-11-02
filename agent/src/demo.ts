@@ -35,6 +35,10 @@ const say = (e: Event) => {
   if (e.tx) console.log(`   ${cfg.explorerTx}${e.tx}`);
 };
 
+if (!dryRun && !chain.canSign()) {
+  console.error(`Signing needs Keel's agent key file (${cfg.agentKeyFile}), which only Keel's operator has. Run \`npm run demo -- --dry-run\` to see every decision without signing.`);
+  process.exit(1);
+}
 console.log(`Keel demo on ${vault} (${cfg.network})${dryRun ? ", dry run: nothing is signed" : ""}`);
 const state = loadState();
 delete state.handled[vault]; // replay every bill in the demo

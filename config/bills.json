@@ -91,11 +91,11 @@
   ],
   "vega.keel.testnet": [
     {
-      "id": "design-base-oct",
+      "id": "design-base-nov-2",
       "payee": "0x000000000000000000000000000000000000dEaD",
-      "amount": "15.00",
-      "due": "+2",
-      "memo": "Designer invoice, paid in USDC on Base",
+      "amount": "3.00",
+      "due": "+3",
+      "memo": "Designer invoice 2, paid in USDC on Base",
       "chain": "base"
     }
   ]
