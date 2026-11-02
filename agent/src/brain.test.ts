@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, checkCounterparty, decide, draftRule, firstShortfall, forecast, isSpike, type DecideInput, type Policy } from "./brain";
+import { addDays, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
 
 const U = 1_000_000n; // 1 USDC
 
@@ -116,4 +116,10 @@ test("1Click quote body: exact input, origin-chain deposit, refunds to the vault
   assert.equal(body.refundTo, "kora.keel.near");
   assert.equal(body.slippageTolerance, 100);
   assert.equal(body.deadline, "2026-11-02T12:30:00.000Z");
+});
+
+test("bills on another chain are cross-chain; NEAR bills are not", () => {
+  assert.equal(isCrossChain({ id: "p", payee: "0xabc", amount: 1n, due: "2026-11-05", chain: "base" }), true);
+  assert.equal(isCrossChain({ id: "n", payee: "a.testnet", amount: 1n, due: "2026-11-05" }), false);
+  assert.equal(isCrossChain({ id: "n", payee: "a.testnet", amount: 1n, due: "2026-11-05", chain: "near" }), false);
 });

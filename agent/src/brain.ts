@@ -27,10 +27,16 @@ export interface Proposal {
 /** A bill the founder told Keel about. Amount in the token's smallest unit. */
 export interface Bill {
   id: string;
-  payee: string;
+  payee: string; // a NEAR account, or an address on `chain`
   amount: bigint;
   due: string; // YYYY-MM-DD
   memo?: string;
+  chain?: string; // set for payees on another chain, for example "base"
+}
+
+/** Bills paid on another chain go through NEAR Intents and always need the owner. */
+export function isCrossChain(b: Bill): boolean {
+  return Boolean(b.chain && b.chain !== "near");
 }
 
 export interface PaymentRecord {
