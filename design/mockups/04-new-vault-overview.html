@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Keel · New vault</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Hanken+Grotesk:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<style>
+  .setup { background: var(--brass-tint); border: 1px solid var(--brass-line); border-radius: 12px; padding: 24px; margin-bottom: 20px; display: grid; grid-template-columns: 300px 1fr; gap: 32px; }
+  .setup h2 { font-family: var(--serif); font-weight: 600; font-size: 24px; line-height: 1.2; }
+  .setup .why { color: #6e5420; font-size: 13px; margin-top: 8px; }
+  .checklist { background: var(--surface); border-radius: 10px; }
+  .ck { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .ck:last-child { border-bottom: 0; }
+  .ck .box { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid #c3cfcf; flex: none; }
+  .ck.done .box { background: var(--good); border-color: var(--good); color: #fff; }
+  .ck .t { flex: 1; }
+  .ck .t b { display: block; font-weight: 600; font-size: 14px; }
+  .ck.done .t b { color: var(--muted); font-weight: 500; }
+  .ck .t span { font-size: 12px; color: var(--muted); }
+  .ck .btn { height: 32px; font-size: 13px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 380px; gap: 20px; }
+  .big { font-size: 44px; margin-top: 6px; }
+  .big small { font: 500 13px var(--sans); color: var(--muted); margin-left: 6px; letter-spacing: 0; }
+  .empty-chart { margin-top: 20px; height: 150px; border-radius: 8px; border: 1px dashed #cdd8d8; background: var(--page); display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); font-size: 13px; padding: 0 40px; }
+  .rules-head { display: flex; align-items: center; justify-content: space-between; }
+  .rules-head h2 { display: flex; align-items: center; gap: 10px; }
+  .rules-head span { font-size: 12px; color: var(--muted); }
+  .rl div { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .rl div:last-child { border-bottom: 0; }
+  .rl div span:first-child { color: var(--muted); }
+  .rl .unset { color: var(--brass); font-weight: 500; }
+  .decisions { margin-top: 20px; }
+  .decisions .empty { margin-top: 16px; padding: 28px; border: 1px dashed #cdd8d8; border-radius: 10px; color: var(--muted); font-size: 13px; text-align: center; }
+  .deposit { margin-top: 20px; }
+  .addr { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--page); border: 1px solid var(--line); }
+  .addr .mono { color: var(--ink); font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <span class="wordmark">KEEL</span>
+      <div class="company-card">
+        <div class="who">
+          <div class="name">Nova Labs</div>
+          <span class="mono">nova.keel.near</span>
+        </div>
+        <svg class="icon" style="color:var(--muted)" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+      </div>
+      <nav class="nav">
+        <a class="active"><svg class="icon" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>Overview</a>
+        <a><svg class="icon" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>Approvals</a>
+        <a><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"/></svg>Activity</a>
+        <a><svg class="icon" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></svg>Rules</a>
+        <a><svg class="icon" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>Wallets</a>
+      </nav>
+      <div class="status-box">
+        <div class="row"><span class="dot wait"></span>Keel is waiting for limits</div>
+        <p>Connected, but can only propose until you set them</p>
+        <button class="btn"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>Pause all payments</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="head">
+        <div>
+          <h1 class="serif">Overview</h1>
+          <p class="sub">Nova Labs · vault created just now</p>
+        </div>
+        <div class="tools">
+          <button class="btn">Deposit</button>
+          <button class="btn primary">Set limits</button>
+        </div>
+      </div>
+
+      <section class="setup">
+        <div>
+          <h2>Finish setting up Nova Labs</h2>
+          <p class="why">Until you set limits, Keel can't pay anything on its own. It can still watch and propose payments for you to approve.</p>
+        </div>
+        <div class="checklist">
+          <div class="ck done"><span class="box"><svg class="icon" style="width:13px;height:13px;stroke-width:2.5" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><div class="t"><b>Vault created</b><span class="mono">nova.keel.near · owned by ultraviolet.near</span></div></div>
+          <div class="ck done"><span class="box"><svg class="icon" style="width:13px;height:13px;stroke-width:2.5" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><div class="t"><b>Keel's agent connected</b><span>Can call execute_payment and propose_payment only</span></div></div>
+          <div class="ck"><span class="box"></span><div class="t"><b>Set your limits</b><span>Per payment, per day, and when Keel must ask you</span></div><button class="btn primary">Set limits</button></div>
+          <div class="ck"><span class="box"></span><div class="t"><b>Add the payees Keel may pay</b><span>Suppliers, payroll and your other wallets</span></div><button class="btn">Add payees</button></div>
+          <div class="ck"><span class="box"></span><div class="t"><b>Deposit USDC</b><span>Send USDC on NEAR to nova.keel.near</span></div><button class="btn">Deposit</button></div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <div>
+          <section class="card card-pad">
+            <span class="muted">Total treasury</span>
+            <div class="big serif num">0.00<small>USDC</small></div>
+            <span class="muted" style="font-size:13px">1 wallet on NEAR</span>
+            <div class="empty-chart">Keel starts forecasting the next 14 days once the vault holds USDC and has bills to watch</div>
+          </section>
+          <section class="card card-pad decisions">
+            <h2>Keel's decisions</h2>
+            <p class="sub">Every move, with the rule it checked</p>
+            <div class="empty">No moves yet. Each payment Keel makes or proposes will show here with the rule it checked.</div>
+          </section>
+        </div>
+        <div>
+          <section class="card card-pad">
+            <div class="rules-head">
+              <h2><svg class="loadline" viewBox="0 0 22 14" style="color:var(--brass)"><circle cx="11" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1 7h20" stroke="currentColor" stroke-width="1.5"/></svg>Active rules</h2>
+              <span>Enforced on chain</span>
+            </div>
+            <div class="rl" style="margin-top:8px">
+              <div><span>Per payment</span><span class="unset">Not set</span></div>
+              <div><span>Per day</span><span class="unset">Not set</span></div>
+              <div><span>Approval needed</span><span>Every payment</span></div>
+              <div><span>Allowed payees</span><span>None</span></div>
+              <div><span>Blocked addresses</span><span>None</span></div>
+            </div>
+          </section>
+          <section class="card card-pad deposit">
+            <h2>Deposit address</h2>
+            <p class="sub">USDC on NEAR only. Other chains come through NEAR Intents once limits are set.</p>
+            <div class="addr"><span class="mono">nova.keel.near</span><svg class="icon" style="width:16px;height:16px;color:var(--muted)" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

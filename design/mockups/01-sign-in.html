@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Keel · Sign in</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Hanken+Grotesk:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<style>
+  .top { display: flex; align-items: center; justify-content: space-between; height: 72px; padding: 0 120px; border-bottom: 1px solid var(--line); background: var(--page); }
+  .top .wordmark { padding: 0; }
+  .top a { color: var(--ink-2); text-decoration: none; font-size: 13px; }
+  .wrap { display: grid; grid-template-columns: 1fr 520px; gap: 80px; align-items: center; min-height: calc(100vh - 72px); padding: 48px 120px; max-width: 1440px; margin: 0 auto; }
+  h1 { font-size: 64px; line-height: 1.02; }
+  .lead { font-size: 17px; color: var(--ink-2); margin: 20px 0 32px; max-width: 520px; }
+  .actions { display: flex; align-items: center; gap: 20px; }
+  .promises { margin-top: 48px; display: grid; gap: 16px; max-width: 520px; }
+  .promise { display: flex; gap: 14px; align-items: flex-start; }
+  .promise .ic { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); color: var(--teal); flex: none; }
+  .promise b { display: block; font-weight: 600; }
+  .promise span { color: var(--muted); font-size: 13px; }
+
+  /* Right: a vault card, the one bright element */
+  .vault { padding: 28px; position: relative; overflow: hidden; }
+  .vault-top { display: flex; align-items: center; justify-content: space-between; }
+  .vault-name { font-weight: 600; font-size: 15px; }
+  .vault .bal { font-size: 44px; margin: 20px 0 4px; }
+  .vault .bal small { font: 500 13px var(--sans); color: var(--muted); margin-left: 6px; letter-spacing: 0; }
+  .line-meter { position: relative; height: 72px; margin: 24px 0 8px; border-radius: 8px; background: var(--chart-fill); overflow: hidden; }
+  .line-meter .water { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; background: #cfe0de; }
+  .line-meter .cap { position: absolute; left: 0; right: 0; top: 32px; border-top: 1.5px dashed var(--brass); }
+  .line-meter .cap-label { position: absolute; right: 10px; top: 10px; font-size: 11px; color: var(--brass); font-weight: 600; }
+  .line-meter .mark { position: absolute; left: 14px; top: 25px; }
+  .rules { margin-top: 18px; border-top: 1px solid var(--line); }
+  .rules div { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .rules div span:first-child { color: var(--muted); }
+  .agent { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 12px 14px; border-radius: 10px; background: var(--ink); color: #fff; font-size: 13px; }
+  .agent .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--good); }
+  .agent span:last-child { margin-left: auto; color: #a9bcc1; font-family: var(--mono); font-size: 11px; }
+</style>
+</head>
+<body>
+  <header class="top">
+    <span class="wordmark">KEEL</span>
+    <a href="#">How Keel works</a>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h1 class="serif">Sign in to run your treasury</h1>
+      <p class="lead">Connect the NEAR wallet you want to own your companies' vaults. Keel never holds your key, and its agent can only pay inside the limits you sign.</p>
+      <div class="actions">
+        <button class="btn primary lg">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>
+          Connect wallet
+        </button>
+        <a class="link" href="#">New to NEAR? Get a wallet</a>
+      </div>
+
+      <div class="promises">
+        <div class="promise">
+          <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg></span>
+          <div><b>You own every vault</b><span>Each company gets its own vault, signed for by your wallet</span></div>
+        </div>
+        <div class="promise">
+          <span class="ic"><svg class="loadline" viewBox="0 0 22 14"><circle cx="11" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1 7h20" stroke="currentColor" stroke-width="1.5"/></svg></span>
+          <div><b>Nothing moves alone until you set the line</b><span>New vaults start with no limits; you choose them</span></div>
+        </div>
+        <div class="promise">
+          <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <div><b>The chain refuses anything past it</b><span>Limits live in your vault contract, not in Keel's servers</span></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="card vault">
+      <div class="vault-top">
+        <div>
+          <div class="vault-name">Kora Supply Group</div>
+          <span class="mono">kora.keel.near</span>
+        </div>
+        <span class="pill ok">Running</span>
+      </div>
+      <div class="bal serif num">48,215.40<small>USDC</small></div>
+      <span class="muted" style="font-size:13px">3 wallets on NEAR, Base and Arbitrum</span>
+
+      <div class="line-meter">
+        <div class="water"></div>
+        <div class="cap"></div>
+        <svg class="loadline mark" viewBox="0 0 22 14" style="color:var(--brass)"><circle cx="11" cy="7" r="5.5" fill="var(--chart-fill)" stroke="currentColor" stroke-width="1.5"/><path d="M1 7h20" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span class="cap-label">Your line · 100 USDC per payment</span>
+      </div>
+
+      <div class="rules">
+        <div><span>Per payment</span><span class="num">100 USDC</span></div>
+        <div><span>Per day</span><span class="num">80 of 500 USDC used</span></div>
+        <div><span>Above the line</span><span>Waits for your signature</span></div>
+      </div>
+
+      <div class="agent"><span class="dot"></span><span>Keel's agent can call 2 methods</span><span>execute · propose</span></div>
+    </aside>
+  </main>
+</body>
+</html>
