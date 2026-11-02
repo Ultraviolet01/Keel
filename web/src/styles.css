@@ -460,3 +460,6 @@ input:focus, textarea:focus { outline: none; border-color: var(--teal); box-shad
 }
 .evm-wallet { display: flex; flex-direction: column; gap: 6px; }
 .evm-wallet .btn { align-self: flex-start; margin-top: 4px; }
+/* Long unbroken text, like a 0x address inside a reason, wraps instead of widening the page. */
+.decisions li, .why-list li, .q-item, .table td { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .ov-bottom { grid-template-columns: minmax(0, 1fr); } }
