@@ -326,7 +326,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
         Default::default(),
         vec![PromiseResult::Failed],
     );
-    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), 1);
+    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), Some(1));
     assert!(!ok);
     assert_eq!(v.get_policy().spent_today, U128(0));
     assert!(get_logs().iter().any(|l| l.contains("payment_failed")));
@@ -351,6 +351,46 @@ fn approved_proposal_marked_executed_on_success() {
         Default::default(),
         vec![PromiseResult::Successful(vec![])],
     );
-    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), 1));
+    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), None));
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Executed);
+}
+
+#[test]
+fn owner_can_withdraw_even_while_paused() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.pause();
+    as_owner(DAY);
+    let _ = v.withdraw(acc("kora.testnet"), U128(250 * USDC), None);
+    assert!(get_logs().iter().any(|l| l.contains("withdrawal_started")));
+    // Owner withdrawals never count against the agent's daily cap.
+    assert_eq!(v.get_policy().spent_today, U128(0));
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the owner can call this")]
+fn agent_cannot_withdraw() {
+    let mut v = vault();
+    set_ctx("agent.kora.testnet", DAY, 1);
+    let _ = v.withdraw(acc("agent.kora.testnet"), U128(1 * USDC), None);
+}
+
+#[test]
+fn failed_owner_withdrawal_does_not_touch_agent_cap() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(60 * USDC), None);
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(acc("vault.kora.testnet"))
+            .predecessor_account_id(acc("vault.kora.testnet"))
+            .block_timestamp(DAY)
+            .build(),
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![PromiseResult::Failed],
+    );
+    v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None);
+    assert_eq!(v.get_policy().spent_today, U128(60 * USDC));
 }

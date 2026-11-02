@@ -18,8 +18,8 @@ Everything below runs on NEAR testnet and costs nothing.
 
 1. **Install.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm install`. You see the install finish with no errors.
 2. **Configure.** Run `cp .env.example .env` and fill in an owner and an agent testnet account. You see both account ids printed by `npm run check-env`.
-3. **Deploy to testnet.** Run `OWNER=<your-account>.testnet scripts/deploy-testnet.sh`. You see `usdc.`, `vault.` and `agent.` accounts created under yours, both contracts deployed, the agent given a key that can only call `execute_payment` and `propose_payment`, and 1,000 test USDC minted to the vault. The vault starts with no policy: both caps are 0 and the allowlist is empty, so every payment needs your approval.
-4. **Set your policy.** As the owner, call `update_policy` with your own caps and payees and 1 yoctoNEAR attached, for example `near contract call-function as-transaction vault.<you>.testnet update_policy json-args '{"update":{"per_payment_cap":"100000000","daily_cap":"500000000","allow":["<payee>.testnet"]},"reason":"initial policy"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `get_policy` return your values. The examples below assume 100 USDC per payment and 500 per day.
+3. **Sign up as a founder.** With your own testnet account, run `near contract call-function as-transaction keel.testnet create_vault json-args '{"name":"<company>"}' prepaid-gas '300 Tgas' attached-deposit '2.29 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `"<company>.keel.testnet"` returned: your own vault, owned by you, with Keel's agent and no policy. Both caps are 0 and the allowlist is empty, so every payment needs your approval. The deposit is the `min_vault_deposit` shown by `get_config` on `keel.testnet`; it pays the vault's storage and stays in the vault.
+4. **Set your policy.** As the owner, call `update_policy` on your vault with your own caps and payees and 1 yoctoNEAR attached, for example `near contract call-function as-transaction <company>.keel.testnet update_policy json-args '{"update":{"per_payment_cap":"100000000","daily_cap":"500000000","allow":["<payee>.testnet"]},"reason":"initial policy"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `get_policy` return your values. The examples below assume 100 USDC per payment and 500 per day.
 5. **Pay under the cap.** Run `npm run agent -- --once`. You see Keel pay Northwind Hosting 80 USDC alone, with a transaction hash and the rule it checked.
 6. **Go over the cap.** Run `npm run scenario:shortfall`. You see Keel file proposal #1 to move 8,000 USDC to Payroll, with its reasons. The vault has moved nothing yet.
 7. **Approve as owner.** Run `npm run approve -- 1`. You see the owner's key sign `approve(1)` and the move execute.
@@ -56,6 +56,7 @@ The vault holds the USDC and the rules, and decides every payment's band itself.
 | `approve` / `reject` | Owner key | Executes or closes a proposal |
 | `update_policy` | Owner key | Changes caps, allowlist, blocklist or threshold, and logs old value, new value and reason |
 | `pause` / `resume` | Owner key | Stops every payment at once, then restarts them |
+| `withdraw` | Owner key | Pays out directly, for example back to the owner; works while paused |
 
 | Band | Rule (USDC) | Result |
 | --- | --- | --- |
@@ -67,7 +68,7 @@ Two token details the vault handles itself: it attaches the 1 yoctoNEAR that `ft
 
 Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot attach a deposit, so only the owner's full-access key can approve, change the policy or pause.
 
-**Check the rules yourself:** run `cd contract && cargo test`. You see 24 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy` and `pause_blocks_everything_until_resume`. Method details are in [contract/README.md](contract/README.md).
+**Check the rules yourself:** run `cd contract && cargo test`. You see 27 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy` and `pause_blocks_everything_until_resume`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 12 tests.
 
 ## Security
 
@@ -102,20 +103,22 @@ The agent never holds a key that can move money freely. Limits live in the contr
 
 ## Live on testnet
 
-Deployed with `scripts/deploy-testnet.sh` on Nov 2, 2026. Read any of these yourself with `near contract call-function as-read-only vault.keel-owner.testnet get_policy json-args {} network-config testnet now`.
+Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can read these, for example `near contract call-function as-read-only keel.testnet get_config json-args {} network-config testnet now`.
 
 | Account | What it is |
 | --- | --- |
-| `keel-owner.testnet` | Owner, holds the full-access key |
-| `vault.keel-owner.testnet` | Keel Vault, holding 1,000 test USDC, no policy set yet |
-| `agent.keel-owner.testnet` | Agent, with a function-call key for `execute_payment` and `propose_payment` only |
+| `keel.testnet` | Keel factory: creates one vault per founder at sign-up |
+| `agent.keel.testnet` | Keel's agent, holding one function-call key per vault (`execute_payment` and `propose_payment` only) |
+| `kora.keel.testnet` | A founder's vault, created by `keel-owner.testnet` through the factory; no policy set |
 | `usdc.keel-owner.testnet` | Keel Test USDC |
 
-Checked live with the agent's function-call key:
+Checked live:
 
-1. **Pay with no policy.** You see the vault refuse: `Keel Vault refused: new payee, not on the allowlist`.
-2. **Propose a payment.** You see proposal `1` created ([transaction](https://explorer.testnet.near.org/transactions/BZpMvkZq5LjuP8RdkkE4MudCwyk7Q1ndf4tVbRbiWdxn)).
-3. **Try to change the policy.** You see the network reject it before the contract runs: `Transaction method name <update_policy> isn't allowed by the access key`.
+1. **Founder signs up.** `keel-owner.testnet` called `create_vault` with `"kora"`. You see `"kora.keel.testnet"` returned and a `vault_created` event ([transaction](https://explorer.testnet.near.org/transactions/GLV4QR6FwuZeTSPWWHrEvZxdsFky4dGVTNKx5H69W4Fy)).
+2. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `GtcrN5jgm7CcQkkVsdrYrSw5HENKJxsCxDAep4bogro9`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository. `kora.keel.testnet` reports the same code (hex `ec18764d…`).
+3. **The vault has no keys.** `near account view-account-summary kora.keel.testnet network-config testnet now` shows `Account is locked (no access keys)`. Nobody, Keel included, can sign as the vault; money moves only through its methods.
+4. **Agent pays with no policy.** You see the vault refuse: `Keel Vault refused: new payee, not on the allowlist`.
+5. **Agent tries to change the policy** (checked on the earlier single-founder deployment, `vault.keel-owner.testnet`). You see the network reject it before the contract runs: `Transaction method name <update_policy> isn't allowed by the access key`.
 
 ## Mainnet Intents leg
 
@@ -143,10 +146,11 @@ NEAR Intents has no testnet, so cross-chain moves run on mainnet through a secon
 | Path | What it holds |
 | --- | --- |
 | `contract/` | Keel Vault smart contract and its tests |
+| `factory/` | Keel factory: one vault per founder, created at sign-up |
 | `agent/` | The loop: observe, forecast, decide, check, act, reconcile, learn |
 | `agent/memory.json` | Human overrides and rule-draft history |
 | `config/treasury.json` | Wallets, minimums, payees and upcoming bills |
-| `scripts/` | Deploy, fund, scenario, approve, attack, pause |
+| `scripts/` | `deploy-factory-testnet.sh`, `add-agent-key.sh`, `deploy-testnet.sh` (single vault for development), and the planned demo scripts |
 | `web/` | Dashboard and public ledger page |
 | `test-token/` | Keel Test USDC, a NEP-141 token with 6 decimals for testnet only |
 

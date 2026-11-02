@@ -178,7 +178,7 @@ impl KeelVault {
             "payment_started",
             json!({ "receiver_id": receiver_id, "amount": amount, "by": "agent", "rule": check.reason }),
         );
-        self.pay(receiver_id, amount, memo, None, day)
+        self.pay(receiver_id, amount, memo, None, Some(day))
     }
 
     /// Files a proposal for the owner. Used for new payees, amounts over the
@@ -243,7 +243,7 @@ impl KeelVault {
             "proposal_approved",
             json!({ "id": proposal_id, "approved_by": self.owner_id }),
         );
-        self.pay(receiver_id, amount, memo, Some(proposal_id), today())
+        self.pay(receiver_id, amount, memo, Some(proposal_id), None)
     }
 
     #[payable]
@@ -339,6 +339,20 @@ impl KeelVault {
         self.agent_id = agent_id;
     }
 
+    /// Owner pays out directly, for example back to their own wallet. Works
+    /// while paused, so the owner can always get their money out.
+    #[payable]
+    pub fn withdraw(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) -> Promise {
+        self.assert_owner();
+        require!(amount.0 > 0, "amount must be above zero");
+        check_text(memo.as_deref().unwrap_or(""), "memo");
+        emit(
+            "withdrawal_started",
+            json!({ "receiver_id": receiver_id, "amount": amount, "by": self.owner_id }),
+        );
+        self.pay(receiver_id, amount, memo, None, None)
+    }
+
     // -------------------------------------------------------------- callback
 
     #[private]
@@ -347,7 +361,7 @@ impl KeelVault {
         proposal_id: Option<u64>,
         receiver_id: AccountId,
         amount: U128,
-        day: u64,
+        agent_day: Option<u64>,
     ) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
@@ -359,7 +373,7 @@ impl KeelVault {
                     ProposalStatus::Failed
                 };
             }
-        } else if !ok && day == self.spent_day {
+        } else if !ok && agent_day == Some(self.spent_day) {
             // The transfer did not happen, so it should not count against today's cap.
             self.spent_today = self.spent_today.saturating_sub(amount.0);
         }
@@ -470,7 +484,7 @@ impl KeelVault {
         amount: U128,
         memo: Option<String>,
         proposal_id: Option<u64>,
-        day: u64,
+        agent_day: Option<u64>,
     ) -> Promise {
         ext_ft::ext(self.token_id.clone())
             .with_attached_deposit(STORAGE_DEPOSIT)
@@ -485,7 +499,7 @@ impl KeelVault {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
-                    .on_payment_done(proposal_id, receiver_id, amount, day),
+                    .on_payment_done(proposal_id, receiver_id, amount, agent_day),
             )
     }
 }
