@@ -2,9 +2,12 @@
 //!
 //! When a founder signs up in the Keel app, or adds another company, the app
 //! calls `create_vault` from the founder's own wallet. One founder can own up
-//! to 20 vaults, one per company. The factory creates `<name>.<factory>` with the
-//! Keel Vault code, sets the founder as its owner and Keel's agent as its
-//! agent, and registers it on the token so it can receive USDC. The vault
+//! to 20 vaults, one per company. In one transaction the factory creates
+//! `<name>.<factory>` with the Keel Vault code, sets the founder as owner, and
+//! adds Keel's agent key to the vault account as a function-call key that can
+//! only call that vault's `execute_payment` and `propose_payment`. So the agent
+//! is connected the moment the vault exists, with no backend step. A callback
+//! then registers the vault on the token so it can receive USDC. The vault
 //! starts with no policy: the founder sets every limit.
 //!
 //! The admin uploads the vault code once with `set_vault_code`. Every vault
@@ -20,12 +23,16 @@ use near_sdk::json_types::Base58CryptoHash;
 use near_sdk::serde_json::{json, Value};
 use near_sdk::store::{IterableSet, LazyOption, LookupMap};
 use near_sdk::{
-    env, ext_contract, near, require, AccountId, BorshStorageKey, CryptoHash,
-    Gas, NearToken, PanicOnDefault, Promise, PromiseResult,
+    env, ext_contract, near, require, AccountId, Allowance, BorshStorageKey, CryptoHash, Gas,
+    NearToken, PanicOnDefault, Promise, PromiseResult, PublicKey,
 };
 
-/// Room for the vault's own state on top of its code (proposals, lists).
-const VAULT_STATE_ALLOWANCE: NearToken = NearToken::from_millinear(300);
+/// Room for the vault's own state on top of its code (proposals, lists) and
+/// for the gas its agent key spends.
+const VAULT_STATE_ALLOWANCE: NearToken = NearToken::from_millinear(500);
+/// The agent key's permissions on each vault.
+const AGENT_METHODS: &str = "execute_payment,propose_payment";
+const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
 /// NEP-145 registration of the new vault on the token (0.00125 NEAR).
 const TOKEN_REGISTRATION: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 const GAS_VAULT_INIT: Gas = Gas::from_tgas(20);
@@ -54,7 +61,7 @@ enum StorageKey {
 #[near(serializers = [json])]
 pub struct FactoryConfig {
     pub admin_id: AccountId,
-    pub agent_id: AccountId,
+    pub agent_key: PublicKey,
     pub token_id: AccountId,
     pub vault_code_hash: Option<Base58CryptoHash>,
     pub vault_code_bytes: u64,
@@ -64,6 +71,20 @@ pub struct FactoryConfig {
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct KeelFactory {
+    admin_id: AccountId,
+    agent_key: PublicKey,
+    token_id: AccountId,
+    vault_code: LazyOption<Vec<u8>>,
+    vault_code_hash: Option<CryptoHash>,
+    vault_code_bytes: u64,
+    vaults_by_owner: LookupMap<AccountId, Vec<AccountId>>,
+    vault_owner: LookupMap<AccountId, AccountId>,
+    vaults: IterableSet<AccountId>,
+}
+
+/// State layout when the agent was a separate account instead of a key.
+#[near(serializers = [borsh])]
+struct KeelFactoryV2 {
     admin_id: AccountId,
     agent_id: AccountId,
     token_id: AccountId,
@@ -75,26 +96,13 @@ pub struct KeelFactory {
     vaults: IterableSet<AccountId>,
 }
 
-/// State layout before founders could own several vaults.
-#[near(serializers = [borsh])]
-struct KeelFactoryV1 {
-    admin_id: AccountId,
-    agent_id: AccountId,
-    token_id: AccountId,
-    vault_code: LazyOption<Vec<u8>>,
-    vault_code_hash: Option<CryptoHash>,
-    vault_code_bytes: u64,
-    vault_by_owner: LookupMap<AccountId, AccountId>,
-    vaults: IterableSet<AccountId>,
-}
-
 #[near]
 impl KeelFactory {
     #[init]
-    pub fn new(admin_id: AccountId, agent_id: AccountId, token_id: AccountId) -> Self {
+    pub fn new(admin_id: AccountId, agent_key: PublicKey, token_id: AccountId) -> Self {
         Self {
             admin_id,
-            agent_id,
+            agent_key,
             token_id,
             vault_code: LazyOption::new(StorageKey::VaultCode, None),
             vault_code_hash: None,
@@ -105,33 +113,25 @@ impl KeelFactory {
         }
     }
 
-    /// Upgrades a factory deployed before founders could own several vaults.
-    /// `owners` lists every founder who already has a vault; each one is moved
-    /// to the new per-founder list.
+    /// Upgrades a factory from the version where the agent was a separate
+    /// account. Vaults created before this keep their old agent setup; new
+    /// vaults get `agent_key` on the vault account.
     #[private]
     #[init(ignore_state)]
-    pub fn migrate(owners: Vec<AccountId>) -> Self {
-        let mut old: KeelFactoryV1 =
+    pub fn migrate(agent_key: PublicKey) -> Self {
+        let old: KeelFactoryV2 =
             env::state_read().unwrap_or_else(|| env::panic_str("no state to migrate"));
-        let mut this = Self {
+        Self {
             admin_id: old.admin_id,
-            agent_id: old.agent_id,
+            agent_key,
             token_id: old.token_id,
             vault_code: old.vault_code,
             vault_code_hash: old.vault_code_hash,
             vault_code_bytes: old.vault_code_bytes,
-            vaults_by_owner: LookupMap::new(StorageKey::VaultsByOwner),
-            vault_owner: LookupMap::new(StorageKey::VaultOwner),
+            vaults_by_owner: old.vaults_by_owner,
+            vault_owner: old.vault_owner,
             vaults: old.vaults,
-        };
-        for owner_id in owners {
-            if let Some(vault_id) = old.vault_by_owner.remove(&owner_id) {
-                this.vault_owner.insert(vault_id.clone(), owner_id.clone());
-                this.vaults_by_owner.insert(owner_id, vec![vault_id]);
-            }
         }
-        old.vault_by_owner.flush();
-        this
     }
 
     /// Called by the founder's wallet at sign-up and for each company they
@@ -156,7 +156,6 @@ impl KeelFactory {
             .parse()
             .unwrap_or_else(|_| env::panic_str("that name cannot be used for a vault"));
         require!(!self.vaults.contains(&vault_id), "that vault name is taken");
-        require!(owner_id != self.agent_id, "the agent cannot own a vault");
 
         // Reserve now so two sign-ups cannot race for the same name.
         self.vaults_by_owner
@@ -168,7 +167,7 @@ impl KeelFactory {
 
         let init_args = json!({
             "owner_id": owner_id,
-            "agent_id": self.agent_id,
+            "agent_key": self.agent_key,
             "token_id": self.token_id,
         })
         .to_string()
@@ -178,6 +177,12 @@ impl KeelFactory {
             .create_account()
             .transfer(deposit.saturating_sub(TOKEN_REGISTRATION))
             .deploy_contract(self.vault_code.get().clone().unwrap())
+            .add_access_key_allowance(
+                self.agent_key.clone(),
+                Allowance::limited(AGENT_KEY_ALLOWANCE).unwrap(),
+                vault_id.clone(),
+                AGENT_METHODS,
+            )
             .function_call("new".to_string(), init_args, NearToken::from_yoctonear(0), GAS_VAULT_INIT)
             .then(
                 Self::ext(env::current_account_id())
@@ -204,7 +209,7 @@ impl KeelFactory {
                 .detach();
             emit(
                 "vault_created",
-                json!({ "owner_id": owner_id, "vault_id": vault_id, "agent_id": self.agent_id }),
+                json!({ "owner_id": owner_id, "vault_id": vault_id, "agent_key": self.agent_key }),
             );
             Some(vault_id)
         } else {
@@ -242,6 +247,17 @@ impl KeelFactory {
         );
     }
 
+    /// Admin only: the agent key added to vaults created from now on.
+    /// Existing vaults keep theirs; their owners can change it themselves.
+    pub fn set_agent_key(&mut self, agent_key: PublicKey) {
+        require!(
+            env::predecessor_account_id() == self.admin_id,
+            "only the admin can call this"
+        );
+        emit("agent_key_changed", json!({ "agent_key": agent_key }));
+        self.agent_key = agent_key;
+    }
+
     // ----------------------------------------------------------------- views
 
     /// Every vault a founder owns, in the order they were created. The app
@@ -266,7 +282,7 @@ impl KeelFactory {
     pub fn get_config(&self) -> FactoryConfig {
         FactoryConfig {
             admin_id: self.admin_id.clone(),
-            agent_id: self.agent_id.clone(),
+            agent_key: self.agent_key.clone(),
             token_id: self.token_id.clone(),
             vault_code_hash: self.vault_code_hash.map(Base58CryptoHash::from),
             vault_code_bytes: self.vault_code_bytes,
@@ -321,6 +337,10 @@ mod tests {
         id.parse().unwrap()
     }
 
+    fn agent_key() -> PublicKey {
+        "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap()
+    }
+
     fn ctx(predecessor: &str, deposit: NearToken) {
         testing_env!(VMContextBuilder::new()
             .current_account_id(acc("keel.testnet"))
@@ -333,7 +353,7 @@ mod tests {
         ctx("admin.testnet", NearToken::from_yoctonear(0));
         let mut f = KeelFactory::new(
             acc("admin.testnet"),
-            acc("agent.keel.testnet"),
+            agent_key(),
             acc("usdc.testnet"),
         );
         testing_env!(VMContextBuilder::new()
@@ -382,29 +402,32 @@ mod tests {
     }
 
     #[test]
-    fn migrate_moves_existing_founder_to_new_list() {
+    fn migrate_switches_to_agent_key_and_keeps_vaults() {
         ctx("keel.testnet", NearToken::from_yoctonear(0));
-        let mut v1 = KeelFactoryV1 {
+        let mut v2 = KeelFactoryV2 {
             admin_id: acc("keel.testnet"),
             agent_id: acc("agent.keel.testnet"),
             token_id: acc("usdc.testnet"),
             vault_code: LazyOption::new(StorageKey::VaultCode, Some(b"\0asm x".to_vec())),
             vault_code_hash: Some([1u8; 32]),
             vault_code_bytes: 6,
-            vault_by_owner: LookupMap::new(StorageKey::VaultByOwner),
+            vaults_by_owner: LookupMap::new(StorageKey::VaultsByOwner),
+            vault_owner: LookupMap::new(StorageKey::VaultOwner),
             vaults: IterableSet::new(StorageKey::Vaults),
         };
-        v1.vault_by_owner.insert(acc("founder.testnet"), acc("kora.keel.testnet"));
-        v1.vaults.insert(acc("kora.keel.testnet"));
-        v1.vault_by_owner.flush();
-        v1.vaults.flush();
-        v1.vault_code.flush();
-        env::state_write(&v1);
+        v2.vaults_by_owner.insert(acc("founder.testnet"), vec![acc("kora.keel.testnet")]);
+        v2.vault_owner.insert(acc("kora.keel.testnet"), acc("founder.testnet"));
+        v2.vaults.insert(acc("kora.keel.testnet"));
+        v2.vaults_by_owner.flush();
+        v2.vault_owner.flush();
+        v2.vaults.flush();
+        v2.vault_code.flush();
+        env::state_write(&v2);
 
-        let f = KeelFactory::migrate(vec![acc("founder.testnet")]);
+        let f = KeelFactory::migrate(agent_key());
+        assert_eq!(f.get_config().agent_key, agent_key());
         assert_eq!(f.get_vaults_for_owner(acc("founder.testnet")), vec![acc("kora.keel.testnet")]);
         assert_eq!(f.get_owner(acc("kora.keel.testnet")), Some(acc("founder.testnet")));
-        assert_eq!(f.get_vaults(None, None), vec![acc("kora.keel.testnet")]);
         assert_eq!(f.get_config().vault_code_bytes, 6);
     }
 
@@ -477,12 +500,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the agent cannot own a vault")]
-    fn agent_cannot_own_a_vault() {
+    #[should_panic(expected = "only the admin can call this")]
+    fn only_admin_changes_agent_key() {
         let mut f = factory();
-        let m = min(&f);
-        ctx("agent.keel.testnet", m);
-        let _ = f.create_vault("sneaky".into());
+        ctx("founder.testnet", NearToken::from_yoctonear(0));
+        f.set_agent_key("ed25519:DcA2MzgpJbrUATQLLceocVckhhAqrkingax4oJ9kZ847".parse().unwrap());
     }
 
     #[test]
@@ -544,7 +566,7 @@ mod tests {
     #[should_panic(expected = "vault code has not been uploaded yet")]
     fn cannot_create_before_code_upload() {
         ctx("admin.testnet", NearToken::from_yoctonear(0));
-        let mut f = KeelFactory::new(acc("admin.testnet"), acc("agent.keel.testnet"), acc("usdc.testnet"));
+        let mut f = KeelFactory::new(acc("admin.testnet"), agent_key(), acc("usdc.testnet"));
         ctx("founder.testnet", NearToken::from_near(3));
         let _ = f.create_vault("kora".into());
     }

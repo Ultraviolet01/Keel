@@ -5,15 +5,19 @@
 #
 # FACTORY must already exist with its full-access key in ~/.near-credentials
 # (for example `near account create-account sponsor-by-faucet-service ...`).
-# Creates agent.FACTORY for Keel's agent, deploys the factory, and uploads the
-# vault code. Needs about 5 testnet NEAR on FACTORY.
+# Uses Keel's agent key from AGENT_KEY_FILE (default
+# ~/.near-credentials/keel-agent-key.json; create it with
+# `node scripts/new-agent-key.mjs`). Deploys the factory with that public key
+# and uploads the vault code. Needs about 5 testnet NEAR on FACTORY.
 
 set -euo pipefail
 
 : "${FACTORY:?Set FACTORY, for example FACTORY=keel.testnet}"
 : "${TOKEN:?Set TOKEN to the USDC contract, for example TOKEN=usdc.keel-owner.testnet}"
 NET=testnet
-AGENT="agent.$FACTORY"
+AGENT_KEY_FILE="${AGENT_KEY_FILE:-$HOME/.near-credentials/keel-agent-key.json}"
+[ -f "$AGENT_KEY_FILE" ] || { echo "No agent key at $AGENT_KEY_FILE. Run: node scripts/new-agent-key.mjs"; exit 1; }
+AGENT_KEY="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1])).public_key)" "$AGENT_KEY_FILE")"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 step() { printf '\n==> %s\n' "$1"; }
@@ -22,14 +26,9 @@ step "Building contracts"
 (cd "$ROOT/contract" && cargo near build non-reproducible-wasm >/dev/null)
 (cd "$ROOT/factory" && cargo near build non-reproducible-wasm >/dev/null)
 
-step "Creating Keel's agent account $AGENT"
-near account create-account fund-myself "$AGENT" '1 NEAR' \
-  autogenerate-new-keypair save-to-legacy-keychain \
-  sign-as "$FACTORY" network-config "$NET" sign-with-legacy-keychain send
-
 step "Deploying the factory to $FACTORY"
 near contract deploy "$FACTORY" use-file "$ROOT/factory/target/near/keel_factory.wasm" \
-  with-init-call new json-args "{\"admin_id\":\"$FACTORY\",\"agent_id\":\"$AGENT\",\"token_id\":\"$TOKEN\"}" \
+  with-init-call new json-args "{\"admin_id\":\"$FACTORY\",\"agent_key\":\"$AGENT_KEY\",\"token_id\":\"$TOKEN\"}" \
   prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
   network-config "$NET" sign-with-legacy-keychain send
 

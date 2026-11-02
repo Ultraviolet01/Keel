@@ -1,8 +1,13 @@
 //! Keel Vault
 //!
 //! Holds a company's USDC and the rules Keel's agent must stay inside.
-//! The agent can only call `execute_payment` and `propose_payment`; every
-//! other change needs the owner. The vault, not the agent, decides the band:
+//!
+//! Keel's agent signs with a function-call access key that lives on the vault
+//! account itself and can only call this vault's `execute_payment` and
+//! `propose_payment`. The factory adds that key when it creates the vault, so
+//! the agent is connected the moment the vault exists. The vault has no other
+//! keys; the owner can remove or replace the agent key through the contract.
+//! Every other change needs the owner. The vault, not the agent, decides the band:
 //!
 //! - Runs alone: allowlisted payee, within the per-payment and daily caps.
 //! - Needs approval: a new payee or an amount over the per-payment cap.
@@ -16,8 +21,8 @@ use near_sdk::json_types::U128;
 use near_sdk::serde_json::{json, Value};
 use near_sdk::store::{IterableMap, IterableSet};
 use near_sdk::{
-    assert_one_yocto, env, ext_contract, near, require, AccountId, BorshStorageKey, Gas,
-    NearToken, PanicOnDefault, Promise, PromiseResult,
+    assert_one_yocto, env, ext_contract, near, require, AccountId, Allowance, BorshStorageKey,
+    Gas, NearToken, PanicOnDefault, Promise, PromiseResult, PublicKey,
 };
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
@@ -29,6 +34,9 @@ const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 const MAX_TEXT: usize = 280;
+/// Methods the agent's key may call, and how much NEAR it may spend on gas.
+const AGENT_METHODS: &str = "execute_payment,propose_payment";
+const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
@@ -104,7 +112,7 @@ pub struct PolicyUpdate {
 #[near(serializers = [json])]
 pub struct PolicyView {
     pub owner_id: AccountId,
-    pub agent_id: AccountId,
+    pub agent_key: Option<PublicKey>,
     pub token_id: AccountId,
     pub per_payment_cap: U128,
     pub daily_cap: U128,
@@ -118,7 +126,7 @@ pub struct PolicyView {
 #[derive(PanicOnDefault)]
 pub struct KeelVault {
     owner_id: AccountId,
-    agent_id: AccountId,
+    agent_key: Option<PublicKey>,
     token_id: AccountId,
     per_payment_cap: u128,
     daily_cap: u128,
@@ -137,11 +145,14 @@ impl KeelVault {
     /// every payment needs the owner's approval until the owner sets limits
     /// with `update_policy`.
     #[init]
-    pub fn new(owner_id: AccountId, agent_id: AccountId, token_id: AccountId) -> Self {
-        require!(owner_id != agent_id, "owner and agent must be different accounts");
+    ///
+    /// `agent_key` is the public key of Keel's agent. Whoever deploys the
+    /// vault (the factory) adds it as a function-call key on the vault account
+    /// in the same transaction.
+    pub fn new(owner_id: AccountId, agent_key: PublicKey, token_id: AccountId) -> Self {
         Self {
             owner_id,
-            agent_id,
+            agent_key: Some(agent_key),
             token_id,
             per_payment_cap: 0,
             daily_cap: 0,
@@ -327,16 +338,38 @@ impl KeelVault {
         emit("resumed", json!({ "by": self.owner_id }));
     }
 
-    /// Rotates the agent to a new account.
+    /// Fires the agent: deletes its key from the vault account. The agent
+    /// can do nothing until the owner sets a new key.
     #[payable]
-    pub fn set_agent(&mut self, agent_id: AccountId) {
+    pub fn revoke_agent(&mut self) -> Promise {
         self.assert_owner();
-        require!(agent_id != self.owner_id, "owner and agent must be different accounts");
-        emit(
-            "agent_changed",
-            json!({ "old": self.agent_id, "new": agent_id, "by": self.owner_id }),
-        );
-        self.agent_id = agent_id;
+        let old = self
+            .agent_key
+            .take()
+            .unwrap_or_else(|| env::panic_str("there is no agent key to revoke"));
+        emit("agent_revoked", json!({ "old_key": old, "by": self.owner_id }));
+        Promise::new(env::current_account_id()).delete_key(old)
+    }
+
+    /// Replaces the agent's key, for example to rotate it or to hire an agent
+    /// again after revoking. The new key can only call `execute_payment` and
+    /// `propose_payment` on this vault.
+    #[payable]
+    pub fn set_agent_key(&mut self, agent_key: PublicKey) -> Promise {
+        self.assert_owner();
+        let mut batch = Promise::new(env::current_account_id());
+        if let Some(old) = self.agent_key.take() {
+            require!(old != agent_key, "that key is already the agent key");
+            batch = batch.delete_key(old);
+        }
+        emit("agent_key_set", json!({ "new_key": agent_key, "by": self.owner_id }));
+        self.agent_key = Some(agent_key.clone());
+        batch.add_access_key_allowance(
+            agent_key,
+            Allowance::limited(AGENT_KEY_ALLOWANCE).unwrap(),
+            env::current_account_id(),
+            AGENT_METHODS,
+        )
     }
 
     /// Owner pays out directly, for example back to their own wallet. Works
@@ -394,7 +427,7 @@ impl KeelVault {
     pub fn get_policy(&self) -> PolicyView {
         PolicyView {
             owner_id: self.owner_id.clone(),
-            agent_id: self.agent_id.clone(),
+            agent_key: self.agent_key.clone(),
             token_id: self.token_id.clone(),
             per_payment_cap: U128(self.per_payment_cap),
             daily_cap: U128(self.daily_cap),
@@ -420,11 +453,12 @@ impl KeelVault {
 }
 
 impl KeelVault {
+    /// The agent signs with its key on this vault's own account, so the call
+    /// comes from the vault itself and is signed by the agent key.
     fn assert_agent(&self) {
-        require!(
-            env::predecessor_account_id() == self.agent_id,
-            "Keel Vault refused: only the agent can call this"
-        );
+        let is_agent = env::predecessor_account_id() == env::current_account_id()
+            && self.agent_key.as_ref() == Some(&env::signer_account_pk());
+        require!(is_agent, "Keel Vault refused: only the agent can call this");
     }
 
     fn assert_owner(&self) {

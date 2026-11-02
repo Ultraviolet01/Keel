@@ -9,17 +9,35 @@ fn acc(id: &str) -> AccountId {
     id.parse().unwrap()
 }
 
-fn set_ctx(predecessor: &str, at: u64, deposit: u128) {
+const VAULT: &str = "vault.kora.testnet";
+const AGENT_KEY: &str = "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp";
+const OTHER_KEY: &str = "ed25519:DcA2MzgpJbrUATQLLceocVckhhAqrkingax4oJ9kZ847";
+
+fn pk(key: &str) -> PublicKey {
+    key.parse().unwrap()
+}
+
+fn ctx(predecessor: &str, signer_key: &str, at: u64, deposit: u128) {
     testing_env!(VMContextBuilder::new()
-        .current_account_id(acc("vault.kora.testnet"))
+        .current_account_id(acc(VAULT))
         .predecessor_account_id(acc(predecessor))
+        .signer_account_pk(pk(signer_key))
         .block_timestamp(at)
         .attached_deposit(NearToken::from_yoctonear(deposit))
         .build());
 }
 
+fn set_ctx(predecessor: &str, at: u64, deposit: u128) {
+    ctx(predecessor, OTHER_KEY, at, deposit);
+}
+
+/// The agent signs with its key on the vault's own account.
 fn as_agent(at: u64) {
-    set_ctx("agent.kora.testnet", at, 0);
+    ctx(VAULT, AGENT_KEY, at, 0);
+}
+
+fn as_agent_with_deposit(at: u64, deposit: u128) {
+    ctx(VAULT, AGENT_KEY, at, deposit);
 }
 
 fn as_owner(at: u64) {
@@ -30,7 +48,7 @@ fn fresh_vault() -> KeelVault {
     as_owner(DAY);
     KeelVault::new(
         acc("kora.testnet"),
-        acc("agent.kora.testnet"),
+        pk(AGENT_KEY),
         acc("usdc.testnet"),
     )
 }
@@ -142,7 +160,7 @@ fn only_agent_can_execute() {
 #[should_panic(expected = "Keel Vault refused: only the owner can call this")]
 fn agent_cannot_change_policy() {
     let mut v = vault();
-    set_ctx("agent.kora.testnet", DAY, 1);
+    as_agent_with_deposit(DAY, 1);
     v.update_policy(
         PolicyUpdate {
             per_payment_cap: Some(U128(1_000_000 * USDC)),
@@ -234,7 +252,7 @@ fn agent_cannot_approve_its_own_proposal() {
     let mut v = vault();
     as_agent(DAY);
     v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into());
-    set_ctx("agent.kora.testnet", DAY, 1);
+    as_agent_with_deposit(DAY, 1);
     let _ = v.approve(1);
 }
 
@@ -298,13 +316,60 @@ fn cannot_allow_blocklisted_payee() {
 }
 
 #[test]
-fn rotating_agent_locks_out_old_one() {
+fn rotating_agent_key_locks_out_old_one() {
     let mut v = vault();
     as_owner(DAY);
-    v.set_agent(acc("agent2.kora.testnet"));
-    set_ctx("agent2.kora.testnet", DAY, 0);
+    let _ = v.set_agent_key(pk(OTHER_KEY));
+    assert_eq!(v.get_policy().agent_key, Some(pk(OTHER_KEY)));
+    ctx(VAULT, OTHER_KEY, DAY, 0);
     let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
-    assert_eq!(v.get_policy().agent_id, acc("agent2.kora.testnet"));
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the agent can call this")]
+fn old_agent_key_refused_after_rotation() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.set_agent_key(pk(OTHER_KEY));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the agent can call this")]
+fn revoked_agent_can_do_nothing() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.revoke_agent();
+    assert_eq!(v.get_policy().agent_key, None);
+    assert!(get_logs().iter().any(|l| l.contains("agent_revoked")));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the owner can call this")]
+fn agent_cannot_change_its_own_key() {
+    let mut v = vault();
+    as_agent_with_deposit(DAY, 1);
+    let _ = v.set_agent_key(pk(OTHER_KEY));
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the agent can call this")]
+fn another_key_on_the_vault_is_not_the_agent() {
+    // Even a call from the vault's own account is refused unless the agent key signed it.
+    let mut v = vault();
+    ctx(VAULT, OTHER_KEY, DAY, 0);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: only the agent can call this")]
+fn agent_key_from_another_account_is_refused() {
+    let mut v = vault();
+    ctx("agent.kora.testnet", AGENT_KEY, DAY, 0);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
 }
 
 #[test]
@@ -371,8 +436,8 @@ fn owner_can_withdraw_even_while_paused() {
 #[should_panic(expected = "Keel Vault refused: only the owner can call this")]
 fn agent_cannot_withdraw() {
     let mut v = vault();
-    set_ctx("agent.kora.testnet", DAY, 1);
-    let _ = v.withdraw(acc("agent.kora.testnet"), U128(1 * USDC), None);
+    as_agent_with_deposit(DAY, 1);
+    let _ = v.withdraw(acc("attacker.testnet"), U128(1 * USDC), None);
 }
 
 #[test]
