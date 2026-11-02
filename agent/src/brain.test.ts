@@ -123,3 +123,15 @@ test("bills on another chain are cross-chain; NEAR bills are not", () => {
   assert.equal(isCrossChain({ id: "n", payee: "a.testnet", amount: 1n, due: "2026-11-05" }), false);
   assert.equal(isCrossChain({ id: "n", payee: "a.testnet", amount: 1n, due: "2026-11-05", chain: "near" }), false);
 });
+
+import { privateKeyToAccount } from "viem/accounts";
+import { addressFromNearKey } from "./evm";
+
+test("Chain Signatures: a NEAR secp256k1 key maps to the right EVM address", () => {
+  const acct = privateKeyToAccount(`0x${"11".repeat(32)}`);
+  const point = Buffer.from(acct.publicKey.slice(4), "hex"); // drop 0x04
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = BigInt(`0x${point.toString("hex")}`), b58 = "";
+  while (n > 0n) { b58 = ALPHABET[Number(n % 58n)] + b58; n /= 58n; }
+  assert.equal(addressFromNearKey(`secp256k1:${b58}`).toLowerCase(), acct.address.toLowerCase());
+});

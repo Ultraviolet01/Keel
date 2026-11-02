@@ -86,7 +86,7 @@ export interface Policy {
   blocklist: string[];
 }
 
-export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed";
+export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed";
 
 export interface Proposal {
   id: number;
@@ -96,6 +96,11 @@ export interface Proposal {
   reason: string;
   status: ProposalStatus;
   created_at_ms: number;
+  /** Offers that expire, such as a NEAR Intents quote. The vault refuses approval after this. */
+  valid_until_ms?: number | null;
+  /** Paid from the vault's own EVM address through NEAR Chain Signatures. */
+  evm?: { chain_id: number; token: string; to: string; nonce: number; gas_limit: number; max_fee_per_gas: string } | null;
+  evm_signed?: { raw_tx: string; tx_hash: string } | null;
 }
 
 export interface TokenMetadata {

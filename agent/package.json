@@ -12,7 +12,8 @@
     "intents": "tsx src/intents-cli.ts"
   },
   "dependencies": {
-    "near-api-js": "7.3.1"
+    "near-api-js": "7.3.1",
+    "viem": "^2.57.14"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

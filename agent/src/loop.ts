@@ -14,11 +14,13 @@ import {
   isCrossChain,
   isSpike,
   type Bill,
+  type Proposal,
   type RuleDraft,
 } from "./brain";
 import type { Chain, Config } from "./chain";
 import { explain } from "./explain";
-import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL } from "./intents";
+import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
+import { balances, broadcast, chainInfo, prepareTransfer, receipt, usdc, vaultAddress, vaultRoute } from "./evm";
 
 const STATE_FILE = resolve(import.meta.dirname, "../state.json");
 const LEDGER_FILE = resolve(import.meta.dirname, "../ledger.jsonl");
@@ -27,7 +29,10 @@ const BILLS_FILE = resolve(import.meta.dirname, "../../config/bills.json");
 export interface State {
   handled: Record<
     string,
-    Record<string, { action: string; tx?: string; proposalId?: number; depositAddress?: string; swap?: string; at: string }>
+    Record<
+      string,
+      { action: string; tx?: string; proposalId?: number; depositAddress?: string; swap?: string; route?: string; evmTx?: string; chainId?: number; at: string }
+    >
   >;
   codeHashes: Record<string, string>;
   drafts: Record<string, RuleDraft[]>;
@@ -118,7 +123,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
 
   for (const bill of due) {
     if (isCrossChain(bill)) {
-      await crossChain(cfg, chain, vaultId, bill, policy.token_id, handled, money, o.dryRun, say);
+      await crossChain(cfg, chain, vaultId, bill, policy.token_id, proposals, handled, money, o.dryRun, say);
       continue;
     }
     const acct = await chain.account(bill.payee);
@@ -174,16 +179,57 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     }
   }
 
-  // Reconcile cross-chain moves the owner approved: follow 1Click until final
+  // Reconcile cross-chain moves: follow each one until it is final, and
+  // re-quote any offer that expired before the owner approved it.
+  // Signed EVM transfers Keel did not propose (owner withdrawals) are sent too.
+  for (const p of proposals) {
+    if (p.status === "signed" && !Object.values(handled).some((h) => h.proposalId === p.id)) {
+      handled[`evm-${p.id}`] = { action: "bridge", route: "chain-signatures", proposalId: p.id, at: new Date().toISOString() };
+    }
+  }
   for (const [id, h] of Object.entries(handled)) {
-    if (h.action !== "bridge" || !h.depositAddress || (h.swap && FINAL.includes(h.swap as never))) continue;
+    if (h.action !== "bridge" || (h.swap && FINAL.includes(h.swap as never))) continue;
     const p = proposals.find((x) => x.id === h.proposalId);
-    if (!p || p.status !== "executed") continue;
+    if (!p) continue;
+    if (p.status === "pending" && p.valid_until_ms && p.valid_until_ms < Date.now()) {
+      delete handled[id];
+      say("reconcile", `${id}: offer #${p.id} expired before approval; Keel will propose a fresh one`);
+      continue;
+    }
     try {
-      h.swap = await swapStatus(h.depositAddress);
-      say("reconcile", `${id}: NEAR Intents status ${h.swap}`);
+      if (h.route === "chain-signatures") {
+        if (p.status === "failed") {
+          h.swap = "FAILED";
+          say("reconcile", `${id}: NEAR's MPC network did not sign #${p.id}`);
+        } else if (p.status === "signed" && p.evm_signed && p.evm) {
+          const { raw_tx, tx_hash } = p.evm_signed;
+          if (!h.evmTx && o.dryRun) {
+            say("reconcile", `${id}: #${p.id} is signed; would broadcast it (dry run)`);
+            continue;
+          }
+          if (!h.evmTx) {
+            if ((await broadcast(p.evm.chain_id, raw_tx as `0x${string}`, tx_hash as `0x${string}`)) === "stale") {
+              delete handled[id];
+              say("reconcile", `${id}: #${p.id} was signed with a nonce another transfer already used; Keel will propose it again`);
+              continue;
+            }
+            h.evmTx = tx_hash;
+            h.chainId = p.evm.chain_id;
+            say("reconcile", `${id}: broadcast the vault-signed transfer on ${chainInfo(p.evm.chain_id).name}: ${chainInfo(p.evm.chain_id).explorer}/tx/${tx_hash}`);
+          }
+          const r = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
+          if (r) {
+            h.swap = r;
+            say("reconcile", `${id}: ${r === "SUCCESS" ? "paid" : "the transfer reverted"} on ${chainInfo(p.evm.chain_id).name}`);
+          }
+        }
+      } else if (h.depositAddress && p.status === "executed") {
+        h.swap = await swapStatus(h.depositAddress);
+        say("reconcile", `${id}: NEAR Intents status ${h.swap}`);
+      }
     } catch (e) {
-      say("reconcile", `${id}: could not read the 1Click status (${String(e).slice(0, 120)})`);
+      const msg = (e as { shortMessage?: string }).shortMessage ?? String(e);
+      say("reconcile", `${id}: could not follow the cross-chain move yet (${msg.slice(0, 140)}); will retry`);
     }
   }
 
@@ -201,10 +247,16 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
 }
 
 /**
- * A bill paid on another chain. Keel gets a real 1Click quote, then proposes
- * paying the quote's deposit address with valid_until_ms set to the quote's
- * deadline, so the vault refuses the approval once the address is inactive.
- * 1Click runs on mainnet only; on testnet Keel records what it would do.
+ * A bill paid on another chain. Keel tries each route in order and uses the
+ * first that works, so one service being down does not stop the bill:
+ *
+ * 1. NEAR Intents 1Click (mainnet): proposes paying a quote's deposit address,
+ *    with valid_until_ms before the quote deadline.
+ * 2. NEAR Chain Signatures: proposes a USDC transfer from the vault's own EVM
+ *    address. The vault builds the transaction and NEAR's MPC network signs
+ *    it after the owner approves. Works on testnet (Base Sepolia).
+ *
+ * If no route works, nothing is recorded, so the next loop tries again.
  */
 async function crossChain(
   cfg: Config,
@@ -212,45 +264,100 @@ async function crossChain(
   vaultId: string,
   bill: Bill,
   tokenId: string,
+  proposals: Proposal[],
   handled: State["handled"][string],
   money: (u: bigint) => string,
   dryRun: boolean,
   say: (step: string, text: string, tx?: string) => void,
 ) {
   const label = `${bill.memo ?? bill.id}: ${money(bill.amount)} to ${bill.payee} on ${bill.chain}, due ${bill.due}`;
-  if (cfg.network !== "mainnet") {
-    say("decide", `${label}. Cross-chain moves go through NEAR Intents, which runs on mainnet only; on testnet Keel records the move without quoting.`);
-    return;
-  }
-  try {
-    const from = await chain.view<{ symbol: string }>(tokenId, "ft_metadata");
-    const [origin, dest] = await Promise.all([findToken("near", from.symbol), findToken(bill.chain!, from.symbol)]);
-    const q = await quote({
-      dry: dryRun,
-      originAsset: origin.assetId,
-      destinationAsset: dest.assetId,
-      amount: bill.amount.toString(),
-      recipient: bill.payee,
-      refundTo: vaultId,
-      deadline: deadlineFromNow(60),
-    });
-    const route = `${q.amountInFormatted} in, at least ${q.minAmountOut} out on ${bill.chain} via NEAR Intents, about ${q.timeEstimate ?? "?"} s`;
-    if (dryRun || !q.depositAddress) {
-      say("decide", `${label}. Would propose a cross-chain move (dry run): ${route}`);
-      return;
+  const tried: string[] = [];
+  for (const route of [viaIntents, viaChainSignatures]) {
+    try {
+      const done = await route(cfg, chain, vaultId, bill, tokenId, proposals, handled, label, dryRun, say);
+      if (done) return;
+    } catch (e) {
+      tried.push(`${route.name.replace(/^via/, "")}: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`);
     }
-    const validUntil = Date.parse(q.deadline ?? deadlineFromNow(60)) - 2 * 60_000; // two minutes of margin
-    const reason = `Cross-chain to ${bill.chain}: ${route}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
-    const r = await chain.callAsAgent(vaultId, "propose_payment", {
-      receiver_id: q.depositAddress,
-      amount: bill.amount.toString(),
-      memo: bill.memo ?? bill.id,
-      reason: reason.slice(0, 270),
-      valid_until_ms: validUntil,
-    });
-    handled[bill.id] = { action: "bridge", tx: r.hash, proposalId: Number(r.value), depositAddress: q.depositAddress, at: new Date().toISOString() };
-    say("act", `proposed cross-chain move #${r.value}: ${reason}`, r.hash);
-  } catch (e) {
-    say("act", `${label}. Could not prepare the cross-chain move: ${String(e).slice(0, 160)}`);
   }
+  say("act", `${label}. No cross-chain route is available right now, so Keel will retry on the next run. ${tried.join(" | ")}`);
 }
+
+type Route = (
+  cfg: Config,
+  chain: Chain,
+  vaultId: string,
+  bill: Bill,
+  tokenId: string,
+  proposals: Proposal[],
+  handled: State["handled"][string],
+  label: string,
+  dryRun: boolean,
+  say: (step: string, text: string, tx?: string) => void,
+) => Promise<boolean>;
+
+const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals, handled, label, dryRun, say) => {
+  if (cfg.network !== "mainnet") throw new Error("NEAR Intents runs on mainnet only");
+  await intentsTokens(); // health check: throws while 1Click is down
+  const from = await chain.view<{ symbol: string }>(tokenId, "ft_metadata");
+  const [origin, dest] = await Promise.all([findToken("near", from.symbol), findToken(bill.chain!, from.symbol)]);
+  const q = await quote({
+    dry: dryRun,
+    originAsset: origin.assetId,
+    destinationAsset: dest.assetId,
+    amount: bill.amount.toString(),
+    recipient: bill.payee,
+    refundTo: vaultId,
+    deadline: deadlineFromNow(60),
+  });
+  const route = `${q.amountInFormatted} in, at least ${q.minAmountOut} out on ${bill.chain} via NEAR Intents, about ${q.timeEstimate ?? "?"} s`;
+  if (dryRun || !q.depositAddress) {
+    say("decide", `${label}. Would propose a cross-chain move (dry run): ${route}`);
+    return true;
+  }
+  const validUntil = Date.parse(q.deadline ?? deadlineFromNow(60)) - 2 * 60_000; // two minutes of margin
+  const reason = `Cross-chain to ${bill.chain}: ${route}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
+  const r = await chain.callAsAgent(vaultId, "propose_payment", {
+    receiver_id: q.depositAddress,
+    amount: bill.amount.toString(),
+    memo: bill.memo ?? bill.id,
+    reason: reason.slice(0, 270),
+    valid_until_ms: validUntil,
+  });
+  handled[bill.id] = { action: "bridge", route: "intents", tx: r.hash, proposalId: Number(r.value), depositAddress: q.depositAddress, at: new Date().toISOString() };
+  say("act", `proposed cross-chain move #${r.value}: ${reason}`, r.hash);
+  return true;
+};
+
+const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say) => {
+  const info = await vaultRoute(chain, vaultId);
+  if (!info) throw new Error("this vault was created before Chain Signatures");
+  if (!info.route) throw new Error("the owner turned the vault's EVM route off");
+  const route = info.route;
+  if (chainInfo(route.chain_id).name !== bill.chain) throw new Error(`the vault's EVM route is not ${bill.chain}`);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(bill.payee)) throw new Error("payee is not a 0x address");
+  const from = await vaultAddress(chain, info.mpc_id, vaultId, info.path);
+  const { usdc: onChain, eth } = await balances(route.chain_id, route.token, from);
+  if (onChain < bill.amount) throw new Error(`the vault's ${bill.chain} address ${from} holds ${usdc(onChain)}, needs ${usdc(bill.amount)}; top it up`);
+  if (eth === 0n) throw new Error(`the vault's ${bill.chain} address ${from} has no ETH for gas`);
+  const queued = proposals.filter((p) => p.evm && (p.status === "pending" || p.status === "signing")).length;
+  const evm = await prepareTransfer(route, from, bill.payee, bill.amount, queued);
+  const where = `from the vault's own ${bill.chain} address ${from.slice(0, 8)}… via NEAR Chain Signatures`;
+  if (dryRun) {
+    say("decide", `${label}. Would propose paying ${where} (dry run, nonce ${evm.nonce})`);
+    return true;
+  }
+  const validUntil = Date.now() + 30 * 60_000; // nonce and fees go stale
+  const reason = `Cross-chain to ${bill.chain}: pay ${bill.payee} ${where}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
+  const r = await chain.callAsAgent(vaultId, "propose_payment", {
+    receiver_id: evm.to,
+    amount: bill.amount.toString(),
+    memo: bill.memo ?? bill.id,
+    reason: reason.slice(0, 270),
+    valid_until_ms: validUntil,
+    evm,
+  });
+  handled[bill.id] = { action: "bridge", route: "chain-signatures", tx: r.hash, proposalId: Number(r.value), at: new Date().toISOString() };
+  say("act", `proposed cross-chain move #${r.value}: ${reason}`, r.hash);
+  return true;
+};

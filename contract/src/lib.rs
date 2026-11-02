@@ -14,6 +14,11 @@
 //!   The agent files a proposal and the owner approves or rejects it.
 //! - Blocked: blocklisted payee, vault paused, or the daily cap reached.
 //!
+//! Cross-chain bills can also be paid from the vault's own address on an EVM
+//! chain (Base), through NEAR Chain Signatures: the vault builds the USDC
+//! transfer itself and asks NEAR's MPC network to sign it after the owner
+//! approves. No third-party server is involved.
+//!
 //! Amounts are in the token's smallest unit (USDC has 6 decimals, so
 //! 100 USDC is `100000000`).
 
@@ -37,6 +42,14 @@ const MAX_TEXT: usize = 280;
 /// Methods the agent's key may call, and how much NEAR it may spend on gas.
 const AGENT_METHODS: &str = "execute_payment,propose_payment";
 const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
+/// Chain Signatures: gas for the MPC `sign` call and for storing the result.
+const GAS_MPC_SIGN: Gas = Gas::from_tgas(150);
+const GAS_SIGNED_CALLBACK: Gas = Gas::from_tgas(30);
+/// Derivation path for the vault's EVM address. Same address on every EVM chain.
+pub const EVM_PATH: &str = "evm";
+
+mod evm;
+pub use evm::{EvmRoute, EvmSigned, EvmTransfer};
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
@@ -79,6 +92,10 @@ pub enum ProposalStatus {
     Executed,
     Rejected,
     Failed,
+    /// EVM moves: waiting for NEAR's MPC network to sign.
+    Signing,
+    /// EVM moves: signed; anyone can broadcast `evm_signed.raw_tx`.
+    Signed,
 }
 
 #[near(serializers = [borsh, json])]
@@ -94,6 +111,9 @@ pub struct Proposal {
     /// For cross-chain moves: the 1Click quote's deadline. Paying its deposit
     /// address after this time can lose the funds, so approval is refused.
     pub valid_until_ms: Option<u64>,
+    /// Set when this is paid from the vault's EVM address via Chain Signatures.
+    pub evm: Option<EvmTransfer>,
+    pub evm_signed: Option<EvmSigned>,
 }
 
 /// Owner's changes to the policy. Every field is optional.
@@ -140,6 +160,10 @@ pub struct KeelVault {
     blocklist: IterableSet<AccountId>,
     proposals: IterableMap<u64, Proposal>,
     next_proposal_id: u64,
+    /// NEAR's Chain Signatures contract.
+    mpc_id: AccountId,
+    /// The EVM chain and token the owner allows. None turns the route off.
+    evm_route: Option<EvmRoute>,
 }
 
 #[near]
@@ -166,6 +190,8 @@ impl KeelVault {
             blocklist: IterableSet::new(StorageKey::Blocklist),
             proposals: IterableMap::new(StorageKey::Proposals),
             next_proposal_id: 1,
+            mpc_id: default_mpc(),
+            evm_route: Some(default_evm_route()),
         }
     }
 
@@ -199,6 +225,8 @@ impl KeelVault {
     /// cap and cross-chain moves. Blocklisted payees are never proposed.
     /// `valid_until_ms` marks an offer that expires, such as a NEAR Intents
     /// deposit address; the vault refuses to approve it after that time.
+    /// `evm` pays the bill from the vault's own EVM address instead; then
+    /// `receiver_id` is the payee's lowercase 0x address.
     pub fn propose_payment(
         &mut self,
         receiver_id: AccountId,
@@ -206,6 +234,7 @@ impl KeelVault {
         memo: Option<String>,
         reason: String,
         valid_until_ms: Option<u64>,
+        evm: Option<EvmTransfer>,
     ) -> u64 {
         self.assert_agent();
         require!(!self.paused, "Keel Vault refused: vault is paused");
@@ -219,6 +248,9 @@ impl KeelVault {
         if let Some(t) = valid_until_ms {
             require!(t > env::block_timestamp_ms(), "Keel Vault refused: the offer has already expired");
         }
+        if let Some(e) = &evm {
+            self.check_evm(e, &receiver_id);
+        }
 
         let id = self.next_proposal_id;
         self.next_proposal_id += 1;
@@ -231,6 +263,8 @@ impl KeelVault {
             status: ProposalStatus::Pending,
             created_at_ms: env::block_timestamp_ms(),
             valid_until_ms,
+            evm,
+            evm_signed: None,
         };
         emit("proposal_created", json!(proposal));
         self.proposals.insert(id, proposal);
@@ -263,14 +297,67 @@ impl KeelVault {
                 "Keel Vault refused: this offer expired; Keel will propose a fresh one"
             );
         }
-        proposal.status = ProposalStatus::Executing;
+        let evm = proposal.evm.clone();
+        proposal.status = if evm.is_some() {
+            ProposalStatus::Signing
+        } else {
+            ProposalStatus::Executing
+        };
         let (receiver_id, amount, memo) =
             (proposal.receiver_id.clone(), proposal.amount, proposal.memo.clone());
         emit(
             "proposal_approved",
             json!({ "id": proposal_id, "approved_by": self.owner_id }),
         );
-        self.pay(receiver_id, amount, memo, Some(proposal_id), None)
+        match evm {
+            Some(e) => {
+                // The owner may have changed the route since the proposal.
+                self.check_evm(&e, &receiver_id);
+                self.sign_evm(proposal_id, &e, amount.0)
+            }
+            None => self.pay(receiver_id, amount, memo, Some(proposal_id), None),
+        }
+    }
+
+    /// Sets the EVM chain, token and fee limits for Chain Signatures
+    /// payments, or turns the route off with `null`.
+    #[payable]
+    pub fn set_evm_route(&mut self, route: Option<EvmRoute>) {
+        self.assert_owner();
+        if let Some(r) = &route {
+            require!(evm::parse_address(&r.token).is_some(), "token must be a 0x address");
+        }
+        emit("evm_route_set", json!({ "old": self.evm_route, "new": route, "by": self.owner_id }));
+        self.evm_route = route;
+    }
+
+    /// Owner moves funds out of the vault's EVM address, for example back to
+    /// their own wallet. Signed straight away; no proposal needed.
+    #[payable]
+    pub fn withdraw_evm(&mut self, evm: EvmTransfer, amount: U128, memo: Option<String>) -> Promise {
+        self.assert_owner();
+        require!(amount.0 > 0, "amount must be above zero");
+        check_text(memo.as_deref().unwrap_or(""), "memo");
+        let to = evm::normalize_address(&evm.to).unwrap_or_else(|| env::panic_str("payee must be a 0x address"));
+        let receiver_id: AccountId = to.parse().unwrap();
+        self.check_evm(&evm, &receiver_id);
+        let id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+        let proposal = Proposal {
+            id,
+            receiver_id,
+            amount,
+            memo,
+            reason: "owner withdrawal from the vault's EVM address".into(),
+            status: ProposalStatus::Signing,
+            created_at_ms: env::block_timestamp_ms(),
+            valid_until_ms: None,
+            evm: Some(evm.clone()),
+            evm_signed: None,
+        };
+        emit("withdrawal_started", json!(proposal));
+        self.proposals.insert(id, proposal);
+        self.sign_evm(id, &evm, amount.0)
     }
 
     #[payable]
@@ -433,7 +520,39 @@ impl KeelVault {
         ok
     }
 
+    /// Stores the MPC signature as a ready-to-broadcast transaction.
+    #[private]
+    pub fn on_evm_signed(&mut self, proposal_id: u64) -> Option<EvmSigned> {
+        #[allow(deprecated)]
+        let result = match env::promise_result(0) {
+            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<Value>(&bytes).ok(),
+            _ => None,
+        };
+        let proposal = self.proposals.get_mut(&proposal_id)?;
+        let signed = result.as_ref().and_then(|v| {
+            let e = proposal.evm.as_ref()?;
+            let big_r = v["big_r"]["affine_point"].as_str()?;
+            let s = evm::hex_decode(v["s"]["scalar"].as_str()?)?;
+            let r = evm::hex_decode(big_r.get(2..)?)?; // drop the 02/03 prefix: r is the x coordinate
+            let y = v["recovery_id"].as_u64()? as u8;
+            Some(e.signed(proposal.amount.0, y, &r, &s))
+        });
+        proposal.status = if signed.is_some() { ProposalStatus::Signed } else { ProposalStatus::Failed };
+        proposal.evm_signed = signed.clone();
+        emit(
+            if signed.is_some() { "evm_signed" } else { "evm_sign_failed" },
+            json!({ "proposal_id": proposal_id, "tx_hash": signed.as_ref().map(|x| &x.tx_hash) }),
+        );
+        signed
+    }
+
     // ----------------------------------------------------------------- views
+
+    /// The EVM route and the inputs to derive the vault's EVM address
+    /// (`derived_public_key` on `mpc_id` with this path and the vault as predecessor).
+    pub fn get_evm_route(&self) -> Value {
+        json!({ "route": self.evm_route, "mpc_id": self.mpc_id, "path": EVM_PATH, "predecessor": env::current_account_id() })
+    }
 
     /// The band a payment would land in, without moving money.
     pub fn check_payment(&self, receiver_id: AccountId, amount: U128) -> PaymentCheck {
@@ -528,6 +647,48 @@ impl KeelVault {
         PaymentCheck { band, reason }
     }
 
+    /// The checks every EVM transfer passes before the vault signs it.
+    fn check_evm(&self, e: &EvmTransfer, receiver_id: &AccountId) {
+        let route = self
+            .evm_route
+            .as_ref()
+            .unwrap_or_else(|| env::panic_str("Keel Vault refused: the EVM route is off"));
+        require!(e.chain_id == route.chain_id, "Keel Vault refused: chain is not the vault's EVM route");
+        require!(
+            evm::normalize_address(&e.token) == evm::normalize_address(&route.token),
+            "Keel Vault refused: only the route's token can be sent"
+        );
+        let to = evm::normalize_address(&e.to)
+            .unwrap_or_else(|| env::panic_str("Keel Vault refused: payee must be a 0x address"));
+        require!(
+            receiver_id.as_str() == to,
+            "Keel Vault refused: receiver_id must be the payee's lowercase 0x address"
+        );
+        require!(e.gas_limit <= route.max_gas, "Keel Vault refused: gas limit over the route's maximum");
+        require!(
+            e.max_fee_per_gas.0 <= route.max_fee_per_gas.0,
+            "Keel Vault refused: fee over the route's maximum"
+        );
+        require!(
+            e.max_priority_fee_per_gas.0 <= e.max_fee_per_gas.0,
+            "Keel Vault refused: priority fee above the max fee"
+        );
+    }
+
+    fn sign_evm(&self, proposal_id: u64, e: &EvmTransfer, amount: u128) -> Promise {
+        let hash = e.signing_hash(amount);
+        let args = json!({
+            "request": { "path": EVM_PATH, "payload_v2": { "Ecdsa": evm::hex_encode(&hash) }, "domain_id": 0 }
+        });
+        Promise::new(self.mpc_id.clone())
+            .function_call("sign", args.to_string().into_bytes(), ONE_YOCTO, GAS_MPC_SIGN)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_SIGNED_CALLBACK)
+                    .on_evm_signed(proposal_id),
+            )
+    }
+
     fn pay(
         &self,
         receiver_id: AccountId,
@@ -552,6 +713,26 @@ impl KeelVault {
                     .on_payment_done(proposal_id, receiver_id, amount, agent_day),
             )
     }
+}
+
+fn is_testnet() -> bool {
+    env::current_account_id().as_str().ends_with(".testnet")
+}
+
+/// NEAR's Chain Signatures contract on this network.
+fn default_mpc() -> AccountId {
+    (if is_testnet() { "v1.signer-prod.testnet" } else { "v1.signer" }).parse().unwrap()
+}
+
+/// Base Sepolia USDC on testnet, Base USDC on mainnet. Fees capped at 5 gwei
+/// and 100k gas, so a bad quote can burn at most 0.0005 ETH.
+fn default_evm_route() -> EvmRoute {
+    let (chain_id, token) = if is_testnet() {
+        (84532, "0x036cbd53842c5426634e7929541ec2318f3dcf7e")
+    } else {
+        (8453, "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913")
+    };
+    EvmRoute { chain_id, token: token.into(), max_fee_per_gas: U128(5_000_000_000), max_gas: 100_000 }
 }
 
 fn today() -> u64 {

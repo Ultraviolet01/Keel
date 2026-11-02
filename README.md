@@ -36,7 +36,7 @@ Everything below runs on NEAR testnet and costs nothing.
 flowchart LR
   S["1. Setup<br/>owner deploys vault"] --> O["2. Observe<br/>ft_balance_of, bills"]
   O --> F["3. Forecast<br/>14 days per wallet"] --> D["4. Decide<br/>transfer, swap, defer"] --> C["5. Check<br/>check_payment view"]
-  C -- within limits --> A["6. Act<br/>vault or 1Click"]
+  C -- within limits --> A["6. Act<br/>vault, 1Click or Chain Signatures"]
   C -- outside limits --> E["9. Escalate<br/>propose, owner approves"]
   E -- approved --> A
   A --> R["7. Reconcile<br/>receipts, ledger page"] --> L["8. Learn<br/>memory, rule drafts"] --> O
@@ -59,6 +59,8 @@ The vault holds the USDC and the rules, and decides every payment's band itself.
 | `update_policy` | Owner key | Changes caps, allowlist, blocklist or threshold, and logs old value, new value and reason |
 | `pause` / `resume` | Owner key | Stops every payment at once, then restarts them |
 | `withdraw` | Owner key | Pays out directly, for example back to the owner; works while paused |
+| `set_evm_route` / `withdraw_evm` | Owner key | Sets or turns off the Base chain, token and fee caps for Chain Signatures payments; moves funds out of the vault's Base address |
+| `get_evm_route` | Anyone (view) | The vault's EVM route and the inputs that derive its Base address |
 
 | Band | Rule (USDC) | Result |
 | --- | --- | --- |
@@ -70,7 +72,7 @@ Two token details the vault handles itself: it attaches the 1 yoctoNEAR that `ft
 
 Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot attach a deposit, so only the owner's full-access key can approve, change the policy or pause.
 
-**Check the rules yourself:** run `cd contract && cargo test`. You see 32 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing` and `pause_blocks_everything_until_resume`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
+**Check the rules yourself:** run `cd contract && cargo test`. You see 50 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing`, `pause_blocks_everything_until_resume`, `evm_bill_with_a_huge_fee_is_refused` and `signing_hash_matches_an_independent_encoder`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
 
 ## Security
 
@@ -113,6 +115,7 @@ Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can rea
 | `keel.testnet` | Keel factory: creates a vault for each company a founder adds (up to 20 per founder) |
 | `nova.keel.testnet` | A company vault owned by `keel-owner.testnet`, with Keel's agent key `ed25519:GZ1zQGxc…` added by the factory at sign-up; no policy set |
 | `kora.keel.testnet`, `lumen.keel.testnet` | Earlier vaults for the same founder, from before the agent key moved onto the vault; they use the separate agent account `agent.keel.testnet` |
+| `vega.keel.testnet` | A vault created with the Chain Signatures code, owned by `vega-founder.testnet`. Its Base Sepolia address is `0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed` |
 | `usdc.keel-owner.testnet` | Keel Test USDC |
 
 Checked live:
@@ -123,9 +126,23 @@ Checked live:
 4. **Earlier sign-up.** `keel-owner.testnet` called `create_vault` with `"kora"`. You see `"kora.keel.testnet"` returned and a `vault_created` event ([transaction](https://explorer.testnet.near.org/transactions/GLV4QR6FwuZeTSPWWHrEvZxdsFky4dGVTNKx5H69W4Fy)).
 5. **One founder, several companies.** The same founder added `"lumen"` ([transaction](https://explorer.testnet.near.org/transactions/QX7P8RhhbXG1AbMo87KQNvE2hn6QUEGqRhen6L6bud2)). You see `get_vaults_for_owner` on `keel.testnet` return all three: `kora`, `lumen` and `nova`. Each vault has its own money, policy and agent key.
 7. **The agent runs the demo.** After `scripts/setup-demo-testnet.sh` (Nova's policy: 100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked; 1,000 test USDC), `npm run demo` took 9.6 s: it paid Northwind Hosting 80 alone ([transaction](https://testnet.nearblocks.io/txns/Da5R9fRbMDYnRoVeyadGMD4ikgFUY8fQZir93Lb6ZQyS)), proposed Atlas Freight 132 as #3 because Atlas is not allowlisted ([transaction](https://testnet.nearblocks.io/txns/7vdd1dT2t3cWxUUBxSPCyG74aHwt9Q6LVp7NGupWVs2f)), refused the "URGENT: supplier changed bank details" bill without signing because the payee is blocklisted, and proposed Contractor payroll 450 as #4 because it is over the cap ([transaction](https://testnet.nearblocks.io/txns/5pi9j2RtGvjn2vcUx712ytgJGkrSZyRRKeHCfosCpCS2)). `ft_balance_of` shows `northwind-keel.testnet` holding 80 and the vault 920.
-6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `9SgNmzqisrrABrdJ83bJbci9VcZXWdavyosrjJrfsMUk`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
+8. **Paying on Base without 1Click.** The agent proposed a 1 USDC transfer on Base Sepolia from `vega.keel.testnet` as #1 ([transaction](https://testnet.nearblocks.io/txns/FjjJnVwJfmc7GmDvPXxEToZqJNj3zf4NhMXcw96Ug7ue)). The founder approved it ([transaction](https://testnet.nearblocks.io/txns/CwtmxfryUoEoCwKUAUHETVx6fKmYkU3fNZHzsUDxM2Bp)). The vault built the transfer, `v1.signer-prod.testnet` signed it, and the vault stored it with an `evm_signed` event. Recovering the signer from the stored transaction with viem gives `0x69aa…cffed`, the vault's own address.
+6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `6Q73wQDbHPVUa9t8T7FcJo45kcNTcmpvpCiS75AVcwrs`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
 
-## Mainnet Intents leg
+## Cross-chain bills
+
+Keel has two independent routes for a bill on Base, so one service going down does not stop the bill:
+
+| Route | Depends on | Testnet |
+| --- | --- | --- |
+| 1. NEAR Intents 1Click | Defuse's 1Click API | No, mainnet only |
+| 2. NEAR Chain Signatures | NEAR validators only (MPC network) | Yes, Base Sepolia |
+
+Keel tries 1Click first and falls back to Chain Signatures. If neither works, the bill waits and Keel tries again on the next run. Details and a dry run are in [agent/README.md](agent/README.md#cross-chain-bills-two-routes).
+
+**Chain Signatures route.** Each vault controls one address on Base, derived from its own account by NEAR's MPC contract. The vault signs only one thing: a USDC `transfer` on the owner's chosen chain, with gas and fees under the owner's caps (100,000 gas, 5 gwei). It builds and hashes the transaction itself, so the agent cannot get anything else signed. Signing waits for the owner's approval, and blocklisted 0x addresses are refused. Approving needs 300 Tgas, because the vault waits for the MPC signature.
+
+### Mainnet Intents leg
 
 NEAR Intents has no testnet, so cross-chain moves run on mainnet through a second Keel Vault capped at a 5 USDC budget. On testnet, the shortfall scenario in Try it uses a dry quote instead.
 
@@ -144,7 +161,8 @@ NEAR Intents has no testnet, so cross-chain moves run on mainnet through a secon
 - NEAR smart contract (Keel Vault)
 - Function-call access keys (scoped agent key)
 - NEAR Intents 1Click API (cross-chain moves)
-- NEAR AI Cloud (planned, for the Decide step)
+- NEAR Chain Signatures (each vault's own Base address, the fallback route when 1Click is down)
+- NEAR AI Cloud (optional, writes the wording of a proposal's reason; decisions stay in plain code)
 
 ## Repo layout and configuration
 
@@ -166,6 +184,7 @@ NEAR Intents has no testnet, so cross-chain moves run on mainnet through a secon
 | `AGENT_KEY_FILE` | Path to Keel's agent key file from `scripts/new-agent-key.mjs`, outside the repository |
 | `USDC_CONTRACT_ID` | USDC token contract on the chosen network |
 | `ONECLICK_JWT` | Optional partner token; removes the 0.2% fee |
+| `EVM_RPC_84532`, `EVM_RPC_8453` | Optional RPC URLs for Base Sepolia and Base; defaults are the public endpoints |
 
 The owner's private key is never put in `.env`. Owner actions sign through the NEAR CLI or a wallet.
 
@@ -175,6 +194,8 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - **Forecast inputs:** bills and invoices come from `config/treasury.json`, not from an accounting system.
 - **Learning is rule-based:** Keel drafts a cap change after 3 approvals in a row for one payee, and flags any bill more than 25% above that payee's last 3. It never changes a limit itself.
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
+- **Base address funding:** the vault's Base address needs its own USDC and a little ETH for gas. Keel says how much is missing; it does not top the address up itself. Testnet funds come from Base Sepolia faucets.
+- **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 
 ## Libraries and AI-generated code
@@ -182,6 +203,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - [near-sdk 5.30](https://crates.io/crates/near-sdk) and [near-contract-standards 5.30](https://crates.io/crates/near-contract-standards) for the contracts
 - [cargo-near 0.22](https://crates.io/crates/cargo-near) to build them, [near-cli-rs 0.30](https://www.npmjs.com/package/near-cli-rs) to deploy and call them
 - [near-api-js 7.3](https://www.npmjs.com/package/near-api-js) for the agent's signing, run with [tsx](https://www.npmjs.com/package/tsx); optional [NEAR AI Cloud](https://cloud.near.ai) for proposal wording
+- [viem 2.57](https://viem.sh) for the agent's Base reads and broadcasts; [@noble/hashes 1.8](https://www.npmjs.com/package/@noble/hashes) for keccak in the app (deriving the vault's Base address)
 - [NEAR Connect 0.11](https://www.npmjs.com/package/@hot-labs/near-connect) for wallet sign-in, with [React 19](https://react.dev), [Vite 8](https://vite.dev) and TypeScript 5.9 for the app
 
 Parts of this project are written with AI coding agents (Claude Code).

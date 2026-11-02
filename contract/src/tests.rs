@@ -225,7 +225,7 @@ fn proposal_flow_approve() {
         U128(8_000 * USDC),
         None,
         "Payroll short 6,920 for Nov 7".into(),
-        None,
+        None, None,
     );
     assert_eq!(id, 1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Pending);
@@ -241,7 +241,7 @@ fn proposal_flow_approve() {
 fn proposal_flow_reject() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
     as_owner(DAY);
     v.reject(1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Rejected);
@@ -252,7 +252,7 @@ fn proposal_flow_reject() {
 fn agent_cannot_approve_its_own_proposal() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
     as_agent_with_deposit(DAY, 1);
     let _ = v.approve(1);
 }
@@ -262,7 +262,7 @@ fn agent_cannot_approve_its_own_proposal() {
 fn blocklisted_payee_is_never_proposed() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into(), None);
+    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into(), None, None);
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn blocklisted_payee_is_never_proposed() {
 fn approval_refused_if_payee_blocked_later() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
     as_owner(DAY);
     v.update_policy(
         PolicyUpdate {
@@ -402,7 +402,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
 fn approved_proposal_marked_executed_on_success() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into(), None);
+    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into(), None, None);
     as_owner(DAY);
     let _ = v.approve(1);
 
@@ -468,7 +468,7 @@ fn intents_offer_can_be_approved_before_it_expires() {
     let mut v = vault();
     as_agent(DAY);
     let deadline = DAY / MS + 10 * 60 * 1000; // ten minutes from now, in ms
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base via NEAR Intents".into(), Some(deadline));
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base via NEAR Intents".into(), Some(deadline), None);
     assert_eq!(v.get_proposal(1).unwrap().valid_until_ms, Some(deadline));
     as_owner(DAY + 5 * 60 * 1_000_000_000);
     let _ = v.approve(1);
@@ -481,7 +481,7 @@ fn expired_intents_offer_is_never_paid() {
     let mut v = vault();
     as_agent(DAY);
     let deadline = DAY / MS + 10 * 60 * 1000;
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base".into(), Some(deadline));
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base".into(), Some(deadline), None);
     as_owner(DAY + 11 * 60 * 1_000_000_000);
     let _ = v.approve(1);
 }
@@ -491,5 +491,185 @@ fn expired_intents_offer_is_never_paid() {
 fn cannot_propose_an_offer_that_already_expired() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "stale".into(), Some(DAY / MS - 1));
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "stale".into(), Some(DAY / MS - 1), None);
+}
+
+// ------------------------------------------------------- Chain Signatures (EVM)
+
+const BASE_USDC: &str = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+const PAYEE_EVM: &str = "0x00000000000000000000000000000000000000aa";
+
+/// Same fields as the viem reference vector in the comments below.
+fn evm_transfer() -> EvmTransfer {
+    EvmTransfer {
+        chain_id: 84532,
+        token: BASE_USDC.into(),
+        to: PAYEE_EVM.into(),
+        nonce: 7,
+        max_fee_per_gas: U128(1_200_000),
+        max_priority_fee_per_gas: U128(1_000_000),
+        gas_limit: 60_000,
+    }
+}
+
+fn propose_evm(v: &mut KeelVault, e: EvmTransfer) -> u64 {
+    as_agent(DAY);
+    let to = e.to.to_lowercase();
+    v.propose_payment(acc(&to), U128(5 * USDC), None, "Pay Base invoice".into(), Some(DAY / MS + 30 * 60 * 1000), Some(e))
+}
+
+#[test]
+fn testnet_vault_starts_with_the_base_sepolia_route() {
+    let v = vault();
+    let r = v.get_evm_route();
+    assert_eq!(r["route"]["chain_id"], 84532);
+    assert_eq!(r["route"]["token"], BASE_USDC);
+    assert_eq!(r["mpc_id"], "v1.signer-prod.testnet");
+    assert_eq!(r["path"], "evm");
+}
+
+#[test]
+fn signing_hash_matches_an_independent_encoder() {
+    // keccak256 of the unsigned EIP-1559 tx, from viem 2.57 serializeTransaction.
+    as_owner(DAY);
+    let h = evm_transfer().signing_hash(5 * USDC);
+    assert_eq!(evm::hex_encode(&h), "28c19d3c600e2595face7d838940a731f1a04932fe88a1d1c13d70a165b913ec");
+}
+
+#[test]
+fn approving_an_evm_bill_asks_the_mpc_network_to_sign() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, evm_transfer());
+    as_owner(DAY);
+    let _ = v.approve(id);
+    assert_eq!(v.get_proposal(id).unwrap().status, ProposalStatus::Signing);
+}
+
+#[test]
+fn mpc_signature_becomes_a_ready_to_send_transaction() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, evm_transfer());
+    as_owner(DAY);
+    let _ = v.approve(id);
+    // MPC response shape; r, s and recovery id from the viem reference signature.
+    let resp = json!({
+        "scheme": "Secp256k1",
+        "big_r": { "affine_point": "025c6e69e75081d7de31709775b841b75f4dc12011d31dc9a5a2a888f99b791e79" },
+        "s": { "scalar": "09684768e1ccf0be4c0108262549d72a762f22bd086eb57cd01fb9069f82cdd9" },
+        "recovery_id": 1
+    });
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(acc(VAULT))
+            .predecessor_account_id(acc(VAULT))
+            .block_timestamp(DAY)
+            .build(),
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![PromiseResult::Successful(resp.to_string().into_bytes())],
+    );
+    let signed = v.on_evm_signed(id).unwrap();
+    assert_eq!(signed.raw_tx, "0x02f8b083014a3407830f424083124f8082ea6094036cbd53842c5426634e7929541ec2318f3dcf7e80b844a9059cbb00000000000000000000000000000000000000000000000000000000000000aa00000000000000000000000000000000000000000000000000000000004c4b40c001a05c6e69e75081d7de31709775b841b75f4dc12011d31dc9a5a2a888f99b791e79a009684768e1ccf0be4c0108262549d72a762f22bd086eb57cd01fb9069f82cdd9");
+    assert_eq!(signed.tx_hash, "0x194031f3ca2b5111d5e2e69530e6f744f9b9ccac59b1770d0a59b31a718e04a5");
+    assert_eq!(v.get_proposal(id).unwrap().status, ProposalStatus::Signed);
+}
+
+#[test]
+fn failed_mpc_call_marks_the_bill_failed() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, evm_transfer());
+    as_owner(DAY);
+    let _ = v.approve(id);
+    testing_env!(
+        VMContextBuilder::new().current_account_id(acc(VAULT)).predecessor_account_id(acc(VAULT)).block_timestamp(DAY).build(),
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![PromiseResult::Failed],
+    );
+    assert!(v.on_evm_signed(id).is_none());
+    assert_eq!(v.get_proposal(id).unwrap().status, ProposalStatus::Failed);
+}
+
+#[test]
+#[should_panic(expected = "chain is not the vault's EVM route")]
+fn evm_bill_on_another_chain_is_refused() {
+    let mut v = vault();
+    propose_evm(&mut v, EvmTransfer { chain_id: 1, ..evm_transfer() });
+}
+
+#[test]
+#[should_panic(expected = "only the route's token can be sent")]
+fn evm_bill_for_another_token_is_refused() {
+    let mut v = vault();
+    propose_evm(&mut v, EvmTransfer { token: "0x00000000000000000000000000000000000000bb".into(), ..evm_transfer() });
+}
+
+#[test]
+#[should_panic(expected = "fee over the route's maximum")]
+fn evm_bill_with_a_huge_fee_is_refused() {
+    let mut v = vault();
+    propose_evm(&mut v, EvmTransfer { max_fee_per_gas: U128(6_000_000_000), max_priority_fee_per_gas: U128(1), ..evm_transfer() });
+}
+
+#[test]
+#[should_panic(expected = "gas limit over the route's maximum")]
+fn evm_bill_with_too_much_gas_is_refused() {
+    let mut v = vault();
+    propose_evm(&mut v, EvmTransfer { gas_limit: 500_000, ..evm_transfer() });
+}
+
+#[test]
+#[should_panic(expected = "receiver_id must be the payee's lowercase 0x address")]
+fn evm_receiver_must_match_the_payee() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("northwind.testnet"), U128(5 * USDC), None, "x".into(), None, Some(evm_transfer()));
+}
+
+#[test]
+#[should_panic(expected = "payee is on the blocklist")]
+fn blocklisted_evm_address_is_refused() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.update_policy(PolicyUpdate { block: vec![acc(PAYEE_EVM)], ..Default::default() }, "scam wallet".into());
+    propose_evm(&mut v, evm_transfer());
+}
+
+#[test]
+#[should_panic(expected = "the EVM route is off")]
+fn owner_can_turn_the_evm_route_off() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.set_evm_route(None);
+    propose_evm(&mut v, evm_transfer());
+}
+
+#[test]
+#[should_panic(expected = "the EVM route is off")]
+fn route_turned_off_after_proposal_blocks_approval() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, evm_transfer());
+    as_owner(DAY);
+    v.set_evm_route(None);
+    let _ = v.approve(id);
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn only_the_owner_sets_the_evm_route() {
+    let mut v = vault();
+    set_ctx("mallory.testnet", DAY, 1);
+    v.set_evm_route(None);
+}
+
+#[test]
+fn owner_can_withdraw_from_the_evm_address() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.withdraw_evm(evm_transfer(), U128(5 * USDC), None);
+    let p = v.get_proposal(1).unwrap();
+    assert_eq!(p.status, ProposalStatus::Signing);
+    assert_eq!(p.receiver_id.as_str(), PAYEE_EVM);
 }

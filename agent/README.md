@@ -35,7 +35,20 @@ All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` (`
 
 Every step is appended to `ledger.jsonl`; `state.json` remembers which bills were handled. Both stay out of git.
 
-## Cross-chain moves (NEAR Intents 1Click)
+## Cross-chain bills: two routes
+
+A bill with `"chain": "base"` in `config/bills.json` is paid on Base. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
+
+1. **NEAR Intents 1Click** (mainnet only). Keel proposes paying a quote's deposit address.
+2. **NEAR Chain Signatures** (testnet and mainnet). Keel proposes a USDC transfer from the vault's own Base address. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.
+
+If no route works, Keel records nothing and tries again on the next run. Offers that expire before the owner approves are proposed again.
+
+**Try the fallback:** run `npm run agent -- --once --dry-run --vault vega.keel.testnet`. You see the Base bill skip 1Click (`runs on mainnet only`) and fall back to Chain Signatures. Until someone funds the vault's Base Sepolia address, the result is `holds 0 USDC, needs 25 USDC; top it up`.
+
+**After the owner approves**, the vault stores the signed transaction (`evm_signed.raw_tx`, `evm_signed.tx_hash`). On its next run Keel broadcasts it on Base and follows the receipt until it lands.
+
+### NEAR Intents 1Click
 
 `src/intents.ts` talks to the 1Click API: token list, quotes, deposit and status. 1Click runs on mainnet only.
 

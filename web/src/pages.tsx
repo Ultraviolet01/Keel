@@ -8,6 +8,7 @@ import { Check, LoadLine, Pause, Play, Shield } from "./icons";
 import type { Send } from "./panels";
 import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
+import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 
 export interface PageProps {
   vaultId: string;
@@ -30,7 +31,37 @@ const PILL: Record<Proposal["status"], { label: string; cls: string }> = {
   executed: { label: "Paid", cls: "ok" },
   rejected: { label: "Rejected", cls: "bad" },
   failed: { label: "Failed", cls: "bad" },
+  signing: { label: "Signing on NEAR", cls: "warn" },
+  signed: { label: "Signed, sent to Base", cls: "ok" },
 };
+
+/** How a proposal moves money, for the flow diagram and the list pill. */
+function routeOf(x: Proposal) {
+  if (x.evm) {
+    const c = EVM_CHAINS[x.evm.chain_id];
+    return { kind: "evm" as const, chain: c?.name ?? `chain ${x.evm.chain_id}`, label: "Signed by NEAR Chain Signatures", detail: `USDC transfer on ${c?.name ?? "EVM"}` };
+  }
+  if (x.valid_until_ms) return { kind: "intents" as const, chain: "Other chain", label: "Cross-chain via NEAR Intents", detail: "1Click deposit address" };
+  return { kind: "near" as const, chain: "NEAR", label: "Paid by the vault", detail: "ft_transfer on NEAR" };
+}
+
+/** Re-renders every second while mounted. */
+function useNow(active: boolean) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+function expiryText(until: number, now: number) {
+  const left = Math.floor((until - now) / 1000);
+  if (left <= 0) return "Offer expired. Keel will propose a fresh one.";
+  const m = Math.floor(left / 60);
+  return `Offer expires in ${m}:${String(left % 60).padStart(2, "0")}`;
+}
 
 const usd = (raw: string | bigint, d: VaultData) => formatToken(raw, d.token.decimals);
 const amt = (raw: string | bigint, d: VaultData) => `${usd(raw, d)} ${d.token.symbol}`;
@@ -73,11 +104,14 @@ function Head({ title, sub, children }: { title: string; sub: string; children?:
   );
 }
 
-function Amount({ raw, d, size = "big" }: { raw: string | bigint; d: VaultData; size?: "big" | "mid" | "huge" }) {
+/** EVM payees are 0x addresses; show them short so they fit. */
+const payee = (id: string) => (/^0x[0-9a-f]{40}$/.test(id) ? short(id) : id);
+
+function Amount({ raw, d, size = "big", symbol }: { raw: string | bigint; d: VaultData; size?: "big" | "mid" | "huge"; symbol?: string }) {
   return (
     <div className={`${size} serif num`}>
       {usd(raw, d)}
-      <small>{d.token.symbol}</small>
+      <small>{symbol ?? d.token.symbol}</small>
     </div>
   );
 }
@@ -159,7 +193,7 @@ export function Overview(p: PageProps) {
             pending.slice(0, 2).map((x) => (
               <div key={x.id} className="needs-item">
                 <b>
-                  Pay {x.receiver_id}
+                  Pay {payee(x.receiver_id)}
                   <span className="num">{amt(x.amount, d)}</span>
                 </b>
                 <span>{x.reason}</span>
@@ -287,7 +321,7 @@ function Decisions({ rows, d }: { rows: Proposal[]; d: VaultData }) {
         <li key={x.id}>
           <div className="dec-line">
             <span className={`pill ${PILL[x.status].cls}`}>{PILL[x.status].label}</span>
-            <b>Pay {x.receiver_id}</b>
+            <b>Pay {payee(x.receiver_id)}</b>
             <span className="dec-amt num">{amt(x.amount, d)}</span>
             <span className="muted small">{ago(x.created_at_ms)}</span>
           </div>
@@ -340,6 +374,16 @@ function checksFor(x: Proposal, d: VaultData): Check[] {
   const spent = BigInt(d.policy.spent_today);
   const blocked = d.policy.blocklist.includes(x.receiver_id);
   const enough = BigInt(d.balance) >= amount;
+  if (x.evm) {
+    return [
+      { label: "Not on the blocklist", ok: !blocked, bad: blocked, result: blocked ? "Blocked" : "Pass" },
+      { label: "Only the vault's USDC on its EVM route", ok: true, result: "Pass" },
+      { label: `Gas capped at ${x.evm.gas_limit.toLocaleString()} units`, ok: true, result: "Pass" },
+      { label: "Built and hashed by the vault, signed by NEAR's MPC network", ok: true, result: "Pass" },
+      { label: "Destination allowlisted", ok: d.policy.allowlist.includes(x.receiver_id), result: d.policy.allowlist.includes(x.receiver_id) ? "Pass" : "Needs you" },
+      { label: "Payments running", ok: !d.policy.paused, bad: d.policy.paused, result: d.policy.paused ? "Paused" : "Pass" },
+    ];
+  }
   return [
     { label: "Not on the blocklist", ok: !blocked, bad: blocked, result: blocked ? "Blocked" : "Pass" },
     { label: "Destination allowlisted", ok: d.policy.allowlist.includes(x.receiver_id), result: d.policy.allowlist.includes(x.receiver_id) ? "Pass" : "Needs you" },
@@ -361,6 +405,9 @@ export function Approvals(p: PageProps) {
   const [verdict, setVerdict] = useState<{ band: string; reason: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const now = useNow(pending.some((x) => x.valid_until_ms));
+  const expired = !!(selected?.status === "pending" && selected.valid_until_ms && selected.valid_until_ms <= now);
+  const route = selected ? routeOf(selected) : null;
 
   useEffect(() => {
     setVerdict(null);
@@ -375,7 +422,9 @@ export function Approvals(p: PageProps) {
     setBusy(true);
     setError(null);
     try {
-      await p.send(p.vaultId, method, { proposal_id: selected.id }, { deposit: "1", gas: method === "approve" ? "100000000000000" : "30000000000000" });
+      // An EVM approval waits for NEAR's MPC network to sign, which needs more gas.
+      const gas = method === "reject" ? "30000000000000" : selected.evm ? "300000000000000" : "100000000000000";
+      await p.send(p.vaultId, method, { proposal_id: selected.id }, { deposit: "1", gas });
       await p.reload();
     } catch (e) {
       setError(/reject|cancel/i.test(String(e)) ? "You cancelled the transaction in your wallet." : String(e));
@@ -405,14 +454,15 @@ export function Approvals(p: PageProps) {
             list.map((x) => (
               <button key={x.id} className={`q-item ${selected?.id === x.id ? "on" : ""}`} onClick={() => setSelectedId(x.id)}>
                 <span className="q-row">
-                  <span className={`pill ${PILL[x.status].cls}`}>{x.status === "pending" ? "Payment" : PILL[x.status].label}</span>
+                  <span className={`pill ${PILL[x.status].cls}`}>{x.status === "pending" ? (routeOf(x).kind === "near" ? "Payment" : "Cross-chain move") : PILL[x.status].label}</span>
                   <span className="muted tiny">{ago(x.created_at_ms)}</span>
                 </span>
                 <span className="q-row">
-                  <b>Pay {x.receiver_id}</b>
-                  <span className="num">{amt(x.amount, d)}</span>
+                  <b>Pay {payee(x.receiver_id)}</b>
+                  <span className="num">{x.evm ? `${usd(x.amount, d)} USDC` : amt(x.amount, d)}</span>
                 </span>
                 <span className="muted small">{x.reason}</span>
+                {x.status === "pending" && x.valid_until_ms ? <span className={`tiny ${x.valid_until_ms <= now ? "bad-t" : "brass"}`}>{expiryText(x.valid_until_ms, now)}</span> : null}
               </button>
             ))
           )}
@@ -424,27 +474,42 @@ export function Approvals(p: PageProps) {
               <span className={`pill ${PILL[selected.status].cls}`}>{selected.status === "pending" ? "Needs your approval" : PILL[selected.status].label}</span>
               <span className="muted small">Proposal #{selected.id}, created by Keel {ago(selected.created_at_ms)}</span>
             </div>
-            <h2 className="ad-title">Pay {selected.receiver_id}</h2>
-            <Amount raw={selected.amount} d={d} />
+            <h2 className="ad-title">Pay {payee(selected.receiver_id)}</h2>
+            <Amount raw={selected.amount} d={d} symbol={selected.evm ? `USDC on ${route?.chain}` : undefined} />
+            {selected.status === "pending" && selected.valid_until_ms ? (
+              <p className={`small ${expired ? "bad-t" : "brass"}`}>{expiryText(selected.valid_until_ms, now)}</p>
+            ) : null}
+            {selected.evm_signed ? (
+              <p className="small">
+                Signed transfer:{" "}
+                <a href={`${EVM_CHAINS[selected.evm!.chain_id]?.explorer}/tx/${selected.evm_signed.tx_hash}`} target="_blank" rel="noreferrer" className="mono">
+                  {short(selected.evm_signed.tx_hash)}
+                </a>
+              </p>
+            ) : null}
 
             <div className="flow">
               <div className="flow-box">
-                <span className="muted small">NEAR</span>
+                <span className="muted small">{route?.kind === "evm" ? route.chain : "NEAR"}</span>
                 <b>{companyName(p.vaultId)} vault</b>
-                <span className="small num">
-                  {usd(d.balance, d)} → {after < 0n ? `short ${usd(-after, d)}` : usd(after, d)}
-                </span>
+                {route?.kind === "evm" ? (
+                  <span className="small">Its own {route.chain} address</span>
+                ) : (
+                  <span className="small num">
+                    {usd(d.balance, d)} → {after < 0n ? `short ${usd(-after, d)}` : usd(after, d)}
+                  </span>
+                )}
               </div>
               <div className="flow-arrow">
                 <svg viewBox="0 0 130 12" aria-hidden="true">
                   <path d="M0 6 H124 M118 1 L126 6 L118 11" stroke="#0b5c55" strokeWidth="1.8" fill="none" />
                 </svg>
-                <span className="teal small">Paid by the vault</span>
-                <span className="muted tiny">ft_transfer on NEAR</span>
+                <span className="teal small">{route?.label}</span>
+                <span className="muted tiny">{route?.detail}</span>
               </div>
               <div className="flow-box">
-                <span className="muted small">NEAR</span>
-                <b>{selected.receiver_id}</b>
+                <span className="muted small">{route?.chain}</span>
+                <b className={route?.kind === "near" ? "" : "mono"}>{route?.kind === "near" ? selected.receiver_id : short(selected.receiver_id)}</b>
                 <span className="small">{d.policy.allowlist.includes(selected.receiver_id) ? "Allowlisted payee" : "Not on your payee list"}</span>
               </div>
             </div>
@@ -485,8 +550,8 @@ export function Approvals(p: PageProps) {
                 {p.canAct && (
                   <span className="q-act">
                     <button className="btn danger" disabled={busy} onClick={() => act("reject")}>Reject</button>
-                    <button className="btn primary" disabled={busy || d.policy.paused} onClick={() => act("approve")}>
-                      {busy ? "Approve in wallet" : "Approve and sign"}
+                    <button className="btn primary" disabled={busy || d.policy.paused || expired} onClick={() => act("approve")}>
+                      {busy ? "Approve in wallet" : expired ? "Offer expired" : "Approve and sign"}
                     </button>
                   </span>
                 )}
@@ -557,7 +622,7 @@ export function Activity(p: PageProps) {
               {rows.map((x) => (
                 <tr key={x.id}>
                   <td className="muted">{when(x.created_at_ms)}</td>
-                  <td>Pay {x.receiver_id}</td>
+                  <td>Pay {payee(x.receiver_id)}</td>
                   <td>Treasury vault</td>
                   <td className="r num">{usd(x.amount, d)}</td>
                   <td><span className={`pill ${PILL[x.status].cls}`}>{PILL[x.status].label}</span></td>
@@ -676,7 +741,8 @@ export function Rules(p: PageProps) {
 
 export function Wallets(p: PageProps) {
   const d = p.data;
-  const pending = d.proposals.filter((x) => x.status === "pending");
+  // Bills paid from the vault's Base address do not draw on the NEAR balance.
+  const pending = d.proposals.filter((x) => x.status === "pending" && !x.evm);
   let running = BigInt(d.balance);
   const plan = pending.map((x) => {
     running -= BigInt(x.amount);
@@ -696,10 +762,7 @@ export function Wallets(p: PageProps) {
       <div className="wallets-grid">
         <div className="stack">
           <VaultCard p={p} selected />
-          <section className="card card-pad add-wallet">
-            <b>Add a wallet on another chain</b>
-            <span className="muted small">Comes with NEAR Intents</span>
-          </section>
+          <EvmWalletCard vaultId={p.vaultId} />
         </div>
         <section className="card card-pad w-detail">
           <div className="card-head">
@@ -717,7 +780,7 @@ export function Wallets(p: PageProps) {
               {plan.map(({ x, after }) => (
                 <tr key={x.id}>
                   <td className="muted">Pending</td>
-                  <td>Pay {x.receiver_id}, proposal #{x.id} <span className="pill warn">Waiting</span></td>
+                  <td>Pay {payee(x.receiver_id)}, proposal #{x.id} <span className="pill warn">Waiting</span></td>
                   <td className="r num">-{usd(x.amount, d)}</td>
                   <td className={`r num ${after < 0n ? "bad-t" : ""}`}>{after < 0n ? `-${usd(-after, d)}` : usd(after, d)}</td>
                 </tr>
@@ -745,3 +808,35 @@ export function Wallets(p: PageProps) {
   );
 }
 
+
+/** The vault's own Base address, controlled through NEAR Chain Signatures. */
+function EvmWalletCard({ vaultId }: { vaultId: string }) {
+  const [w, setW] = useState<EvmWallet | null | undefined>(undefined);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setW(undefined);
+    evmWallet(vaultId).then(setW).catch(() => setW(null));
+  }, [vaultId]);
+  if (w === undefined) return <section className="card card-pad add-wallet"><span className="muted small">Reading the vault's Base address…</span></section>;
+  if (w === null)
+    return (
+      <section className="card card-pad add-wallet">
+        <b>No wallet on another chain</b>
+        <span className="muted small">Vaults created before Chain Signatures pay only on NEAR. Create a new vault to get a Base address.</span>
+      </section>
+    );
+  const copy = () => navigator.clipboard?.writeText(w.address).then(() => setCopied(true)).catch(() => {});
+  return (
+    <section className="card card-pad evm-wallet">
+      <div className="q-row">
+        <b>Vault on {w.chain.name}</b>
+        <span className="tag">Chain Signatures</span>
+      </div>
+      <a className="mono small" href={`${w.chain.explorer}/address/${w.address}`} target="_blank" rel="noreferrer">{short(w.address)}</a>
+      <span className="num">{formatToken(w.usdc, 6)} USDC</span>
+      <span className="muted small">{formatToken(w.eth, 18)} ETH for gas</span>
+      <span className="muted small">Only this vault can sign for this address, through NEAR's MPC network, after you approve. Keel pays {w.chain.name} bills from here when NEAR Intents is unavailable.</span>
+      <button className="btn" onClick={copy}>{copied ? "Copied" : "Copy address to fund it"}</button>
+    </section>
+  );
+}

@@ -458,3 +458,5 @@ input:focus, textarea:focus { outline: none; border-color: var(--teal); box-shad
   .table-card { overflow-x: auto; }
   .agent-actions { width: 100%; }
 }
+.evm-wallet { display: flex; flex-direction: column; gap: 6px; }
+.evm-wallet .btn { align-self: flex-start; margin-top: 4px; }
