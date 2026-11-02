@@ -88,14 +88,14 @@ fn new_vault_has_no_policy_and_needs_approval_for_everything() {
 fn new_vault_refuses_agent_payments_until_owner_sets_policy() {
     let mut v = fresh_vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(1 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(1 * USDC), None, None);
 }
 
 #[test]
 fn agent_pays_allowlisted_payee_under_cap() {
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, None);
     assert_eq!(v.get_policy().spent_today, U128(80 * USDC));
     assert!(get_logs().iter().any(|l| l.contains("payment_started")));
 }
@@ -105,7 +105,7 @@ fn agent_pays_allowlisted_payee_under_cap() {
 fn refuses_payment_over_cap() {
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(101 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(101 * USDC), None, None);
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn refuses_payment_over_cap() {
 fn refuses_new_payee() {
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("stranger.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("stranger.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn refuses_blocklisted_payee() {
     // The attack demo: even if the agent is tricked, the vault says no.
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("scam.testnet"), U128(1 * USDC), None);
+    let _ = v.execute_payment(acc("scam.testnet"), U128(1 * USDC), None, None);
 }
 
 #[test]
@@ -131,9 +131,9 @@ fn refuses_after_daily_cap() {
     let mut v = vault();
     as_agent(DAY);
     for _ in 0..5 {
-        let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None);
+        let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None, None);
     }
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(1 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(1 * USDC), None, None);
 }
 
 #[test]
@@ -141,10 +141,10 @@ fn daily_cap_resets_next_day() {
     let mut v = vault();
     as_agent(DAY);
     for _ in 0..5 {
-        let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None);
+        let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None, None);
     }
     as_agent(2 * DAY + 1);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None, None);
     assert_eq!(v.get_policy().spent_today, U128(100 * USDC));
 }
 
@@ -153,7 +153,7 @@ fn daily_cap_resets_next_day() {
 fn only_agent_can_execute() {
     let mut v = vault();
     set_ctx("someone.testnet", DAY, 0);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn pause_blocks_everything_until_resume() {
     as_owner(DAY);
     v.resume();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn paused_vault_refuses_payment() {
     as_owner(DAY);
     v.pause();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn proposal_flow_approve() {
         U128(8_000 * USDC),
         None,
         "Payroll short 6,920 for Nov 7".into(),
-        None, None,
+        None, None, None,
     );
     assert_eq!(id, 1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Pending);
@@ -241,7 +241,7 @@ fn proposal_flow_approve() {
 fn proposal_flow_reject() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None, None);
     as_owner(DAY);
     v.reject(1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Rejected);
@@ -252,7 +252,7 @@ fn proposal_flow_reject() {
 fn agent_cannot_approve_its_own_proposal() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None, None);
     as_agent_with_deposit(DAY, 1);
     let _ = v.approve(1);
 }
@@ -262,7 +262,7 @@ fn agent_cannot_approve_its_own_proposal() {
 fn blocklisted_payee_is_never_proposed() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into(), None, None);
+    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into(), None, None, None);
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn blocklisted_payee_is_never_proposed() {
 fn approval_refused_if_payee_blocked_later() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None);
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None, None, None);
     as_owner(DAY);
     v.update_policy(
         PolicyUpdate {
@@ -323,7 +323,7 @@ fn rotating_agent_key_locks_out_old_one() {
     let _ = v.set_agent_key(pk(OTHER_KEY));
     assert_eq!(v.get_policy().agent_key, Some(pk(OTHER_KEY)));
     ctx(VAULT, OTHER_KEY, DAY, 0);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -333,7 +333,7 @@ fn old_agent_key_refused_after_rotation() {
     as_owner(DAY);
     let _ = v.set_agent_key(pk(OTHER_KEY));
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -345,7 +345,7 @@ fn revoked_agent_can_do_nothing() {
     assert_eq!(v.get_policy().agent_key, None);
     assert!(get_logs().iter().any(|l| l.contains("agent_revoked")));
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -362,7 +362,7 @@ fn another_key_on_the_vault_is_not_the_agent() {
     // Even a call from the vault's own account is refused unless the agent key signed it.
     let mut v = vault();
     ctx(VAULT, OTHER_KEY, DAY, 0);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
@@ -370,14 +370,14 @@ fn another_key_on_the_vault_is_not_the_agent() {
 fn agent_key_from_another_account_is_refused() {
     let mut v = vault();
     ctx("agent.kora.testnet", AGENT_KEY, DAY, 0);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
 }
 
 #[test]
 fn failed_transfer_is_refunded_to_daily_cap() {
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(100 * USDC), None, None);
     assert_eq!(v.get_policy().spent_today, U128(100 * USDC));
 
     // The token transfer fails; the callback runs as the vault itself.
@@ -392,7 +392,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
         Default::default(),
         vec![PromiseResult::Failed],
     );
-    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), Some(1));
+    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), Some(1), None);
     assert!(!ok);
     assert_eq!(v.get_policy().spent_today, U128(0));
     assert!(get_logs().iter().any(|l| l.contains("payment_failed")));
@@ -402,7 +402,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
 fn approved_proposal_marked_executed_on_success() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into(), None, None);
+    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into(), None, None, None);
     as_owner(DAY);
     let _ = v.approve(1);
 
@@ -417,7 +417,7 @@ fn approved_proposal_marked_executed_on_success() {
         Default::default(),
         vec![PromiseResult::Successful(vec![])],
     );
-    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), None));
+    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), None, None));
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Executed);
 }
 
@@ -445,7 +445,7 @@ fn agent_cannot_withdraw() {
 fn failed_owner_withdrawal_does_not_touch_agent_cap() {
     let mut v = vault();
     as_agent(DAY);
-    let _ = v.execute_payment(acc("northwind.testnet"), U128(60 * USDC), None);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(60 * USDC), None, None);
     testing_env!(
         VMContextBuilder::new()
             .current_account_id(acc("vault.kora.testnet"))
@@ -457,7 +457,7 @@ fn failed_owner_withdrawal_does_not_touch_agent_cap() {
         Default::default(),
         vec![PromiseResult::Failed],
     );
-    v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None);
+    v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None, None);
     assert_eq!(v.get_policy().spent_today, U128(60 * USDC));
 }
 
@@ -468,7 +468,7 @@ fn intents_offer_can_be_approved_before_it_expires() {
     let mut v = vault();
     as_agent(DAY);
     let deadline = DAY / MS + 10 * 60 * 1000; // ten minutes from now, in ms
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base via NEAR Intents".into(), Some(deadline), None);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base via NEAR Intents".into(), Some(deadline), None, None);
     assert_eq!(v.get_proposal(1).unwrap().valid_until_ms, Some(deadline));
     as_owner(DAY + 5 * 60 * 1_000_000_000);
     let _ = v.approve(1);
@@ -481,7 +481,7 @@ fn expired_intents_offer_is_never_paid() {
     let mut v = vault();
     as_agent(DAY);
     let deadline = DAY / MS + 10 * 60 * 1000;
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base".into(), Some(deadline), None);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base".into(), Some(deadline), None, None);
     as_owner(DAY + 11 * 60 * 1_000_000_000);
     let _ = v.approve(1);
 }
@@ -491,7 +491,7 @@ fn expired_intents_offer_is_never_paid() {
 fn cannot_propose_an_offer_that_already_expired() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "stale".into(), Some(DAY / MS - 1), None);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "stale".into(), Some(DAY / MS - 1), None, None);
 }
 
 // ------------------------------------------------------- Chain Signatures (EVM)
@@ -515,7 +515,7 @@ fn evm_transfer() -> EvmTransfer {
 fn propose_evm(v: &mut KeelVault, e: EvmTransfer) -> u64 {
     as_agent(DAY);
     let to = e.to.to_lowercase();
-    v.propose_payment(acc(&to), U128(5 * USDC), None, "Pay Base invoice".into(), Some(DAY / MS + 30 * 60 * 1000), Some(e))
+    v.propose_payment(acc(&to), U128(5 * USDC), None, "Pay Base invoice".into(), Some(DAY / MS + 30 * 60 * 1000), Some(e), None)
 }
 
 #[test]
@@ -625,7 +625,7 @@ fn evm_bill_with_too_much_gas_is_refused() {
 fn evm_receiver_must_match_the_payee() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("northwind.testnet"), U128(5 * USDC), None, "x".into(), None, Some(evm_transfer()));
+    v.propose_payment(acc("northwind.testnet"), U128(5 * USDC), None, "x".into(), None, Some(evm_transfer()), None);
 }
 
 #[test]
@@ -672,4 +672,154 @@ fn owner_can_withdraw_from_the_evm_address() {
     let p = v.get_proposal(1).unwrap();
     assert_eq!(p.status, ProposalStatus::Signing);
     assert_eq!(p.receiver_id.as_str(), PAYEE_EVM);
+}
+
+// ------------------------------------------------------ each bill paid once
+
+fn bill(r: &str) -> Option<String> {
+    Some(r.to_string())
+}
+
+fn callback_result(ok: bool) {
+    testing_env!(
+        VMContextBuilder::new().current_account_id(acc(VAULT)).predecessor_account_id(acc(VAULT)).block_timestamp(DAY).build(),
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![if ok { PromiseResult::Successful(vec![]) } else { PromiseResult::Failed }],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: this bill was already paid")]
+fn agent_cannot_pay_the_same_bill_twice() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    assert!(v.bill_paid_at("nw-nov".into()).is_some());
+    // The agent restarts, forgets, and tries again.
+    as_agent(DAY + 60_000_000_000);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+}
+
+#[test]
+fn different_bills_to_the_same_payee_are_both_paid() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-dec"));
+    assert_eq!(v.get_policy().spent_today, U128(160 * USDC));
+}
+
+#[test]
+fn a_failed_transfer_frees_the_bill_to_be_paid_again() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    callback_result(false);
+    v.on_payment_done(None, acc("northwind.testnet"), U128(80 * USDC), Some(1), bill("nw-nov"));
+    assert_eq!(v.bill_paid_at("nw-nov".into()), None);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: this bill was already paid")]
+fn a_paid_bill_cannot_be_proposed() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    v.propose_payment(acc("northwind.testnet"), U128(80 * USDC), None, "again".into(), None, None, bill("nw-nov"));
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: this bill was already paid")]
+fn approving_a_bill_already_paid_is_refused() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("northwind.testnet"), U128(80 * USDC), None, "waiting".into(), None, None, bill("nw-nov"));
+    // Later the agent pays the same bill directly, inside the caps.
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    as_owner(DAY);
+    let _ = v.approve(1);
+}
+
+#[test]
+fn a_newer_proposal_for_the_same_bill_replaces_the_old_one() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "quote 1".into(), None, None, bill("base-oct"));
+    v.propose_payment(acc("deposit2.1click.near"), U128(5 * USDC), None, "quote 2".into(), None, None, bill("base-oct"));
+    assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Superseded);
+    assert_eq!(v.get_proposal(2).unwrap().status, ProposalStatus::Pending);
+    assert!(get_logs().iter().any(|l| l.contains("proposal_superseded")));
+}
+
+#[test]
+#[should_panic(expected = "proposal is not pending")]
+fn a_superseded_proposal_cannot_be_approved() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "quote 1".into(), None, None, bill("base-oct"));
+    v.propose_payment(acc("deposit2.1click.near"), U128(5 * USDC), None, "quote 2".into(), None, None, bill("base-oct"));
+    as_owner(DAY);
+    let _ = v.approve(1);
+}
+
+#[test]
+fn approving_marks_the_bill_paid_and_rejecting_does_not() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("atlas.testnet"), U128(50 * USDC), None, "a".into(), None, None, bill("atlas-1"));
+    v.propose_payment(acc("atlas.testnet"), U128(50 * USDC), None, "b".into(), None, None, bill("atlas-2"));
+    as_owner(DAY);
+    let _ = v.approve(1);
+    v.reject(2);
+    assert!(v.bill_paid_at("atlas-1".into()).is_some());
+    assert_eq!(v.bill_paid_at("atlas-2".into()), None);
+    // A rejected bill can be proposed again.
+    as_agent(DAY);
+    assert_eq!(v.propose_payment(acc("atlas.testnet"), U128(50 * USDC), None, "c".into(), None, None, bill("atlas-2")), 3);
+}
+
+#[test]
+fn a_failed_mpc_signature_frees_the_bill() {
+    let mut v = vault();
+    as_agent(DAY);
+    let to = PAYEE_EVM.to_string();
+    v.propose_payment(acc(&to), U128(5 * USDC), None, "base".into(), None, Some(evm_transfer()), bill("base-oct"));
+    as_owner(DAY);
+    let _ = v.approve(1);
+    assert!(v.bill_paid_at("base-oct".into()).is_some());
+    callback_result(false);
+    assert!(v.on_evm_signed(1).is_none());
+    assert_eq!(v.bill_paid_at("base-oct".into()), None);
+}
+
+#[test]
+fn owner_can_release_a_bill_that_never_arrived() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    as_owner(DAY);
+    v.release_bill("nw-nov".into());
+    assert_eq!(v.bill_paid_at("nw-nov".into()), None);
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn only_the_owner_can_release_a_bill() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
+    ctx(VAULT, AGENT_KEY, DAY, 1);
+    v.release_bill("nw-nov".into());
+}
+
+#[test]
+#[should_panic(expected = "bill_ref must be 1 to 64 characters")]
+fn bill_ref_must_be_short() {
+    let mut v = vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, Some("x".repeat(65)));
 }

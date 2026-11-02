@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepares one vault for `npm run demo` on testnet.
 #
-#   OWNER=keel-owner.testnet VAULT=nova.keel.testnet scripts/setup-demo-testnet.sh
+#   OWNER=keel-owner.testnet VAULT=orbit.keel.testnet scripts/setup-demo-testnet.sh
 #
 # 1. Creates the demo payees from the faucet (free testnet accounts).
 # 2. Signs update_policy as the owner: 100 per payment, 500 per day,
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 : "${OWNER:?Set OWNER, the vault owner, for example OWNER=keel-owner.testnet}"
-: "${VAULT:?Set VAULT, for example VAULT=nova.keel.testnet}"
+: "${VAULT:?Set VAULT, for example VAULT=orbit.keel.testnet}"
 TOKEN="${TOKEN:-usdc.keel-owner.testnet}"
 NET=testnet
 PAYEES=(northwind-keel.testnet atlas-keel.testnet payroll-keel.testnet scam-keel.testnet)

@@ -152,7 +152,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
           if (!h.evmTx) {
             if ((await broadcast(p.evm.chain_id, raw_tx as `0x${string}`, tx_hash as `0x${string}`)) === "stale") {
               delete handled[id];
-              say("reconcile", `${id}: #${p.id} was signed with a nonce another transfer already used; Keel will propose it again`);
+              say("reconcile", `${id}: #${p.id} was signed with a nonce another transfer already used, so it never arrived. The vault still counts the bill as paid; once you confirm, call release_bill("${p.bill_ref ?? id}") and Keel will propose it again`);
               continue;
             }
             h.evmTx = tx_hash;
@@ -180,10 +180,14 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   dueBy.setUTCDate(dueBy.getUTCDate() + o.lookaheadDays);
   const due = open.filter((b) => new Date(`${b.due}T00:00:00Z`) <= dueBy).sort((a, b) => a.due.localeCompare(b.due));
   let available = balance;
+  // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
+  const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);
+  const ref = (bill: Bill) => (remembers ? { bill_ref: bill.id } : {});
 
   for (const bill of due) {
+    if (remembers && (await recall(chain, vaultId, bill, proposals, handled, o.dryRun, say))) continue;
     if (isCrossChain(bill)) {
-      await crossChain(cfg, chain, vaultId, bill, policy.token_id, proposals, handled, money, o.dryRun, say);
+      await crossChain(cfg, chain, vaultId, bill, policy.token_id, proposals, handled, money, o.dryRun, say, ref(bill));
       continue;
     }
     const acct = await chain.account(bill.payee);
@@ -222,13 +226,13 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     }
     try {
       if (action.kind === "pay") {
-        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id });
+        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) });
         handled[bill.id] = { action: "pay", tx: r.hash, at: new Date().toISOString() };
         available -= bill.amount;
         say("act", `paid alone: ${action.reason}`, r.hash);
       } else {
         const why = await explain(cfg, { company: vaultId.split(".")[0], payee: bill.payee, amount: money(bill.amount), due: bill.due, rule: action.reason, memo: bill.memo });
-        const r = await chain.callAsAgent(vaultId, "propose_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, reason: why.text });
+        const r = await chain.callAsAgent(vaultId, "propose_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, reason: why.text, ...ref(bill) });
         handled[bill.id] = { action: "propose", tx: r.hash, proposalId: Number(r.value), at: new Date().toISOString() };
         say("act", `proposed #${r.value} for the owner (${why.by === "near-ai" ? "reason written by NEAR AI" : "templated reason"}): ${why.text}`, r.hash);
       }
@@ -250,6 +254,34 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   for (const d of drafts) {
     say("learn", `rule draft for ${d.payee}: raise the cap from ${money(d.currentCap)} to ${money(d.suggestedCap)} after approvals of ${d.evidence.map(money).join(", ")}. Only the owner can apply it.`);
   }
+}
+
+/**
+ * Rebuilds Keel's memory of one bill from the vault, so losing state.json
+ * never leads to paying twice. Returns true when the bill needs no action.
+ */
+async function recall(
+  chain: Chain,
+  vaultId: string,
+  bill: Bill,
+  proposals: Proposal[],
+  handled: State["handled"][string],
+  dryRun: boolean,
+  say: (step: string, text: string, tx?: string) => void,
+): Promise<boolean> {
+  const paidAt = await chain.view<number | null>(vaultId, "bill_paid_at", { bill_ref: bill.id });
+  const open = proposals.find(
+    (p) => p.bill_ref === bill.id && (["signing", "signed", "executing"].includes(p.status) || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > Date.now()))),
+  );
+  if (!paidAt && !open) return false;
+  const at = new Date(paidAt ?? open!.created_at_ms).toISOString();
+  if (!dryRun) {
+    handled[bill.id] = open
+      ? { action: open.evm || open.valid_until_ms ? "bridge" : "propose", route: open.evm ? "chain-signatures" : open.valid_until_ms ? "intents" : undefined, depositAddress: open.evm ? undefined : open.receiver_id, proposalId: open.id, at }
+      : { action: "paid-before", at };
+  }
+  say("check", `${bill.memo ?? bill.id}: ${open ? `already proposed as #${open.id}, waiting for the owner` : `the vault already paid this bill (${at.slice(0, 16).replace("T", " ")} UTC)`}; nothing to do`);
+  return true;
 }
 
 /** How many transactions the vault's EVM address has sent: the next nonce. */
@@ -283,12 +315,13 @@ async function crossChain(
   money: (u: bigint) => string,
   dryRun: boolean,
   say: (step: string, text: string, tx?: string) => void,
+  billRef: object,
 ) {
   const label = `${bill.memo ?? bill.id}: ${money(bill.amount)} to ${bill.payee} on ${bill.chain}, due ${bill.due}`;
   const tried: string[] = [];
   for (const route of [viaIntents, viaChainSignatures]) {
     try {
-      const done = await route(cfg, chain, vaultId, bill, tokenId, proposals, handled, label, dryRun, say);
+      const done = await route(cfg, chain, vaultId, bill, tokenId, proposals, handled, label, dryRun, say, billRef);
       if (done) return;
     } catch (e) {
       tried.push(`${route.name.replace(/^via/, "")}: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`);
@@ -308,9 +341,10 @@ type Route = (
   label: string,
   dryRun: boolean,
   say: (step: string, text: string, tx?: string) => void,
+  billRef: object,
 ) => Promise<boolean>;
 
-const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals, handled, label, dryRun, say) => {
+const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals, handled, label, dryRun, say, billRef) => {
   if (cfg.network !== "mainnet") throw new Error("NEAR Intents runs on mainnet only");
   await intentsTokens(); // health check: throws while 1Click is down
   const from = await chain.view<{ symbol: string }>(tokenId, "ft_metadata");
@@ -337,13 +371,14 @@ const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals,
     memo: bill.memo ?? bill.id,
     reason: reason.slice(0, 270),
     valid_until_ms: validUntil,
+    ...billRef,
   });
   handled[bill.id] = { action: "bridge", route: "intents", tx: r.hash, proposalId: Number(r.value), depositAddress: q.depositAddress, at: new Date().toISOString() };
   say("act", `proposed cross-chain move #${r.value}: ${reason}`, r.hash);
   return true;
 };
 
-const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say) => {
+const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say, billRef) => {
   const info = await vaultRoute(chain, vaultId);
   if (!info) throw new Error("this vault was created before Chain Signatures");
   if (!info.route) throw new Error("the owner turned the vault's EVM route off");
@@ -372,6 +407,7 @@ const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, p
     reason: reason.slice(0, 270),
     valid_until_ms: validUntil,
     evm,
+    ...billRef,
   });
   handled[bill.id] = { action: "bridge", route: "chain-signatures", tx: r.hash, proposalId: Number(r.value), at: new Date().toISOString() };
   say("act", `proposed cross-chain move #${r.value}: ${reason}`, r.hash);

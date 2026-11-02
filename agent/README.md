@@ -11,13 +11,14 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 
 ## Demo: one full loop in a few seconds
 
-1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=nova.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
+1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=orbit.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
 2. Run `npm run demo`. You see, for the four bills in `../config/bills.json`:
    - **Northwind Hosting, 80**: paid alone, with a transaction link.
    - **Atlas Freight, 132**: proposed for the owner, because Atlas is not on the allowlist.
    - **"URGENT: supplier changed bank details", 950**: refused before signing, because the payee is on the blocklist. This is the prompt-injection case: the bill's text asks for urgency, the rules do not care.
    - **Contractor payroll, 450**: proposed, because it is over the 100 per-payment cap.
 3. Open the app's Approvals page for the vault. You see the two proposals waiting, with Keel's reasons.
+4. Run `npm run demo` again. You see Keel report Northwind as already paid by the vault and Atlas and payroll as already proposed, and nothing is signed. The vault pays each bill once, so a fresh demo needs a fresh vault.
 
 ## How it decides
 

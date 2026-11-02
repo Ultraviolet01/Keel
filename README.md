@@ -14,7 +14,7 @@ Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`busin
 
 Everything below runs on NEAR testnet and costs nothing.
 
-**Fastest path:** run `cd agent && npm install && npm run demo -- --dry-run`. In a few seconds you see one full loop on `nova.keel.testnet`: Keel reads the vault, forecasts 14 days, checks each bill's payee, and decides to pay, propose or refuse, with nothing signed. To sign for real, prepare the vault once with `scripts/setup-demo-testnet.sh` and drop `--dry-run`; details in [agent/README.md](agent/README.md).
+**Fastest path:** run `cd agent && npm install && npm run demo -- --dry-run`. In a few seconds you see one full loop on `orbit.keel.testnet`: Keel reads the vault, forecasts 14 days, checks each bill's payee, and refuses the scam bill, with nothing signed. The vault has already paid Northwind and holds proposals for Atlas and payroll, so Keel says so and does not act on them again. To sign for real, prepare the vault once with `scripts/setup-demo-testnet.sh` and drop `--dry-run`; details in [agent/README.md](agent/README.md).
 
 1. **Install.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm install`. You see the install finish with no errors.
 2. **Configure.** Run `cp .env.example .env` and fill in an owner and an agent testnet account. You see both account ids printed by `npm run check-env`.
@@ -52,8 +52,10 @@ The vault holds the USDC and the rules, and decides every payment's band itself.
 
 | Method | Who can call it | What it does |
 | --- | --- | --- |
-| `execute_payment` | Agent key | Pays an allowlisted payee if the amount is within the per-payment and daily caps |
-| `propose_payment` | Agent key | Files a proposal for anything over the threshold, a new payee or a cross-chain swap |
+| `execute_payment` | Agent key | Pays an allowlisted payee if the amount is within the per-payment and daily caps, and the bill (`bill_ref`) was not paid before |
+| `propose_payment` | Agent key | Files a proposal for anything over the threshold, a new payee or a cross-chain swap. A newer proposal for the same bill replaces the waiting one |
+| `bill_paid_at` | Anyone (view) | When the vault paid a bill, or `null` |
+| `release_bill` | Owner key | Lets a bill be paid again, after the owner confirms a payment never arrived |
 | `check_payment` | Anyone (view) | Returns the band a payment would land in, without moving money |
 | `approve` / `reject` | Owner key | Executes or closes a proposal |
 | `update_policy` | Owner key | Changes caps, allowlist, blocklist or threshold, and logs old value, new value and reason |
@@ -72,9 +74,13 @@ Two token details the vault handles itself: it attaches the 1 yoctoNEAR that `ft
 
 Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot attach a deposit, so only the owner's full-access key can approve, change the policy or pause.
 
-**Check the rules yourself:** run `cd contract && cargo test`. You see 50 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing`, `pause_blocks_everything_until_resume`, `evm_bill_with_a_huge_fee_is_refused` and `signing_hash_matches_an_independent_encoder`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
+**Check the rules yourself:** run `cd contract && cargo test`. You see 62 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing`, `pause_blocks_everything_until_resume`, `evm_bill_with_a_huge_fee_is_refused`, `signing_hash_matches_an_independent_encoder`, `agent_cannot_pay_the_same_bill_twice` and `a_failed_transfer_frees_the_bill_to_be_paid_again`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
 
 ## Security
+
+**Each bill is paid once, enforced by the vault.** Keel tags every payment and proposal with the bill's id. The vault records each bill it pays and refuses a second payment (`Keel Vault refused: this bill was already paid`), even if the agent restarts with no memory or is tricked into retrying. A failed transfer frees the bill again. At startup Keel reads `bill_paid_at` and the vault's proposals, so a lost `agent/state.json` never causes a double payment.
+
+1. Run `cd agent && rm -f state.json && npm run agent -- --once --vault orbit.keel.testnet`. You see `the vault already paid this bill` for Northwind and `already proposed as #1` for Atlas, and nothing is signed.
 
 The agent never holds a key that can move money freely. Limits live in the contract, so a compromised or prompt-injected agent still cannot overspend.
 
@@ -115,6 +121,7 @@ Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can rea
 | `keel.testnet` | Keel factory: creates a vault for each company a founder adds (up to 20 per founder) |
 | `nova.keel.testnet` | A company vault owned by `keel-owner.testnet`, with Keel's agent key `ed25519:GZ1zQGxc…` added by the factory at sign-up; no policy set |
 | `kora.keel.testnet`, `lumen.keel.testnet` | Earlier vaults for the same founder, from before the agent key moved onto the vault; they use the separate agent account `agent.keel.testnet` |
+| `orbit.keel.testnet` | The demo vault for `npm run demo`, owned by `keel-owner.testnet`, created with the code that pays each bill once |
 | `vega.keel.testnet` | A vault created with the Chain Signatures code, owned by `vega-founder.testnet`. Its Base Sepolia address is `0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed` |
 | `usdc.keel-owner.testnet` | Keel Test USDC |
 
@@ -128,7 +135,8 @@ Checked live:
 7. **The agent runs the demo.** After `scripts/setup-demo-testnet.sh` (Nova's policy: 100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked; 1,000 test USDC), `npm run demo` took 9.6 s: it paid Northwind Hosting 80 alone ([transaction](https://testnet.nearblocks.io/txns/Da5R9fRbMDYnRoVeyadGMD4ikgFUY8fQZir93Lb6ZQyS)), proposed Atlas Freight 132 as #3 because Atlas is not allowlisted ([transaction](https://testnet.nearblocks.io/txns/7vdd1dT2t3cWxUUBxSPCyG74aHwt9Q6LVp7NGupWVs2f)), refused the "URGENT: supplier changed bank details" bill without signing because the payee is blocklisted, and proposed Contractor payroll 450 as #4 because it is over the cap ([transaction](https://testnet.nearblocks.io/txns/5pi9j2RtGvjn2vcUx712ytgJGkrSZyRRKeHCfosCpCS2)). `ft_balance_of` shows `northwind-keel.testnet` holding 80 and the vault 920.
 8. **Paying on Base without 1Click.** The agent proposed a 1 USDC transfer on Base Sepolia from `vega.keel.testnet` as #1 ([transaction](https://testnet.nearblocks.io/txns/FjjJnVwJfmc7GmDvPXxEToZqJNj3zf4NhMXcw96Ug7ue)). The founder approved it ([transaction](https://testnet.nearblocks.io/txns/CwtmxfryUoEoCwKUAUHETVx6fKmYkU3fNZHzsUDxM2Bp)). The vault built the transfer, `v1.signer-prod.testnet` signed it, and the vault stored it with an `evm_signed` event. Recovering the signer from the stored transaction with viem gives `0x69aa…cffed`, the vault's own address. Once the address was funded, Keel broadcast it and it landed on Base Sepolia ([transaction](https://sepolia.basescan.org/tx/0x810f796b040edca5df3b1c3c3097d2dc31f5f060bf06e5436166b300f3b29171)).
 9. **A Base bill paid end to end.** For the 15 USDC "Designer invoice, paid in USDC on Base" bill in `config/bills.json`, Keel skipped 1Click (mainnet only), proposed a Chain Signatures transfer as #4, the founder approved it ([transaction](https://testnet.nearblocks.io/txns/EyRxbDQyv4MocVD1DwhWkrgMZuWufrbRJFRxXjmHMK1V)), and Keel broadcast the vault-signed transfer ([transaction](https://sepolia.basescan.org/tx/0xb39efe2b80d77ced7be0bb619055c957b4271fbf490cc7a8bdd1a894a64aa1d3)). The vault's Base address went from 20 to 4 USDC. An earlier proposal, #3, had taken a nonce that #1 then used; Keel flagged it as unable to land and proposed #4 instead.
-6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `6Q73wQDbHPVUa9t8T7FcJo45kcNTcmpvpCiS75AVcwrs`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
+10. **No double payment after memory loss.** On `orbit.keel.testnet`, `npm run demo` paid Northwind 80 ([transaction](https://testnet.nearblocks.io/txns/3vcwJbZebqFq8DueC2HP1W5qsrdFwt8NgbDm5tRAD7B9)) and proposed Atlas (#1) and payroll (#2). After deleting `agent/state.json`, the next run reported Northwind paid and Atlas proposed, and signed nothing. Calling `execute_payment` for the same bill directly with the agent key failed on chain with `Keel Vault refused: this bill was already paid`; the vault's balance stayed at 920.
+6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `2eeT4d49yJQszYiFeoht2QSkyYFCnbU2f9ZiAtifmuQB`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
 
 ## Cross-chain bills
 

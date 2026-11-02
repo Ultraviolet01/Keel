@@ -86,7 +86,7 @@ export interface Policy {
   blocklist: string[];
 }
 
-export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed";
+export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed" | "superseded";
 
 export interface Proposal {
   id: number;
@@ -101,6 +101,8 @@ export interface Proposal {
   /** Paid from the vault's own EVM address through NEAR Chain Signatures. */
   evm?: { chain_id: number; token: string; to: string; nonce: number; gas_limit: number; max_fee_per_gas: string } | null;
   evm_signed?: { raw_tx: string; tx_hash: string } | null;
+  /** The bill this pays. The vault pays each bill at most once. */
+  bill_ref?: string | null;
 }
 
 export interface TokenMetadata {

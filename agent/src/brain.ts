@@ -20,12 +20,14 @@ export interface Proposal {
   amount: string;
   memo: string | null;
   reason: string;
-  status: "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed";
+  status: "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed" | "superseded";
   created_at_ms: number;
   valid_until_ms?: number | null;
   /** Set for bills paid from the vault's EVM address through Chain Signatures. */
   evm?: { chain_id: number; token: string; to: string; nonce: number } | null;
   evm_signed?: { raw_tx: string; tx_hash: string } | null;
+  /** The bill this proposal pays; the vault pays each bill at most once. */
+  bill_ref?: string | null;
 }
 
 /** A bill the founder told Keel about. Amount in the token's smallest unit. */

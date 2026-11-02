@@ -33,6 +33,7 @@ const PILL: Record<Proposal["status"], { label: string; cls: string }> = {
   failed: { label: "Failed", cls: "bad" },
   signing: { label: "Signing on NEAR", cls: "warn" },
   signed: { label: "Signed, sent to Base", cls: "ok" },
+  superseded: { label: "Replaced by a newer offer", cls: "muted" },
 };
 
 /** How a proposal moves money, for the flow diagram and the list pill. */
