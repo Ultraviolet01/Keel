@@ -86,6 +86,18 @@ export interface Policy {
   blocklist: string[];
 }
 
+export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed";
+
+export interface Proposal {
+  id: number;
+  receiver_id: string;
+  amount: string;
+  memo: string | null;
+  reason: string;
+  status: ProposalStatus;
+  created_at_ms: number;
+}
+
 export interface TokenMetadata {
   symbol: string;
   decimals: number;
@@ -139,4 +151,38 @@ export function companyLabel(vaultId: string): string {
 export function shortKey(key: string): string {
   const [, body = key] = key.split(":");
   return `${body.slice(0, 6)}…${body.slice(-4)}`;
+}
+
+/** "100.5" with 6 decimals -> "100500000". Returns null if the text is not a number. */
+export function parseToken(text: string, decimals: number): string | null {
+  const t = text.trim().replace(/,/g, "");
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  const [whole, frac = ""] = t.split(".");
+  if (frac.length > decimals) return null;
+  return (BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, "0") || "0")).toString();
+}
+
+// ------------------------------------------------- company names (this browser)
+
+const NAMES_KEY = "keel.companyNames";
+
+/** The name a founder typed for each vault, remembered in this browser only. */
+export function companyName(vaultId: string): string {
+  try {
+    const names = JSON.parse(localStorage.getItem(NAMES_KEY) ?? "{}") as Record<string, string>;
+    if (names[vaultId]) return names[vaultId];
+  } catch {
+    /* storage unavailable */
+  }
+  return companyLabel(vaultId);
+}
+
+export function rememberCompanyName(vaultId: string, name: string) {
+  try {
+    const names = JSON.parse(localStorage.getItem(NAMES_KEY) ?? "{}") as Record<string, string>;
+    names[vaultId] = name;
+    localStorage.setItem(NAMES_KEY, JSON.stringify(names));
+  } catch {
+    /* storage unavailable */
+  }
 }
