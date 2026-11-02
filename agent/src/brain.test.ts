@@ -135,3 +135,12 @@ test("Chain Signatures: a NEAR secp256k1 key maps to the right EVM address", () 
   while (n > 0n) { b58 = ALPHABET[Number(n % 58n)] + b58; n /= 58n; }
   assert.equal(addressFromNearKey(`secp256k1:${b58}`).toLowerCase(), acct.address.toLowerCase());
 });
+
+import { nextNonce } from "./evm";
+
+test("Chain Signatures: each transfer gets a free nonce; used ones are skipped", () => {
+  assert.equal(nextNonce(1, []), 1);
+  assert.equal(nextNonce(1, [0]), 1, "a stale proposal at nonce 0 does not push the next one up");
+  assert.equal(nextNonce(1, [1, 2]), 3);
+  assert.equal(nextNonce(1, [2]), 1);
+});

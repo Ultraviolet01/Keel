@@ -74,10 +74,10 @@ export async function balances(chainId: number, token: string, owner: Hex) {
 }
 
 /**
- * Fills in the fields the vault needs. `queued` is how many earlier EVM
- * proposals from this vault are still waiting, so each gets its own nonce.
+ * Fills in the fields the vault needs. `reserved` are the nonces of earlier
+ * EVM proposals that can still be signed, so each transfer gets its own.
  */
-export async function prepareTransfer(route: EvmRoute, from: Hex, to: string, amount: bigint, queued: number): Promise<EvmTransfer> {
+export async function prepareTransfer(route: EvmRoute, from: Hex, to: string, amount: bigint, reserved: number[]): Promise<EvmTransfer> {
   const c = client(route.chain_id);
   const [nonce, fees, gas] = await Promise.all([
     c.getTransactionCount({ address: from, blockTag: "pending" }),
@@ -96,11 +96,18 @@ export async function prepareTransfer(route: EvmRoute, from: Hex, to: string, am
     chain_id: route.chain_id,
     token: route.token,
     to: to.toLowerCase(),
-    nonce: nonce + queued,
+    nonce: nextNonce(nonce, reserved),
     max_fee_per_gas: maxFee.toString(),
     max_priority_fee_per_gas: priority.toString(),
     gas_limit: gasLimit,
   };
+}
+
+/** The first nonce at or after the chain's next nonce that no waiting proposal holds. */
+export function nextNonce(chainNonce: number, reserved: number[]): number {
+  let n = chainNonce;
+  while (reserved.includes(n)) n++;
+  return n;
 }
 
 /**

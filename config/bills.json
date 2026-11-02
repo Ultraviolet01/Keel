@@ -33,7 +33,7 @@
     {
       "id": "design-base-oct",
       "payee": "0x000000000000000000000000000000000000dEaD",
-      "amount": "25.00",
+      "amount": "15.00",
       "due": "+2",
       "memo": "Designer invoice, paid in USDC on Base",
       "chain": "base"
