@@ -3,7 +3,7 @@ import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
 import { SampleApp } from "./Sample";
-import { ConnectPanel, CreatePanel, DepositPanel, LimitsPanel, type Send } from "./panels";
+import { ConnectPanel, CreatePanel, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
 import { Activity, Approvals, Overview, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
 
@@ -17,7 +17,7 @@ export default function App() {
   const [vaults, setVaults] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("overview");
-  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | null>(null);
+  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readOnly = Boolean(viewAs);
@@ -162,8 +162,11 @@ export default function App() {
           canAct,
           send,
           reload: vault.reload,
+          go: setPage,
           onSetLimits: () => setPanel("limits"),
           onDeposit: () => setPanel("deposit"),
+          onNewPayment: () => setPanel("pay"),
+          onPauseToggle: togglePause,
         }
       : null;
   const PageView = { overview: Overview, approvals: Approvals, activity: Activity, rules: Rules, wallets: Wallets }[page];
@@ -224,6 +227,9 @@ export default function App() {
       )}
       {panel === "limits" && selected && d && (
         <LimitsPanel vaultId={selected} policy={d.policy} token={d.token} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
+      )}
+      {panel === "pay" && selected && d && (
+        <PayPanel vaultId={selected} token={d.token} balance={d.balance} send={send} onClose={() => setPanel(null)} onPaid={vault.reload} />
       )}
       {panel === "deposit" && selected && d && (
         <DepositPanel vaultId={selected} token={d.token} tokenId={d.policy.token_id} onClose={() => setPanel(null)} />

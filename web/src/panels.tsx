@@ -406,3 +406,73 @@ export function DepositPanel(props: { vaultId: string; token: TokenMetadata; tok
     </Overlay>
   );
 }
+
+// ------------------------------------------------------------- new payment
+
+export function PayPanel(props: { vaultId: string; token: TokenMetadata; balance: string; send: Send; onClose: () => void; onPaid: () => Promise<void> }) {
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const raw = parseToken(amount || "0", props.token.decimals);
+  const problem = !to
+    ? "Enter who to pay"
+    : !ACCOUNT.test(to.trim().toLowerCase())
+      ? `${to} is not a NEAR account id`
+      : raw === null || raw === "0"
+        ? `Enter an amount in ${props.token.symbol}`
+        : BigInt(raw) > BigInt(props.balance)
+          ? `The vault holds ${formatToken(props.balance, props.token.decimals)} ${props.token.symbol}`
+          : null;
+
+  const pay = async () => {
+    if (problem || !raw) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.send(props.vaultId, "withdraw", { receiver_id: to.trim().toLowerCase(), amount: raw, memo: memo.trim() || null }, { deposit: "1", gas: "100000000000000" });
+      await props.onPaid();
+      props.onClose();
+    } catch (e) {
+      setError(friendly(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={props.onClose}>
+      <section className="card panel form" role="dialog" aria-labelledby="pay-title">
+        <div className="panel-top">
+          <span className="panel-icon">
+            <Wallet />
+          </span>
+          <CloseButton onClose={props.onClose} />
+        </div>
+        <h1 className="serif" id="pay-title">New payment</h1>
+        <p className="lead">Paid from the vault straight away with your signature. Your limits bind Keel's agent, not you.</p>
+        <label className="field">
+          <span className="label">Pay to</span>
+          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="northwind.testnet" autoFocus />
+        </label>
+        <label className="field">
+          <span className="label">Amount</span>
+          <span className="input-group">
+            <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="80" />
+            <span className="suffix">{props.token.symbol}</span>
+          </span>
+          <span className="hint">Vault holds {formatToken(props.balance, props.token.decimals)} {props.token.symbol}</span>
+        </label>
+        <label className="field">
+          <span className="label">Memo</span>
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" />
+        </label>
+        {(error || (to && amount && problem)) && <p className="error">{error ?? problem}</p>}
+        <button className="btn primary lg block" onClick={pay} disabled={busy || Boolean(problem)}>
+          {busy ? "Approve in your wallet" : "Pay from the vault"}
+        </button>
+      </section>
+    </Overlay>
+  );
+}

@@ -11,7 +11,7 @@ export function SampleApp() {
         <div className="switch">
           <div className="company-card">
             <span className="who">
-              <span className="name">Kora Supply Group</span>
+              <span className="name-row"><span className="name">Kora Supply Group</span><span className="tag">Mainnet</span></span>
               <span className="mono">kora.keel.near</span>
             </span>
           </div>

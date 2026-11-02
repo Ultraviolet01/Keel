@@ -68,10 +68,13 @@ export function Sidebar(props: {
           aria-expanded={open}
         >
           <span className="who">
-            <span className="name">{current ? companyName(current) : "No company yet"}</span>
+            <span className="name-row">
+              <span className="name">{current ? companyName(current) : "No company yet"}</span>
+              <span className="tag">Testnet</span>
+            </span>
             <span className="mono">{current ?? "Create one to start"}</span>
           </span>
-          <ChevronsUpDown className="faint" />
+          <ChevronsUpDown className="faint" size={16} />
         </button>
 
         {open && (

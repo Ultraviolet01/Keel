@@ -1,11 +1,11 @@
 # Keel web app
 
-Founders connect a NEAR wallet, create a vault for each company, set its limits and approve what Keel proposes. Talks to the factory at `keel.testnet` on NEAR testnet. The layout follows the Figma screens and the mockups in `design/mockups/`.
+Founders connect a NEAR wallet, create a vault for each company, set its limits and approve what Keel proposes. Talks to the factory at `keel.testnet` on NEAR testnet. The layout follows the Figma screens (Landing, Overview, Approvals, Activity, Rules, Wallets, measured from 2x exports) and the mockups in `design/mockups/`.
 
 ## Run it
 
 1. Run `npm install` in this folder. You see the install finish.
-2. Run `npm run dev` and open the address it prints. You see the app blurred behind a **Connect wallet** panel.
+2. Run `npm run dev` and open the address it prints. You see the landing page, with the ship riding light under its load line and sinking past it when a payment needs your signature. Click **Open app** (or go to `/app`). You see the app blurred behind a **Connect wallet** panel.
 3. Click **Connect wallet**. You see the NEAR Connect wallet picker (Meteor, Intear, Ledger, Nightly, Ethereum wallets, NEAR CLI).
 4. Sign in with a testnet account holding about 3 NEAR. With no company yet, you see **Name your first company** over the blurred app.
 5. Type a company name. You see the vault address filled in, a live check that it is free, and the deposit (about 2.62 NEAR). Click **Create vault** and approve in your wallet.
@@ -14,7 +14,7 @@ Founders connect a NEAR wallet, create a vault for each company, set its limits 
 8. Open the company card at the top of the sidebar. You see all your companies and **Add company**.
 9. Open **Approvals** to approve or reject what Keel proposed, and use **Pause all payments** in the sidebar to stop everything at once.
 
-**Without a wallet:** open `/?view=keel-owner.testnet`. You see that founder's companies read-only, with live data from testnet, including two proposals waiting on `nova.keel.testnet`.
+**Without a wallet:** open `/app?view=keel-owner.testnet`. You see that founder's companies read-only, with live data from testnet, including two proposals waiting on `nova.keel.testnet`.
 
 ## What each screen does
 
@@ -39,7 +39,8 @@ Company names are kept in this browser only; the chain stores the vault address.
 
 | File | What it holds |
 | --- | --- |
-| `src/App.tsx` | Wallet session, which screen shows, transaction sending |
+| `src/Landing.tsx` | Landing page at `/`, with the ship drawn in SVG |
+| `src/App.tsx` | The app at `/app`: wallet session, which screen shows, transaction sending |
 | `src/Sidebar.tsx` | Company switcher, nav, Keel status box with pause and resume |
 | `src/panels.tsx` | Connect wallet, Name your company, Set limits and Deposit panels |
 | `src/pages.tsx` | Overview, Approvals, Activity, Rules, Wallets |
