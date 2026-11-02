@@ -65,6 +65,10 @@ The vault holds the USDC and the rules, and decides every payment's band itself.
 
 Two token details the vault handles itself: it attaches the 1 yoctoNEAR that `ft_transfer` requires, because a function-call key cannot attach a deposit, and it registers new payees with `storage_deposit` before paying them.
 
+Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot attach a deposit, so only the owner's full-access key can approve, change the policy or pause.
+
+**Check the rules yourself:** run `cd contract && cargo test`. You see 22 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy` and `pause_blocks_everything_until_resume`. Method details are in [contract/README.md](contract/README.md).
+
 ## Security
 
 The agent never holds a key that can move money freely. Limits live in the contract, so a compromised or prompt-injected agent still cannot overspend.
