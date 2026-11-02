@@ -1,10 +1,10 @@
 # Keel factory
 
-Creates one Keel Vault per founder when they sign up. Live on testnet at `keel.testnet`.
+Creates one Keel Vault per company, when a founder signs up or adds another company. A founder can own up to 20 vaults. Live on testnet at `keel.testnet`.
 
 ## Run the tests
 
-1. Run `cargo test` in this folder. You see 12 tests pass, including `one_vault_per_founder`, `failed_creation_frees_name_and_refunds` and `only_admin_uploads_vault_code`.
+1. Run `cargo test` in this folder. You see 15 tests pass, including `founder_can_own_several_companies`, `caps_vaults_per_founder`, `failed_creation_keeps_founders_other_vaults` and `migrate_moves_existing_founder_to_new_list`.
 
 ## How sign-up works
 
@@ -19,8 +19,10 @@ Creates one Keel Vault per founder when they sign up. Live on testnet at `keel.t
 | --- | --- | --- |
 | `new` | Deployer, once | `admin_id`, `agent_id`, `token_id` |
 | `set_vault_code` | Admin | Raw wasm as the call input. Sets the code for new vaults and records its SHA-256 |
-| `create_vault` | Founder, with deposit | `name`: 2 to 32 lowercase letters, digits, `-` or `_`. One vault per founder |
-| `get_vault` | Anyone (view) | `owner_id` → vault id or null |
+| `create_vault` | Founder, with deposit | `name`: 2 to 32 lowercase letters, digits, `-` or `_`. Up to 20 vaults per founder |
+| `get_vaults_for_owner` | Anyone (view) | `owner_id` → every vault that founder owns, oldest first (the app's company switcher) |
+| `get_owner` | Anyone (view) | `vault_id` → its founder, or null |
+| `migrate` | Factory account, once | `owners`: founders from the one-vault version. Moves them to the new per-founder list |
 | `get_vaults` | Anyone (view) | `from_index?`, `limit?` |
 | `get_config` | Anyone (view) | Admin, agent, token, `vault_code_hash`, `vault_code_bytes`, `min_vault_deposit` |
 

@@ -1,7 +1,8 @@
 //! Keel factory
 //!
-//! When a founder signs up in the Keel app, the app calls `create_vault` from
-//! the founder's own wallet. The factory creates `<name>.<factory>` with the
+//! When a founder signs up in the Keel app, or adds another company, the app
+//! calls `create_vault` from the founder's own wallet. One founder can own up
+//! to 20 vaults, one per company. The factory creates `<name>.<factory>` with the
 //! Keel Vault code, sets the founder as its owner and Keel's agent as its
 //! agent, and registers it on the token so it can receive USDC. The vault
 //! starts with no policy: the founder sets every limit.
@@ -30,6 +31,8 @@ const TOKEN_REGISTRATION: NearToken = NearToken::from_yoctonear(1_250_000_000_00
 const GAS_VAULT_INIT: Gas = Gas::from_tgas(20);
 const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 const GAS_CALLBACK: Gas = Gas::from_tgas(30);
+/// One vault per company; this caps how many companies one founder can add.
+const MAX_VAULTS_PER_OWNER: usize = 20;
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
@@ -40,9 +43,12 @@ trait FungibleToken {
 #[derive(BorshStorageKey)]
 #[near]
 enum StorageKey {
+    /// Old one-vault-per-founder map, kept only so `migrate` can read it.
     VaultByOwner,
     Vaults,
     VaultCode,
+    VaultsByOwner,
+    VaultOwner,
 }
 
 #[near(serializers = [json])]
@@ -64,6 +70,20 @@ pub struct KeelFactory {
     vault_code: LazyOption<Vec<u8>>,
     vault_code_hash: Option<CryptoHash>,
     vault_code_bytes: u64,
+    vaults_by_owner: LookupMap<AccountId, Vec<AccountId>>,
+    vault_owner: LookupMap<AccountId, AccountId>,
+    vaults: IterableSet<AccountId>,
+}
+
+/// State layout before founders could own several vaults.
+#[near(serializers = [borsh])]
+struct KeelFactoryV1 {
+    admin_id: AccountId,
+    agent_id: AccountId,
+    token_id: AccountId,
+    vault_code: LazyOption<Vec<u8>>,
+    vault_code_hash: Option<CryptoHash>,
+    vault_code_bytes: u64,
     vault_by_owner: LookupMap<AccountId, AccountId>,
     vaults: IterableSet<AccountId>,
 }
@@ -79,22 +99,53 @@ impl KeelFactory {
             vault_code: LazyOption::new(StorageKey::VaultCode, None),
             vault_code_hash: None,
             vault_code_bytes: 0,
-            vault_by_owner: LookupMap::new(StorageKey::VaultByOwner),
+            vaults_by_owner: LookupMap::new(StorageKey::VaultsByOwner),
+            vault_owner: LookupMap::new(StorageKey::VaultOwner),
             vaults: IterableSet::new(StorageKey::Vaults),
         }
     }
 
-    /// Called by the founder's wallet at sign-up. Creates `<name>.<factory>`
-    /// owned by the caller. One vault per founder.
+    /// Upgrades a factory deployed before founders could own several vaults.
+    /// `owners` lists every founder who already has a vault; each one is moved
+    /// to the new per-founder list.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate(owners: Vec<AccountId>) -> Self {
+        let mut old: KeelFactoryV1 =
+            env::state_read().unwrap_or_else(|| env::panic_str("no state to migrate"));
+        let mut this = Self {
+            admin_id: old.admin_id,
+            agent_id: old.agent_id,
+            token_id: old.token_id,
+            vault_code: old.vault_code,
+            vault_code_hash: old.vault_code_hash,
+            vault_code_bytes: old.vault_code_bytes,
+            vaults_by_owner: LookupMap::new(StorageKey::VaultsByOwner),
+            vault_owner: LookupMap::new(StorageKey::VaultOwner),
+            vaults: old.vaults,
+        };
+        for owner_id in owners {
+            if let Some(vault_id) = old.vault_by_owner.remove(&owner_id) {
+                this.vault_owner.insert(vault_id.clone(), owner_id.clone());
+                this.vaults_by_owner.insert(owner_id, vec![vault_id]);
+            }
+        }
+        old.vault_by_owner.flush();
+        this
+    }
+
+    /// Called by the founder's wallet at sign-up and for each company they
+    /// add. Creates `<name>.<factory>` owned by the caller.
     #[payable]
     pub fn create_vault(&mut self, name: String) -> Promise {
         let owner_id = env::predecessor_account_id();
         let deposit = env::attached_deposit();
         require!(self.vault_code_hash.is_some(), "vault code has not been uploaded yet");
         let min_deposit = self.min_vault_deposit();
+        let owned = self.vaults_by_owner.get(&owner_id).map_or(0, Vec::len);
         require!(
-            !self.vault_by_owner.contains_key(&owner_id),
-            "you already have a Keel vault"
+            owned < MAX_VAULTS_PER_OWNER,
+            format!("one founder can own at most {MAX_VAULTS_PER_OWNER} vaults")
         );
         require!(
             deposit >= min_deposit,
@@ -108,7 +159,11 @@ impl KeelFactory {
         require!(owner_id != self.agent_id, "the agent cannot own a vault");
 
         // Reserve now so two sign-ups cannot race for the same name.
-        self.vault_by_owner.insert(owner_id.clone(), vault_id.clone());
+        self.vaults_by_owner
+            .entry(owner_id.clone())
+            .or_default()
+            .push(vault_id.clone());
+        self.vault_owner.insert(vault_id.clone(), owner_id.clone());
         self.vaults.insert(vault_id.clone());
 
         let init_args = json!({
@@ -154,7 +209,10 @@ impl KeelFactory {
             Some(vault_id)
         } else {
             // Creation failed: free the name and give the founder their NEAR back.
-            self.vault_by_owner.remove(&owner_id);
+            if let Some(list) = self.vaults_by_owner.get_mut(&owner_id) {
+                list.retain(|v| v != &vault_id);
+            }
+            self.vault_owner.remove(&vault_id);
             self.vaults.remove(&vault_id);
             Promise::new(owner_id.clone()).transfer(deposit).detach();
             emit(
@@ -186,8 +244,14 @@ impl KeelFactory {
 
     // ----------------------------------------------------------------- views
 
-    pub fn get_vault(&self, owner_id: AccountId) -> Option<AccountId> {
-        self.vault_by_owner.get(&owner_id).cloned()
+    /// Every vault a founder owns, in the order they were created. The app
+    /// uses this for its company switcher.
+    pub fn get_vaults_for_owner(&self, owner_id: AccountId) -> Vec<AccountId> {
+        self.vaults_by_owner.get(&owner_id).cloned().unwrap_or_default()
+    }
+
+    pub fn get_owner(&self, vault_id: AccountId) -> Option<AccountId> {
+        self.vault_owner.get(&vault_id).cloned()
     }
 
     pub fn get_vaults(&self, from_index: Option<u64>, limit: Option<u64>) -> Vec<AccountId> {
@@ -313,20 +377,75 @@ mod tests {
         let m = min(&f);
         ctx("founder.testnet", m);
         let _ = f.create_vault("kora".into());
-        assert_eq!(f.get_vault(acc("founder.testnet")), Some(acc("kora.keel.testnet")));
+        assert_eq!(f.get_vaults_for_owner(acc("founder.testnet")), vec![acc("kora.keel.testnet")]);
         assert_eq!(f.get_vaults(None, None), vec![acc("kora.keel.testnet")]);
     }
 
     #[test]
-    #[should_panic(expected = "you already have a Keel vault")]
-    fn one_vault_per_founder() {
+    fn migrate_moves_existing_founder_to_new_list() {
+        ctx("keel.testnet", NearToken::from_yoctonear(0));
+        let mut v1 = KeelFactoryV1 {
+            admin_id: acc("keel.testnet"),
+            agent_id: acc("agent.keel.testnet"),
+            token_id: acc("usdc.testnet"),
+            vault_code: LazyOption::new(StorageKey::VaultCode, Some(b"\0asm x".to_vec())),
+            vault_code_hash: Some([1u8; 32]),
+            vault_code_bytes: 6,
+            vault_by_owner: LookupMap::new(StorageKey::VaultByOwner),
+            vaults: IterableSet::new(StorageKey::Vaults),
+        };
+        v1.vault_by_owner.insert(acc("founder.testnet"), acc("kora.keel.testnet"));
+        v1.vaults.insert(acc("kora.keel.testnet"));
+        v1.vault_by_owner.flush();
+        v1.vaults.flush();
+        v1.vault_code.flush();
+        env::state_write(&v1);
+
+        let f = KeelFactory::migrate(vec![acc("founder.testnet")]);
+        assert_eq!(f.get_vaults_for_owner(acc("founder.testnet")), vec![acc("kora.keel.testnet")]);
+        assert_eq!(f.get_owner(acc("kora.keel.testnet")), Some(acc("founder.testnet")));
+        assert_eq!(f.get_vaults(None, None), vec![acc("kora.keel.testnet")]);
+        assert_eq!(f.get_config().vault_code_bytes, 6);
+    }
+
+    #[test]
+    fn founder_can_own_several_companies() {
         let mut f = factory();
         let m = min(&f);
         ctx("founder.testnet", m);
         let _ = f.create_vault("kora".into());
+        ctx("founder.testnet", m);
+        let _ = f.create_vault("lumen".into());
+        assert_eq!(
+            f.get_vaults_for_owner(acc("founder.testnet")),
+            vec![acc("kora.keel.testnet"), acc("lumen.keel.testnet")]
+        );
+        assert_eq!(f.get_owner(acc("lumen.keel.testnet")), Some(acc("founder.testnet")));
+    }
+
+    #[test]
+    #[should_panic(expected = "one founder can own at most 20 vaults")]
+    fn caps_vaults_per_founder() {
+        let mut f = factory();
+        let m = min(&f);
+        for i in 0..=MAX_VAULTS_PER_OWNER {
+            ctx("founder.testnet", m);
+            let _ = f.create_vault(format!("co{i}"));
+        }
+    }
+
+    #[test]
+    fn failed_creation_keeps_founders_other_vaults() {
+        let mut f = factory();
         let m = min(&f);
         ctx("founder.testnet", m);
-        let _ = f.create_vault("kora-two".into());
+        let _ = f.create_vault("kora".into());
+        ctx("founder.testnet", m);
+        let _ = f.create_vault("lumen".into());
+        callback_ctx(PromiseResult::Failed);
+        f.on_vault_created(acc("founder.testnet"), acc("lumen.keel.testnet"), m);
+        assert_eq!(f.get_vaults_for_owner(acc("founder.testnet")), vec![acc("kora.keel.testnet")]);
+        assert_eq!(f.get_owner(acc("lumen.keel.testnet")), None);
     }
 
     #[test]
@@ -387,7 +506,7 @@ mod tests {
         callback_ctx(PromiseResult::Failed);
         let vault = f.on_vault_created(acc("founder.testnet"), acc("kora.keel.testnet"), m);
         assert_eq!(vault, None);
-        assert_eq!(f.get_vault(acc("founder.testnet")), None);
+        assert!(f.get_vaults_for_owner(acc("founder.testnet")).is_empty());
         assert!(f.get_vaults(None, None).is_empty());
         assert!(get_logs().iter().any(|l| l.contains("vault_creation_failed")));
     }
