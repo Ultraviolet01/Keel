@@ -340,7 +340,9 @@ const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, p
   const { usdc: onChain, eth } = await balances(route.chain_id, route.token, from);
   if (onChain < bill.amount) throw new Error(`the vault's ${bill.chain} address ${from} holds ${usdc(onChain)}, needs ${usdc(bill.amount)}; top it up`);
   if (eth === 0n) throw new Error(`the vault's ${bill.chain} address ${from} has no ETH for gas`);
-  const queued = proposals.filter((p) => p.evm && (p.status === "pending" || p.status === "signing")).length;
+  // Earlier transfers that can still be signed take the nonces before this one; expired offers never will.
+  const live = (p: Proposal) => p.status === "signing" || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > Date.now()));
+  const queued = proposals.filter((p) => p.evm && live(p)).length;
   const evm = await prepareTransfer(route, from, bill.payee, bill.amount, queued);
   const where = `from the vault's own ${bill.chain} address ${from.slice(0, 8)}… via NEAR Chain Signatures`;
   if (dryRun) {
