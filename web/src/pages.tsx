@@ -32,7 +32,7 @@ const PILL: Record<Proposal["status"], { label: string; cls: string }> = {
   rejected: { label: "Rejected", cls: "bad" },
   failed: { label: "Failed", cls: "bad" },
   signing: { label: "Signing on NEAR", cls: "warn" },
-  signed: { label: "Signed, sent to Base", cls: "ok" },
+  signed: { label: "Signed, sent on chain", cls: "ok" },
   superseded: { label: "Replaced by a newer offer", cls: "muted" },
 };
 
@@ -810,7 +810,7 @@ export function Wallets(p: PageProps) {
 }
 
 
-/** The vault's own Base address, controlled through NEAR Chain Signatures. */
+/** The vault's own EVM address, controlled through NEAR Chain Signatures, with its balance on each chain. */
 function EvmWalletCard({ vaultId }: { vaultId: string }) {
   const [w, setW] = useState<EvmWallet | null | undefined>(undefined);
   const [copied, setCopied] = useState(false);
@@ -818,25 +818,34 @@ function EvmWalletCard({ vaultId }: { vaultId: string }) {
     setW(undefined);
     evmWallet(vaultId).then(setW).catch(() => setW(null));
   }, [vaultId]);
-  if (w === undefined) return <section className="card card-pad add-wallet"><span className="muted small">Reading the vault's Base address…</span></section>;
+  if (w === undefined) return <section className="card card-pad add-wallet"><span className="muted small">Reading the vault's addresses on other chains…</span></section>;
   if (w === null)
     return (
       <section className="card card-pad add-wallet">
         <b>No wallet on another chain</b>
-        <span className="muted small">Vaults created before Chain Signatures pay only on NEAR. Create a new vault to get a Base address.</span>
+        <span className="muted small">Vaults created before Chain Signatures pay only on NEAR. Create a new vault to get an address on other chains.</span>
       </section>
     );
   const copy = () => navigator.clipboard?.writeText(w.address).then(() => setCopied(true)).catch(() => {});
   return (
     <section className="card card-pad evm-wallet">
       <div className="q-row">
-        <b>Vault on {w.chain.name}</b>
+        <b>Vault on other chains</b>
         <span className="tag">Chain Signatures</span>
       </div>
-      <a className="mono small" href={`${w.chain.explorer}/address/${w.address}`} target="_blank" rel="noreferrer">{short(w.address)}</a>
-      <span className="num">{formatToken(w.usdc, 6)} USDC</span>
-      <span className="muted small">{formatToken(w.eth, 18)} ETH for gas</span>
-      <span className="muted small">Only this vault can sign for this address, through NEAR's MPC network, after you approve. Keel pays {w.chain.name} bills from here when NEAR Intents is unavailable.</span>
+      <span className="mono small">{short(w.address)}</span>
+      <table className="table plain-t evm-chains">
+        <tbody>
+          {w.chains.map((c) => (
+            <tr key={c.route.chain_id}>
+              <td><a href={`${c.chain.explorer}/address/${w.address}`} target="_blank" rel="noreferrer">{c.chain.name}</a></td>
+              <td className="r num">{formatToken(c.usdc, c.route.decimals ?? 6)} USDC</td>
+              <td className="r muted small">{formatToken(c.gas, 18)} {c.chain.gas}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <span className="muted small">The same address on every chain. Only this vault can sign for it, through NEAR's MPC network, after you approve. Keel pays bills on these chains from here when NEAR Intents is unavailable.</span>
       <button className="btn" onClick={copy}>{copied ? "Copied" : "Copy address to fund it"}</button>
     </section>
   );

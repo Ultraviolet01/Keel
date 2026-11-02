@@ -20,7 +20,9 @@ export interface QuoteRequest {
   dry: boolean;
   originAsset: string;
   destinationAsset: string;
-  amount: string; // smallest unit of the origin asset
+  /** EXACT_INPUT: `amount` is what the vault sends. EXACT_OUTPUT: what the payee receives. */
+  swapType?: "EXACT_INPUT" | "EXACT_OUTPUT";
+  amount: string; // smallest unit of the origin asset (EXACT_INPUT) or of the destination asset (EXACT_OUTPUT)
   recipient: string;
   refundTo: string;
   deadline: string; // ISO time
@@ -74,7 +76,7 @@ export async function findToken(blockchain: string, symbol: string): Promise<Tok
 export function quoteBody(q: QuoteRequest) {
   return {
     dry: q.dry,
-    swapType: "EXACT_INPUT",
+    swapType: q.swapType ?? "EXACT_INPUT",
     slippageTolerance: q.slippageTolerance ?? 100,
     originAsset: q.originAsset,
     depositType: "ORIGIN_CHAIN",

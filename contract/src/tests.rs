@@ -522,8 +522,9 @@ fn propose_evm(v: &mut KeelVault, e: EvmTransfer) -> u64 {
 fn testnet_vault_starts_with_the_base_sepolia_route() {
     let v = vault();
     let r = v.get_evm_route();
-    assert_eq!(r["route"]["chain_id"], 84532);
-    assert_eq!(r["route"]["token"], BASE_USDC);
+    let ids: Vec<u64> = r["routes"].as_array().unwrap().iter().map(|x| x["chain_id"].as_u64().unwrap()).collect();
+    assert_eq!(ids, vec![84532, 11155111, 421614], "Base, Ethereum and Arbitrum Sepolia");
+    assert_eq!(r["routes"][0]["token"], BASE_USDC);
     assert_eq!(r["mpc_id"], "v1.signer-prod.testnet");
     assert_eq!(r["path"], "evm");
 }
@@ -593,7 +594,7 @@ fn failed_mpc_call_marks_the_bill_failed() {
 }
 
 #[test]
-#[should_panic(expected = "chain is not the vault's EVM route")]
+#[should_panic(expected = "chain is not one of the vault's EVM routes")]
 fn evm_bill_on_another_chain_is_refused() {
     let mut v = vault();
     propose_evm(&mut v, EvmTransfer { chain_id: 1, ..evm_transfer() });
@@ -638,21 +639,21 @@ fn blocklisted_evm_address_is_refused() {
 }
 
 #[test]
-#[should_panic(expected = "the EVM route is off")]
+#[should_panic(expected = "chain is not one of the vault's EVM routes")]
 fn owner_can_turn_the_evm_route_off() {
     let mut v = vault();
     as_owner(DAY);
-    v.set_evm_route(None);
+    v.set_evm_route(84532, None);
     propose_evm(&mut v, evm_transfer());
 }
 
 #[test]
-#[should_panic(expected = "the EVM route is off")]
+#[should_panic(expected = "chain is not one of the vault's EVM routes")]
 fn route_turned_off_after_proposal_blocks_approval() {
     let mut v = vault();
     let id = propose_evm(&mut v, evm_transfer());
     as_owner(DAY);
-    v.set_evm_route(None);
+    v.set_evm_route(84532, None);
     let _ = v.approve(id);
 }
 
@@ -661,7 +662,7 @@ fn route_turned_off_after_proposal_blocks_approval() {
 fn only_the_owner_sets_the_evm_route() {
     let mut v = vault();
     set_ctx("mallory.testnet", DAY, 1);
-    v.set_evm_route(None);
+    v.set_evm_route(84532, None);
 }
 
 #[test]
@@ -911,4 +912,65 @@ fn owner_can_still_act_when_the_vault_is_low_on_near() {
     v.resume();
     let _ = v.approve(1);
     let _ = v.withdraw(acc("kora.testnet"), U128(USDC), None);
+}
+
+// ------------------------------------------------------- more EVM chains
+
+#[test]
+fn arbitrum_sepolia_bill_is_accepted() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, EvmTransfer { chain_id: 421614, token: "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".into(), ..evm_transfer() });
+    assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * USDC)));
+}
+
+#[test]
+#[should_panic(expected = "only the route's token can be sent")]
+fn base_usdc_cannot_be_sent_on_the_arbitrum_route() {
+    let mut v = vault();
+    propose_evm(&mut v, EvmTransfer { chain_id: 421614, ..evm_transfer() });
+}
+
+#[test]
+fn an_18_decimal_token_gets_the_amount_scaled() {
+    let mut v = vault();
+    as_owner(DAY);
+    let bnb_usdc = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
+    v.set_evm_route(56, Some(EvmRoute { chain_id: 56, token: bnb_usdc.into(), decimals: 18, max_fee_per_gas: U128(5_000_000_000), max_gas: 100_000 }));
+    let id = propose_evm(&mut v, EvmTransfer { chain_id: 56, token: bnb_usdc.into(), ..evm_transfer() });
+    // 5 USDC is 5 * 10^18 units of Binance-Peg USDC.
+    assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * 10u128.pow(18))));
+}
+
+#[test]
+#[should_panic(expected = "the route's token changed since the proposal")]
+fn changing_a_routes_decimals_after_the_proposal_blocks_approval() {
+    let mut v = vault();
+    let id = propose_evm(&mut v, evm_transfer());
+    as_owner(DAY);
+    v.set_evm_route(84532, Some(EvmRoute { chain_id: 84532, token: BASE_USDC.into(), decimals: 18, max_fee_per_gas: U128(5_000_000_000), max_gas: 100_000 }));
+    let _ = v.approve(id);
+}
+
+#[test]
+#[should_panic(expected = "route.chain_id must match chain_id")]
+fn route_chain_id_must_match() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.set_evm_route(1, Some(EvmRoute { chain_id: 56, token: BASE_USDC.into(), decimals: 6, max_fee_per_gas: U128(1), max_gas: 1 }));
+}
+
+#[test]
+#[should_panic(expected = "token decimals must be 6 to 30")]
+fn token_with_fewer_decimals_than_the_vault_is_refused() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.set_evm_route(1, Some(EvmRoute { chain_id: 1, token: BASE_USDC.into(), decimals: 2, max_fee_per_gas: U128(1), max_gas: 1 }));
+}
+
+#[test]
+fn ethereum_sepolia_allows_a_higher_fee_than_base() {
+    let mut v = vault();
+    let eth_usdc = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
+    // 40 gwei: over Base's 5 gwei cap, under Ethereum's 50.
+    propose_evm(&mut v, EvmTransfer { chain_id: 11155111, token: eth_usdc.into(), max_fee_per_gas: U128(40_000_000_000), max_priority_fee_per_gas: U128(1_000_000_000), ..evm_transfer() });
 }

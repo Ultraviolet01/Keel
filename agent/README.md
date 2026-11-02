@@ -13,12 +13,13 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 
 Anyone can run `npm run demo -- --dry-run` to see the decisions below without signing. The steps here are for Keel's operator, who holds the agent key.
 
-1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=harbor.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
-2. Run `npm run demo`. You see, for the four bills in `../config/bills.json`:
+1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=anchor.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
+2. Run `npm run demo`. You see, for the five bills in `../config/bills.json`:
    - **Northwind Hosting, 80**: paid alone, with a transaction link.
    - **Atlas Freight, 132**: proposed for the owner, because Atlas is not on the allowlist.
    - **"URGENT: supplier changed bank details", 950**: refused before signing, because the payee is on the blocklist. This is the prompt-injection case: the bill's text asks for urgency, the rules do not care.
    - **Contractor payroll, 450**: proposed, because it is over the 100 per-payment cap.
+   - **Lisbon contractor, 12 USDC on Arbitrum**: proposed as a Chain Signatures transfer once the vault's Arbitrum Sepolia address (`0x3d003b3d8da32261fbba854dc16188cd02436644`) holds the USDC and some ETH for gas; until then Keel says what is missing and waits.
 3. Open the app's Approvals page for the vault. You see the two proposals waiting, with Keel's reasons.
 4. Run `npm run demo` again. You see Keel report Northwind as already paid by the vault and Atlas and payroll as already proposed, and nothing is signed. The vault pays each bill once, so a fresh demo needs a fresh vault.
 
@@ -44,10 +45,10 @@ Every step is appended to `ledger.jsonl`; `state.json` remembers which bills wer
 
 ## Cross-chain bills: two routes
 
-A bill with `"chain": "base"` in `config/bills.json` is paid on Base. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
+A bill with `"chain"` set in `config/bills.json` (`"base"`, `"eth"`, `"arb"`, `"bsc"`, `"sol"` and any other chain 1Click lists; optionally `"token": "USDT"`) is paid on that chain. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
 
-1. **NEAR Intents 1Click** (mainnet only). Keel proposes paying a quote's deposit address.
-2. **NEAR Chain Signatures** (testnet and mainnet). Keel proposes a USDC transfer from the vault's own Base address. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.
+1. **NEAR Intents 1Click** (mainnet only). Keel gets an exact-output quote, so the payee receives the whole bill, refuses one that costs more than 3% over the bill, and proposes paying the quote's deposit address.
+2. **NEAR Chain Signatures** (testnet and mainnet; Base, Ethereum, Arbitrum and BNB Chain). Keel proposes a USDC transfer from the vault's own EVM address on that chain. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.
 
 If no route works, Keel records nothing and tries again on the next run. Offers that expire before the owner approves are proposed again.
 

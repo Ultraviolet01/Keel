@@ -17,6 +17,8 @@ pub struct EvmRoute {
     pub chain_id: u64,
     /// The stablecoin contract, 0x-prefixed.
     pub token: String,
+    /// The token's decimals on that chain (USDC: 6 on most chains, 18 on BNB Chain).
+    pub decimals: u8,
     pub max_fee_per_gas: U128,
     pub max_gas: u64,
 }

@@ -7,36 +7,51 @@ import { view } from "./near";
 export interface EvmRoute {
   chain_id: number;
   token: string;
+  decimals?: number;
   max_fee_per_gas: string;
   max_gas: number;
 }
 
-export const EVM_CHAINS: Record<number, { name: string; rpc: string; explorer: string }> = {
-  84532: { name: "Base Sepolia", rpc: "https://sepolia.base.org", explorer: "https://sepolia.basescan.org" },
-  8453: { name: "Base", rpc: "https://mainnet.base.org", explorer: "https://basescan.org" },
+export const EVM_CHAINS: Record<number, { name: string; rpc: string; explorer: string; gas: string }> = {
+  84532: { name: "Base Sepolia", rpc: "https://sepolia.base.org", explorer: "https://sepolia.basescan.org", gas: "ETH" },
+  8453: { name: "Base", rpc: "https://mainnet.base.org", explorer: "https://basescan.org", gas: "ETH" },
+  11155111: { name: "Ethereum Sepolia", rpc: "https://ethereum-sepolia-rpc.publicnode.com", explorer: "https://sepolia.etherscan.io", gas: "ETH" },
+  1: { name: "Ethereum", rpc: "https://ethereum-rpc.publicnode.com", explorer: "https://etherscan.io", gas: "ETH" },
+  421614: { name: "Arbitrum Sepolia", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
+  42161: { name: "Arbitrum", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
+  56: { name: "BNB Chain", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
 };
 
-export interface EvmWallet {
+export interface EvmChainBalance {
   route: EvmRoute;
-  address: string;
+  chain: { name: string; rpc: string; explorer: string; gas: string };
   usdc: bigint;
-  eth: bigint;
-  chain: { name: string; rpc: string; explorer: string };
+  gas: bigint;
 }
 
-/** The vault's EVM wallet, or null for vaults created before Chain Signatures or with the route off. */
+export interface EvmWallet {
+  address: string;
+  chains: EvmChainBalance[];
+}
+
+/** The vault's EVM address (the same on every chain) and its balance on each route, or null. */
 export async function evmWallet(vaultId: string): Promise<EvmWallet | null> {
-  const info = await view<{ route: EvmRoute | null; mpc_id: string; path: string }>(vaultId, "get_evm_route").catch(() => null);
-  if (!info?.route) return null;
-  const chain = EVM_CHAINS[info.route.chain_id];
-  if (!chain) return null;
+  const info = await view<{ routes?: EvmRoute[]; route?: EvmRoute | null; mpc_id: string; path: string }>(vaultId, "get_evm_route").catch(() => null);
+  const routes = (info?.routes ?? (info?.route ? [info.route] : [])).filter((r) => EVM_CHAINS[r.chain_id]);
+  if (!info || routes.length === 0) return null;
   const pk = await view<string>(info.mpc_id, "derived_public_key", { path: info.path, predecessor: vaultId, domain_id: 0 });
   const address = addressFromNearKey(pk);
-  const [usdc, eth] = await Promise.all([
-    evmRpc(chain.rpc, "eth_call", [{ to: info.route.token, data: `0x70a08231${address.slice(2).padStart(64, "0")}` }, "latest"]),
-    evmRpc(chain.rpc, "eth_getBalance", [address, "latest"]),
-  ]).catch(() => ["0x0", "0x0"]);
-  return { route: info.route, address, usdc: BigInt(usdc === "0x" ? "0x0" : usdc), eth: BigInt(eth), chain };
+  const chains = await Promise.all(
+    routes.map(async (route) => {
+      const chain = EVM_CHAINS[route.chain_id];
+      const [usdc, gas] = await Promise.all([
+        evmRpc(chain.rpc, "eth_call", [{ to: route.token, data: `0x70a08231${address.slice(2).padStart(64, "0")}` }, "latest"]),
+        evmRpc(chain.rpc, "eth_getBalance", [address, "latest"]),
+      ]).catch(() => ["0x0", "0x0"]);
+      return { route: { ...route, decimals: route.decimals ?? 6 }, chain, usdc: BigInt(usdc === "0x" ? "0x0" : usdc), gas: BigInt(gas) };
+    }),
+  );
+  return { address, chains };
 }
 
 async function evmRpc(url: string, method: string, params: unknown[]): Promise<string> {

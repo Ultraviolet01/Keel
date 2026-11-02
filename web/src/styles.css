@@ -470,3 +470,4 @@ input:focus, textarea:focus { outline: none; border-color: var(--teal); box-shad
 }
 .wrap-any { overflow-wrap: anywhere; }
 .view-banner, .readonly-banner { overflow-wrap: anywhere; }
+.evm-chains td:first-child { white-space: nowrap; }

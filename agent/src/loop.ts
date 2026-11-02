@@ -20,7 +20,7 @@ import {
 import type { Chain, Config } from "./chain";
 import { explain } from "./explain";
 import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
-import { balances, broadcast, chainInfo, client, prepareTransfer, receipt, usdc, vaultAddress, vaultRoute } from "./evm";
+import { balances, broadcast, chainInfo, client, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
 
 const STATE_FILE = resolve(import.meta.dirname, "../state.json");
 const LEDGER_FILE = resolve(import.meta.dirname, "../ledger.jsonl");
@@ -54,6 +54,7 @@ interface RawBill {
   due: string; // YYYY-MM-DD, or "+N" for N days from today
   memo?: string;
   chain?: string;
+  token?: string;
 }
 
 /**
@@ -77,6 +78,8 @@ export function loadBills(vaultId: string, decimals: number, today: string, bad:
       if (seen.has(b.id)) throw new Error("duplicate id");
       if (typeof b.payee !== "string" || !b.payee) throw new Error("payee is missing");
       if (typeof b.due !== "string") throw new Error("due is missing");
+      if (b.token !== undefined && (typeof b.token !== "string" || !/^[A-Za-z0-9.]{1,12}$/.test(b.token))) throw new Error("token must be a symbol like USDT");
+      if (b.token !== undefined && !b.chain) throw new Error("token needs a chain");
       const amount = toUnits(String(b.amount), decimals);
       if (amount <= 0n) throw new Error("amount must be above zero");
       const due = /^\+\d{1,4}$/.test(b.due) ? addDays(today, Number(b.due.slice(1))) : b.due;
@@ -383,18 +386,29 @@ type Route = (
 const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals, handled, label, dryRun, say, billRef) => {
   if (cfg.network !== "mainnet") throw new Error("NEAR Intents runs on mainnet only");
   await intentsTokens(); // health check: throws while 1Click is down
-  const from = await chain.view<{ symbol: string }>(tokenId, "ft_metadata");
-  const [origin, dest] = await Promise.all([findToken("near", from.symbol), findToken(bill.chain!, from.symbol)]);
+  const from = await chain.view<{ symbol: string; decimals: number }>(tokenId, "ft_metadata");
+  const want = bill.token ?? from.symbol;
+  const [origin, dest] = await Promise.all([findToken("near", from.symbol), findToken(bill.chain!, want)]);
+  // The bill's amount is in the payee's token; the payee must receive all of it.
+  const out = (bill.amount * 10n ** BigInt(dest.decimals)) / 10n ** BigInt(from.decimals);
   const q = await quote({
     dry: dryRun,
+    swapType: "EXACT_OUTPUT",
     originAsset: origin.assetId,
     destinationAsset: dest.assetId,
-    amount: bill.amount.toString(),
+    amount: out.toString(),
     recipient: bill.payee,
     refundTo: vaultId,
     deadline: deadlineFromNow(60),
   });
-  const route = `${q.amountInFormatted} in, at least ${q.minAmountOut} out on ${bill.chain} via NEAR Intents, about ${q.timeEstimate ?? "?"} s`;
+  // Price check with 1Click's own USD prices: refuse a quote that costs more than 3% over the bill's value.
+  const valueIn = (Number(q.amountIn) / 10 ** origin.decimals) * origin.price;
+  const valueOut = (Number(out) / 10 ** dest.decimals) * dest.price;
+  if (valueOut > 0 && valueIn > valueOut * 1.03) {
+    throw new Error(`the quote costs $${valueIn.toFixed(2)} for a $${valueOut.toFixed(2)} bill, more than 3% over`);
+  }
+  const fee = valueOut > 0 ? ` (${(((valueIn - valueOut) / valueOut) * 100).toFixed(2)}% cost)` : "";
+  const route = `${q.amountInFormatted} ${from.symbol} in for exactly ${q.amountOutFormatted} ${want} on ${bill.chain}${fee} via NEAR Intents, about ${q.timeEstimate ?? "?"} s`;
   if (dryRun || !q.depositAddress) {
     say("decide", `${label}. Would propose a cross-chain move (dry run): ${route}`);
     return true;
@@ -403,7 +417,7 @@ const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals,
   const reason = `Cross-chain to ${bill.chain}: ${route}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
   const r = await chain.callAsAgent(vaultId, "propose_payment", {
     receiver_id: q.depositAddress,
-    amount: bill.amount.toString(),
+    amount: q.amountIn, // what the vault must send so the payee gets the whole bill
     memo: bill.memo ?? bill.id,
     reason: reason.slice(0, 270),
     valid_until_ms: validUntil,
@@ -417,18 +431,20 @@ const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals,
 const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say, billRef) => {
   const info = await vaultRoute(chain, vaultId);
   if (!info) throw new Error("this vault was created before Chain Signatures");
-  if (!info.route) throw new Error("the owner turned the vault's EVM route off");
-  const route = info.route;
-  if (chainInfo(route.chain_id).name !== bill.chain) throw new Error(`the vault's EVM route is not ${bill.chain}`);
+  const route = routeFor(info.routes, bill.chain!);
+  if (!route) throw new Error(`the vault has no ${bill.chain} route (it has ${info.routes.map((r) => chainInfo(r.chain_id).name).join(", ") || "none"})`);
+  if (bill.token && bill.token.toUpperCase() !== "USDC") throw new Error(`Chain Signatures pays USDC only, not ${bill.token}`);
   if (!/^0x[0-9a-fA-F]{40}$/.test(bill.payee)) throw new Error("payee is not a 0x address");
   const from = await vaultAddress(chain, info.mpc_id, vaultId, info.path);
+  const units = toTokenUnits(bill.amount, route.decimals);
+  const gasToken = chainInfo(route.chain_id).gas;
   const { usdc: onChain, eth } = await balances(route.chain_id, route.token, from);
-  if (onChain < bill.amount) throw new Error(`the vault's ${bill.chain} address ${from} holds ${usdc(onChain)}, needs ${usdc(bill.amount)}; top it up`);
-  if (eth === 0n) throw new Error(`the vault's ${bill.chain} address ${from} has no ETH for gas`);
-  // Earlier transfers that can still be signed keep their nonces; expired offers never will.
+  if (onChain < units) throw new Error(`the vault's ${bill.chain} address ${from} holds ${usdc(onChain, route.decimals)}, needs ${usdc(units, route.decimals)}; top it up`);
+  if (eth === 0n) throw new Error(`the vault's ${bill.chain} address ${from} has no ${gasToken} for gas`);
+  // Earlier transfers on this chain that can still be signed keep their nonces; expired offers never will.
   const live = (p: Proposal) => p.status === "signing" || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > Date.now()));
-  const reserved = proposals.filter((p) => p.evm && live(p)).map((p) => p.evm!.nonce);
-  const evm = await prepareTransfer(route, from, bill.payee, bill.amount, reserved);
+  const reserved = proposals.filter((p) => p.evm && p.evm.chain_id === route.chain_id && live(p)).map((p) => p.evm!.nonce);
+  const evm = await prepareTransfer(route, from, bill.payee, units, reserved);
   const where = `from the vault's own ${bill.chain} address ${from.slice(0, 8)}… via NEAR Chain Signatures`;
   if (dryRun) {
     say("decide", `${label}. Would propose paying ${where} (dry run, nonce ${evm.nonce})`);

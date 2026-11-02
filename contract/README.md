@@ -4,7 +4,7 @@ Rust smart contract (near-sdk 5.30) that holds the company's USDC and enforces t
 
 ## Run the tests
 
-1. Run `cargo test` in this folder. You see 68 tests pass.
+1. Run `cargo test` in this folder. You see 75 tests pass.
 2. Each rule in the root README has a test, for example `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `pause_blocks_everything_until_resume`, `agent_cannot_pay_the_same_bill_twice`, `at_most_50_proposals_wait_at_once` and `signing_hash_matches_an_independent_encoder`.
 
 ## Build the wasm
@@ -18,7 +18,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 
 | Method | Caller | Arguments |
 | --- | --- | --- |
-| `new` | Deployer, once | `owner_id`, `agent_key`, `token_id`. Starts with no policy: caps 0, empty lists. Sets the Base route for the network (Base Sepolia USDC on testnet) |
+| `new` | Deployer, once | `owner_id`, `agent_key`, `token_id`. Starts with no policy: caps 0, empty lists. Sets the EVM routes for the network: Base, Ethereum and Arbitrum Sepolia on testnet; Base, Ethereum, Arbitrum and BNB Chain on mainnet |
 | `execute_payment` | Agent | `receiver_id`, `amount`, `memo?`, `bill_ref?` |
 | `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason`, `valid_until_ms?`, `evm?`, `bill_ref?`. At most 50 wait at once |
 | `approve` | Owner, 1 yoctoNEAR | `proposal_id`. Refused after `valid_until_ms`; for an `evm` proposal it asks the MPC contract to sign (attach 300 Tgas) |
@@ -28,7 +28,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | `revoke_agent` | Owner, 1 yoctoNEAR | none. Deletes the agent key from the vault account |
 | `set_agent_key` | Owner, 1 yoctoNEAR | `agent_key`. Replaces the agent key (or adds one after a revoke) |
 | `withdraw` | Owner, 1 yoctoNEAR | `receiver_id`, `amount`, `memo?`. Works while paused |
-| `set_evm_route` | Owner, 1 yoctoNEAR | `route: { chain_id, token, max_fee_per_gas, max_gas }` or `null` to turn Base payments off |
+| `set_evm_route` | Owner, 1 yoctoNEAR | `chain_id`, `route: { chain_id, token, decimals, max_fee_per_gas, max_gas }`, or `route: null` to turn that chain off |
 | `withdraw_evm` | Owner, 1 yoctoNEAR | `evm`, `amount`, `memo?`. Signs a USDC transfer out of the vault's Base address |
 | `release_bill` | Owner, 1 yoctoNEAR | `bill_ref`. Lets a bill be paid again after the owner confirms it never arrived |
 | `check_payment` | Anyone (view) | `receiver_id`, `amount` → `{ band, reason }` |
@@ -36,7 +36,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | `get_proposal` / `get_proposals` | Anyone (view) | `proposal_id` / `from_index?`, `limit?` |
 | `bill_paid_at` | Anyone (view) | `bill_ref` → time in ms, or `null` |
 | `pending_count` | Anyone (view) | none |
-| `get_evm_route` | Anyone (view) | none → route, MPC contract, path and predecessor for deriving the Base address |
+| `get_evm_route` | Anyone (view) | none → `routes`, MPC contract, path and predecessor for deriving the vault's EVM address |
 
 `evm` is `{ chain_id, token, to, nonce, max_fee_per_gas, max_priority_fee_per_gas, gas_limit }`. For an `evm` proposal, `receiver_id` is the payee's lowercase 0x address, so the blocklist applies to it.
 
@@ -50,5 +50,5 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 - **Approved proposals do not count against the daily cap.** The cap limits what the agent spends alone.
 - **Each bill is paid once.** `bill_ref` is recorded when a payment starts; a second payment or proposal for it is refused. A failed transfer or a failed MPC signature frees it again.
 - **Flood limits.** At most 50 proposals wait, a newer proposal for the same bill deletes the waiting one, and the agent's calls are refused once the vault's spare NEAR would drop below 0.2, so the owner can always act.
-- **Base transfers.** The vault builds the EIP-1559 USDC `transfer`, hashes it with keccak256, asks `v1.signer-prod.testnet` (`v1.signer` on mainnet) to sign it under path `evm`, and stores the signed bytes and hash in `evm_signed`. It checks chain, token, payee, gas and fee caps first.
+- **Base transfers.** The vault builds the EIP-1559 USDC `transfer`, hashes it with keccak256, asks `v1.signer-prod.testnet` (`v1.signer` on mainnet) to sign it under path `evm`, and stores the signed bytes and hash in `evm_signed`. It checks chain, token, payee, gas and fee caps first, and converts the amount from the vault's 6 decimals to the token's (18 for USDC on BNB Chain), fixing it in `evm_amount` when the proposal is made.
 - **Events** are logged as `EVENT_JSON:{"standard":"keel",...}` for `payment_started`, `payment_executed`, `payment_failed`, `proposal_created`, `proposal_approved`, `proposal_rejected`, `proposal_superseded`, `policy_updated`, `paused`, `resumed`, `withdrawal_started`, `agent_revoked`, `agent_key_set`, `evm_route_set`, `evm_signed`, `evm_sign_failed` and `bill_released`.

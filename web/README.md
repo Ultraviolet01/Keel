@@ -14,7 +14,7 @@ Founders connect a NEAR wallet, create a vault for each company, set its limits 
 8. Open the company card at the top of the sidebar. You see all your companies and **Add company**.
 9. Open **Approvals** to approve or reject what Keel proposed, and use **Pause all payments** in the sidebar to stop everything at once.
 
-**Without a wallet:** open `/app?view=keel-owner.testnet`. You see that founder's companies (`nova`, `orbit`, `harbor`, and the older `kora` and `lumen`) read-only, with live testnet data; switch between them in the company card. `/app?view=vega-founder.testnet` shows `vega`, whose Wallets page has the vault's own Base Sepolia address and balance, and whose Approvals page shows Base transfers signed through Chain Signatures. A link to an invalid account, or to one with no vaults, says so.
+**Without a wallet:** open `/app?view=keel-owner.testnet`. You see that founder's companies (`anchor`, `nova`, `orbit`, `harbor`, and the older `kora` and `lumen`) read-only, with live testnet data; switch between them in the company card. `/app?view=vega-founder.testnet` shows `vega` and `multi`; their Wallets pages list the vault's own EVM address and its balance on each chain, and whose Approvals page shows Base transfers signed through Chain Signatures. A link to an invalid account, or to one with no vaults, says so.
 
 ## What each screen does
 
@@ -26,7 +26,7 @@ Founders connect a NEAR wallet, create a vault for each company, set its limits 
 | Approvals | vault `get_proposals`, `check_payment`; offer expiry counts down and Approve turns off once it passes | `approve` (300 Tgas for a Base transfer), `reject` |
 | Activity | vault `get_proposals` | – |
 | Rules | vault `get_policy` | `update_policy` (Set limits), `revoke_agent` |
-| Wallets | token balance, vault gas, the vault's Base address and its USDC and ETH (via the MPC contract's `derived_public_key` and Base RPC) | – |
+| Wallets | token balance, vault gas, the vault's EVM address and its USDC and gas balance on each of its chains (via the MPC contract's `derived_public_key` and each chain's RPC) | – |
 | Sidebar status | vault `get_policy` | `pause`, `resume` |
 
 Company names are kept in this browser only; the chain stores the vault address.
@@ -47,6 +47,6 @@ Company names are kept in this browser only; the chain stores the vault address.
 | `src/Sample.tsx` | The sample treasury shown blurred behind the first panels |
 | `src/vault.ts` | Reads one vault's live state |
 | `src/near.ts` | Network settings, NEAR Connect, JSON-RPC reads, number formats |
-| `src/evm.ts` | The vault's Base address from Chain Signatures, and its balances |
+| `src/evm.ts` | The vault's EVM address from Chain Signatures, and its balances on each chain |
 | `src/icons.tsx` | Line icons and Keel's load-line mark |
 | `src/styles.css` | Tokens sampled from the Figma screens |

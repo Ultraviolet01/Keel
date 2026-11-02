@@ -89,7 +89,7 @@ for (const [m, args] of [
   record(refused(r, /private/i), `outsider cannot call the private callback ${m}`, short(r));
 }
 for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_route"]) {
-  const r = await call("outsider", m, { update: {}, reason: "x", receiver_id: OUTSIDER, amount: "1", bill_ref: "x", route: null }, 1n);
+  const r = await call("outsider", m, { update: {}, reason: "x", receiver_id: OUTSIDER, amount: "1", bill_ref: "x", chain_id: 1, route: null }, 1n);
   record(refused(r, /only the owner/), `outsider cannot call owner method ${m}`, short(r));
 }
 {
@@ -186,10 +186,12 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
 
 // ------------------------------------------------ 6. EVM route abuse through the agent key
 {
-  const route = await chain.view<{ route: { token: string } }>(VAULT, "get_evm_route");
-  const base = { chain_id: 84532, token: route.route.token, to: "0x00000000000000000000000000000000000000aa", nonce: 0, max_fee_per_gas: "1000000", max_priority_fee_per_gas: "1000000", gas_limit: 60000 };
+  const info = await chain.view<{ routes?: { chain_id: number; token: string }[]; route?: { token: string } }>(VAULT, "get_evm_route");
+  const token = info.routes?.find((r) => r.chain_id === 84532)?.token ?? info.route!.token;
+  const base = { chain_id: 84532, token, to: "0x00000000000000000000000000000000000000aa", nonce: 0, max_fee_per_gas: "1000000", max_priority_fee_per_gas: "1000000", gas_limit: 60000 };
   const tries: [string, object, string, RegExp][] = [
-    ["another chain id", { ...base, chain_id: 1 }, base.to, /chain is not/],
+    ["a chain the vault has no route for", { ...base, chain_id: 1 }, base.to, /chain is not/],
+    ["Base's USDC on the Arbitrum route", { ...base, chain_id: 421614 }, base.to, /route's token/],
     ["another token", { ...base, token: "0x00000000000000000000000000000000000000bb" }, base.to, /route's token/],
     ["a huge fee", { ...base, max_fee_per_gas: "999000000000" }, base.to, /fee over/],
     ["a huge gas limit", { ...base, gas_limit: 10_000_000 }, base.to, /gas limit over/],
@@ -216,8 +218,9 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   const rv = await call("owner", "revoke_agent", {}, 1n);
   const dead = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "x", bill_ref: `${run}-fired` });
   const pk = (await chain.policy(VAULT)).agent_key;
-  await call("owner", "set_agent_key", { agent_key: chain.agentPublicKey() }, 1n);
-  const back = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "rehired", bill_ref: `${run}-rehired` });
+  await call("owner", "set_agent_key", { agent_key: await chain.agentPublicKey() }, 1n);
+  let back = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "rehired", bill_ref: `${run}-rehired` });
+  if (!back.ok) console.log("   rehired call 1:", back.error.slice(0, 300));
   record(rv.ok && !dead.ok && pk === null && back.ok, "revoked agent can do nothing; rehired agent works again", `revoke ${rv.ok ? "ok" : short(rv)}; fired call: ${short(dead).slice(0, 50)}; rehired ${back.ok ? "ok" : short(back)}`);
   if (back.ok) await call("owner", "reject", { proposal_id: back.value }, 1n);
 }

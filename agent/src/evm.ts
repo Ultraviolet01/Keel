@@ -1,4 +1,4 @@
-// The vault's own address on an EVM chain (Base), controlled through NEAR
+// The vault's own address on EVM chains (Base, Ethereum, Arbitrum, BNB Chain), controlled through NEAR
 // Chain Signatures. The vault builds and hashes the USDC transfer itself and
 // asks NEAR's MPC network to sign it after the owner approves; Keel only
 // reads the chain, fills in nonce and fees, and broadcasts the signed bytes
@@ -10,6 +10,8 @@ import type { Chain } from "./chain";
 export interface EvmRoute {
   chain_id: number;
   token: string;
+  /** Token decimals on that chain; vaults from before multi-chain routes omit it (6). */
+  decimals?: number;
   max_fee_per_gas: string;
   max_gas: number;
 }
@@ -24,9 +26,16 @@ export interface EvmTransfer {
   gas_limit: number;
 }
 
-const NAMES: Record<number, { name: string; rpc: string; explorer: string }> = {
-  84532: { name: "base", rpc: "https://sepolia.base.org", explorer: "https://sepolia.basescan.org" },
-  8453: { name: "base", rpc: "https://mainnet.base.org", explorer: "https://basescan.org" },
+// Names match NEAR Intents' chain names, so a bill's "chain" means the same on both routes.
+const NAMES: Record<number, { name: string; rpc: string; explorer: string; gas: string }> = {
+  84532: { name: "base", rpc: "https://sepolia.base.org", explorer: "https://sepolia.basescan.org", gas: "ETH" },
+  8453: { name: "base", rpc: "https://mainnet.base.org", explorer: "https://basescan.org", gas: "ETH" },
+  11155111: { name: "eth", rpc: "https://ethereum-sepolia-rpc.publicnode.com", explorer: "https://sepolia.etherscan.io", gas: "ETH" },
+  1: { name: "eth", rpc: "https://ethereum-rpc.publicnode.com", explorer: "https://etherscan.io", gas: "ETH" },
+  421614: { name: "arb", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
+  42161: { name: "arb", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
+  56: { name: "bsc", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
+  97: { name: "bsc", rpc: "https://data-seed-prebsc-1-s1.bnbchain.org:8545", explorer: "https://testnet.bscscan.com", gas: "BNB" },
 };
 
 export function chainInfo(chainId: number) {
@@ -39,14 +48,27 @@ export function client(chainId: number) {
   return createPublicClient({ transport: http(chainInfo(chainId).rpc, { timeout: 20_000 }) });
 }
 
-/** The vault's EVM route, or null for vaults created before Chain Signatures. */
+/**
+ * The vault's EVM routes, or null for vaults created before Chain Signatures.
+ * Vaults from before multi-chain routes return a single `route`.
+ */
 export async function vaultRoute(chain: Chain, vaultId: string) {
   try {
-    return await chain.view<{ route: EvmRoute | null; mpc_id: string; path: string; predecessor: string }>(vaultId, "get_evm_route");
+    const r = await chain.view<{ routes?: EvmRoute[]; route?: EvmRoute | null; mpc_id: string; path: string; predecessor: string }>(vaultId, "get_evm_route");
+    const routes = (r.routes ?? (r.route ? [r.route] : [])).map((x) => ({ ...x, decimals: x.decimals ?? 6 }));
+    return { routes, mpc_id: r.mpc_id, path: r.path, predecessor: r.predecessor };
   } catch {
     return null;
   }
 }
+
+/** The vault's route for a bill's chain name ("base", "eth", "arb", "bsc"), if it has one. */
+export function routeFor(routes: EvmRoute[], chainName: string) {
+  return routes.find((r) => NAMES[r.chain_id]?.name === chainName);
+}
+
+/** Vault amounts have 6 decimals; scales one to the route token's decimals. */
+export const toTokenUnits = (amount: bigint, decimals = 6) => amount * 10n ** BigInt(decimals - 6);
 
 /** The vault's EVM address, derived by NEAR's MPC contract from the vault account and path. */
 export async function vaultAddress(chain: Chain, mpcId: string, vaultId: string, path: string): Promise<Hex> {
@@ -61,8 +83,8 @@ export function addressFromNearKey(pk: string): Hex {
   return `0x${keccak256(bytes).slice(-40)}`;
 }
 
-/** Both route tokens (USDC on Base and Base Sepolia) have 6 decimals. */
-export const usdc = (units: bigint) => `${formatUnits(units, 6)} USDC`;
+/** A token amount in the route token's own decimals, as USDC. */
+export const usdc = (units: bigint, decimals = 6) => `${formatUnits(units, decimals)} USDC`;
 
 export async function balances(chainId: number, token: string, owner: Hex) {
   const c = client(chainId);
