@@ -13,4 +13,5 @@
 - Never deploy to mainnet, sign mainnet transactions or spend tokens without Ultraviolet's explicit OK.
 - Keep README.md in "do X, see Y" steps with no marketing copy. AI judges (Claude Code, Codex) run it first. Update script names in the README whenever they change.
 - List new libraries and templates in the README's "Libraries and AI-generated code" section.
+- Work and push on `main` only. Do not create other branches. Ask Ultraviolet before every push.
 - Commits are authored as `ultraviolet01 <ultravioletadewale@gmail.com>`. Set `git config user.name` and `user.email` to that before committing. Never add Co-Authored-By, Claude-Session or any other Claude attribution lines to commits or PRs.
