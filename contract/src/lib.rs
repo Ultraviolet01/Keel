@@ -133,25 +133,18 @@ pub struct KeelVault {
 
 #[near]
 impl KeelVault {
+    /// Starts with no policy: both caps are 0 and the allowlist is empty, so
+    /// every payment needs the owner's approval until the owner sets limits
+    /// with `update_policy`.
     #[init]
-    pub fn new(
-        owner_id: AccountId,
-        agent_id: AccountId,
-        token_id: AccountId,
-        per_payment_cap: U128,
-        daily_cap: U128,
-    ) -> Self {
+    pub fn new(owner_id: AccountId, agent_id: AccountId, token_id: AccountId) -> Self {
         require!(owner_id != agent_id, "owner and agent must be different accounts");
-        require!(
-            per_payment_cap.0 <= daily_cap.0,
-            "per-payment cap cannot exceed the daily cap"
-        );
         Self {
             owner_id,
             agent_id,
             token_id,
-            per_payment_cap: per_payment_cap.0,
-            daily_cap: daily_cap.0,
+            per_payment_cap: 0,
+            daily_cap: 0,
             spent_day: today(),
             spent_today: 0,
             paused: false,

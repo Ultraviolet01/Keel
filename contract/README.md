@@ -4,7 +4,7 @@ Rust smart contract (near-sdk 5.30) that holds the company's USDC and enforces t
 
 ## Run the tests
 
-1. Run `cargo test` in this folder. You see 22 tests pass.
+1. Run `cargo test` in this folder. You see 24 tests pass.
 2. Each rule in the root README has a test, for example `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy` and `pause_blocks_everything_until_resume`.
 
 ## Build the wasm
@@ -18,7 +18,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 
 | Method | Caller | Arguments |
 | --- | --- | --- |
-| `new` | Deployer, once | `owner_id`, `agent_id`, `token_id`, `per_payment_cap`, `daily_cap` |
+| `new` | Deployer, once | `owner_id`, `agent_id`, `token_id`. Starts with no policy: caps 0, empty lists |
 | `execute_payment` | Agent | `receiver_id`, `amount`, `memo?` |
 | `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason` |
 | `approve` | Owner, 1 yoctoNEAR | `proposal_id` |

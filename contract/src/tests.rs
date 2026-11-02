@@ -26,19 +26,24 @@ fn as_owner(at: u64) {
     set_ctx("kora.testnet", at, 1);
 }
 
-/// A vault with the demo policy: 100 USDC per payment, 500 per day,
-/// Northwind allowlisted and one address blocklisted.
-fn vault() -> KeelVault {
+fn fresh_vault() -> KeelVault {
     as_owner(DAY);
-    let mut v = KeelVault::new(
+    KeelVault::new(
         acc("kora.testnet"),
         acc("agent.kora.testnet"),
         acc("usdc.testnet"),
-        U128(100 * USDC),
-        U128(500 * USDC),
-    );
+    )
+}
+
+/// A vault after the owner sets a sample policy: 100 USDC per payment,
+/// 500 per day, Northwind allowlisted and one address blocklisted.
+fn vault() -> KeelVault {
+    let mut v = fresh_vault();
+    as_owner(DAY);
     v.update_policy(
         PolicyUpdate {
+            per_payment_cap: Some(U128(100 * USDC)),
+            daily_cap: Some(U128(500 * USDC)),
             allow: vec![acc("northwind.testnet"), acc("payroll.kora.testnet")],
             block: vec![acc("scam.testnet")],
             ..Default::default()
@@ -46,6 +51,26 @@ fn vault() -> KeelVault {
         "demo setup".into(),
     );
     v
+}
+
+#[test]
+fn new_vault_has_no_policy_and_needs_approval_for_everything() {
+    let v = fresh_vault();
+    let policy = v.get_policy();
+    assert_eq!(policy.per_payment_cap, U128(0));
+    assert_eq!(policy.daily_cap, U128(0));
+    assert!(policy.allowlist.is_empty() && policy.blocklist.is_empty());
+    as_agent(DAY);
+    let check = v.check_payment(acc("northwind.testnet"), U128(1 * USDC));
+    assert_eq!(check.band, Band::NeedsApproval);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: new payee")]
+fn new_vault_refuses_agent_payments_until_owner_sets_policy() {
+    let mut v = fresh_vault();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(1 * USDC), None);
 }
 
 #[test]
