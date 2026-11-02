@@ -1,0 +1,21 @@
+{
+  "name": "keel-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Keel's agent: watches every founder's vault, pays inside the rules, proposes the rest",
+  "scripts": {
+    "agent": "tsx src/main.ts",
+    "demo": "tsx src/demo.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "near-api-js": "7.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

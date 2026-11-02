@@ -14,7 +14,7 @@ Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`busin
 
 Everything below runs on NEAR testnet and costs nothing.
 
-**Fastest path:** after steps 1 and 2, run `npm run demo`. In under 2 minutes you see one full loop on testnet: Keel reads balances, forecasts the payroll shortfall, pays one bill alone, files one proposal, auto-approves it as the demo owner, settles it and writes every move to the ledger page. The steps below do the same thing one at a time.
+**Fastest path:** run `cd agent && npm install && npm run demo -- --dry-run`. In a few seconds you see one full loop on `nova.keel.testnet`: Keel reads the vault, forecasts 14 days, checks each bill's payee, and decides to pay, propose or refuse, with nothing signed. To sign for real, prepare the vault once with `scripts/setup-demo-testnet.sh` and drop `--dry-run`; details in [agent/README.md](agent/README.md).
 
 1. **Install.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm install`. You see the install finish with no errors.
 2. **Configure.** Run `cp .env.example .env` and fill in an owner and an agent testnet account. You see both account ids printed by `npm run check-env`.
@@ -151,8 +151,8 @@ NEAR Intents has no testnet, so cross-chain moves run on mainnet through a secon
 | --- | --- |
 | `contract/` | Keel Vault smart contract and its tests |
 | `factory/` | Keel factory: one vault per company, created when a founder signs up or adds a company |
-| `agent/` | The loop: observe, forecast, decide, check, act, reconcile, learn |
-| `agent/memory.json` | Human overrides and rule-draft history |
+| `agent/` | The agent service: observe, forecast, check, decide, act, learn, for every vault on the factory |
+| `config/bills.json` | Bills Keel watches for each vault (due dates can be relative, like `+2`) |
 | `config/treasury.json` | Wallets, minimums, payees and upcoming bills |
 | `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair), and the planned demo scripts |
 | `web/` | The app: wallet sign-in, one vault per company, company switcher and Overview (Vite, React, TypeScript, NEAR Connect) |
@@ -180,6 +180,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 
 - [near-sdk 5.30](https://crates.io/crates/near-sdk) and [near-contract-standards 5.30](https://crates.io/crates/near-contract-standards) for the contracts
 - [cargo-near 0.22](https://crates.io/crates/cargo-near) to build them, [near-cli-rs 0.30](https://www.npmjs.com/package/near-cli-rs) to deploy and call them
+- [near-api-js 7.3](https://www.npmjs.com/package/near-api-js) for the agent's signing, run with [tsx](https://www.npmjs.com/package/tsx); optional [NEAR AI Cloud](https://cloud.near.ai) for proposal wording
 - [NEAR Connect 0.11](https://www.npmjs.com/package/@hot-labs/near-connect) for wallet sign-in, with [React 19](https://react.dev), [Vite 8](https://vite.dev) and TypeScript 5.9 for the app
 
 Parts of this project are written with AI coding agents (Claude Code).
