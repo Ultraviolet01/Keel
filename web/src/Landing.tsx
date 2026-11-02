@@ -91,11 +91,13 @@ function Compass() {
   );
 }
 
-function Waves({ y, offset = 0 }: { y: number; offset?: number }) {
+/** A row of wave crests. Each row drifts sideways in a seamless loop (one
+ * crest spacing per cycle), at its own speed and direction. */
+function Waves({ y, offset = 0, speed = "slow" }: { y: number; offset?: number; speed?: "slow" | "mid" | "fast" | "back" }) {
   return (
-    <g stroke="#ffffff" strokeWidth="1.5" opacity="0.8" fill="none">
-      {Array.from({ length: 22 }, (_, i) => {
-        const x = offset + i * 70;
+    <g className={`waves ${speed}`} stroke="#ffffff" strokeWidth="1.5" opacity="0.8" fill="none">
+      {Array.from({ length: 24 }, (_, i) => {
+        const x = offset - 70 + i * 70;
         return <path key={i} d={`M${x} ${y} q16 -5 32 0`} />;
       })}
     </g>
@@ -126,12 +128,13 @@ function Scene() {
         <Compass />
         <rect x="0" y="430" width="1440" height="210" fill="#b3cfd6" />
         <line x1="0" x2="1440" y1="430" y2="430" stroke="#93b3bc" strokeWidth="2" />
+        <Waves y={452} offset={20} speed="fast" />
         <Ship />
         {/* water in front of the hull, so the ship sinks into it */}
         <rect className="front-water" x="0" y="500" width="1440" height="154" fill="#b3cfd6" opacity="0.92" />
-        <Waves y={506} />
-        <Waves y={560} offset={35} />
-        <Waves y={620} />
+        <Waves y={506} speed="mid" />
+        <Waves y={560} offset={35} speed="back" />
+        <Waves y={620} speed="slow" />
       </svg>
     </div>
   );
