@@ -9,7 +9,9 @@
     "demo": "tsx src/demo.ts",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "intents": "tsx src/intents-cli.ts"
+    "intents": "tsx src/intents-cli.ts",
+    "stress": "tsx stress/live.ts",
+    "stress:flood": "tsx stress/spam.ts"
   },
   "dependencies": {
     "near-api-js": "7.3.1",

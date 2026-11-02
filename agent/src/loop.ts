@@ -56,17 +56,43 @@ interface RawBill {
   chain?: string;
 }
 
-export function loadBills(vaultId: string, decimals: number, today: string): Bill[] {
+/**
+ * Reads the vault's bills. A bill with a bad amount, date, id or payee is
+ * skipped and reported through `bad`, so one typo never stops the others.
+ */
+export function loadBills(vaultId: string, decimals: number, today: string, bad: (msg: string) => void = () => {}): Bill[] {
   if (!existsSync(BILLS_FILE)) return [];
-  const all = JSON.parse(readFileSync(BILLS_FILE, "utf8")) as Record<string, RawBill[]>;
-  return (all[vaultId] ?? []).map((b) => ({
-    ...b,
-    amount: toUnits(b.amount, decimals),
-    due: b.due.startsWith("+") ? addDays(today, Number(b.due.slice(1))) : b.due,
-  }));
+  let all: Record<string, RawBill[]>;
+  try {
+    all = JSON.parse(readFileSync(BILLS_FILE, "utf8"));
+  } catch (e) {
+    bad(`config/bills.json is not valid JSON (${String(e).slice(0, 80)}); no bills read`);
+    return [];
+  }
+  const out: Bill[] = [];
+  const seen = new Set<string>();
+  for (const b of Array.isArray(all[vaultId]) ? all[vaultId] : []) {
+    try {
+      if (typeof b?.id !== "string" || !/^[\w.:-]{1,64}$/.test(b.id)) throw new Error("id must be 1 to 64 letters, digits or - _ . :");
+      if (seen.has(b.id)) throw new Error("duplicate id");
+      if (typeof b.payee !== "string" || !b.payee) throw new Error("payee is missing");
+      if (typeof b.due !== "string") throw new Error("due is missing");
+      const amount = toUnits(String(b.amount), decimals);
+      if (amount <= 0n) throw new Error("amount must be above zero");
+      const due = /^\+\d{1,4}$/.test(b.due) ? addDays(today, Number(b.due.slice(1))) : b.due;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(`${due}T00:00:00Z`))) throw new Error(`due "${b.due}" is not YYYY-MM-DD or +N`);
+      seen.add(b.id);
+      out.push({ ...b, amount, due });
+    } catch (e) {
+      bad(`skipped bill ${JSON.stringify(b?.id ?? "?")}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return out;
 }
 
+/** "1,234.50" to smallest units. Rejects signs, exponents and anything else. */
 export function toUnits(text: string, decimals: number): bigint {
+  if (!/^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(text)) throw new Error(`"${text}" is not an amount like 1,234.50`);
   const [w, f = ""] = text.replace(/,/g, "").split(".");
   return BigInt(w) * 10n ** BigInt(decimals) + BigInt(f.padEnd(decimals, "0").slice(0, decimals) || "0");
 }
@@ -104,7 +130,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const meta = await chain.view<{ symbol: string; decimals: number }>(policy.token_id, "ft_metadata");
   const [balance, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
-  const bills = loadBills(vaultId, meta.decimals, o.today);
+  const bills = loadBills(vaultId, meta.decimals, o.today, (msg) => say("observe", msg));
   const handled = (state.handled[vaultId] ??= {});
   const open = bills.filter((b) => !handled[b.id]);
   say("observe", `balance ${money(balance)}, ${proposals.filter((p) => p.status === "pending").length} proposals waiting, ${open.length} open bills`);
@@ -324,7 +350,8 @@ async function crossChain(
       const done = await route(cfg, chain, vaultId, bill, tokenId, proposals, handled, label, dryRun, say, billRef);
       if (done) return;
     } catch (e) {
-      tried.push(`${route.name.replace(/^via/, "")}: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`);
+      const msg = (e as { shortMessage?: string }).shortMessage ?? (e instanceof Error ? e.message : String(e));
+      tried.push(`${route.name.replace(/^via/, "")}: ${msg.replace(/\s+/g, " ").slice(0, 140)}`);
     }
   }
   say("act", `${label}. No cross-chain route is available right now, so Keel will retry on the next run. ${tried.join(" | ")}`);

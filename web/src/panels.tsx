@@ -56,6 +56,30 @@ function friendly(e: unknown): string {
 
 // ------------------------------------------------------------------ connect
 
+/** Read-only view of an account that is not valid or owns no Keel companies. */
+export function ViewNotice({ accountId, invalid }: { accountId: string; invalid: boolean }) {
+  return (
+    <Overlay>
+      <section className="card panel center" role="dialog" aria-labelledby="view-title">
+        <span className="wordmark">KEEL</span>
+        <h1 className="serif" id="view-title">
+          {invalid ? "That is not a NEAR account name" : "No Keel companies here yet"}
+        </h1>
+        <p className="lead wrap-any">
+          {invalid ? (
+            <>The link asks to view <span className="mono">{accountId.slice(0, 80)}{accountId.length > 80 ? "…" : ""}</span>, which is not a valid NEAR account name.</>
+          ) : (
+            <><span className="mono">{accountId}</span> owns no Keel vaults on testnet.</>
+          )}
+        </p>
+        <a className="btn primary lg block" href="/app">
+          Open the app with your own wallet
+        </a>
+      </section>
+    </Overlay>
+  );
+}
+
 export function ConnectPanel({ onConnect, error }: { onConnect: () => void; error: string | null }) {
   return (
     <Overlay>

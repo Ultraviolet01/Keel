@@ -750,13 +750,14 @@ fn a_newer_proposal_for_the_same_bill_replaces_the_old_one() {
     as_agent(DAY);
     v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "quote 1".into(), None, None, bill("base-oct"));
     v.propose_payment(acc("deposit2.1click.near"), U128(5 * USDC), None, "quote 2".into(), None, None, bill("base-oct"));
-    assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Superseded);
+    assert!(v.get_proposal(1).is_none(), "the replaced offer is deleted");
+    assert_eq!(v.pending_count(), 1);
     assert_eq!(v.get_proposal(2).unwrap().status, ProposalStatus::Pending);
     assert!(get_logs().iter().any(|l| l.contains("proposal_superseded")));
 }
 
 #[test]
-#[should_panic(expected = "proposal is not pending")]
+#[should_panic(expected = "no such proposal")]
 fn a_superseded_proposal_cannot_be_approved() {
     let mut v = vault();
     as_agent(DAY);
@@ -822,4 +823,92 @@ fn bill_ref_must_be_short() {
     let mut v = vault();
     as_agent(DAY);
     let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, Some("x".repeat(65)));
+}
+
+// ------------------------------------------------- storage flood by a stolen agent key
+
+#[test]
+#[should_panic(expected = "50 proposals are already waiting")]
+fn at_most_50_proposals_wait_at_once() {
+    let mut v = vault();
+    as_agent(DAY);
+    for i in 0..51 {
+        v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "flood".into(), None, None, bill(&format!("flood-{i}")));
+    }
+}
+
+#[test]
+fn approving_or_rejecting_frees_a_waiting_slot() {
+    let mut v = vault();
+    as_agent(DAY);
+    for i in 0..50 {
+        v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "x".into(), None, None, bill(&format!("b-{i}")));
+    }
+    as_owner(DAY);
+    v.reject(1);
+    let _ = v.approve(2);
+    assert_eq!(v.pending_count(), 48);
+    as_agent(DAY);
+    v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "x".into(), None, None, bill("b-50"));
+    v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "x".into(), None, None, bill("b-51"));
+    assert_eq!(v.pending_count(), 50);
+}
+
+#[test]
+fn reproposing_one_bill_forever_keeps_one_record() {
+    let mut v = vault();
+    as_agent(DAY);
+    for _ in 0..200 {
+        as_agent(DAY); // one transaction per proposal
+        v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "r".repeat(280), None, None, bill("same-bill"));
+    }
+    assert_eq!(v.pending_count(), 1);
+    assert_eq!(v.get_proposals(None, Some(100)).len(), 1);
+}
+
+fn low_on_near() {
+    testing_env!(VMContextBuilder::new()
+        .current_account_id(acc(VAULT))
+        .predecessor_account_id(acc(VAULT))
+        .signer_account_pk(pk(AGENT_KEY))
+        .block_timestamp(DAY)
+        .storage_usage(100_000)
+        // 100 kB costs 1 NEAR; leave 0.1 NEAR spare, under the 0.2 reserve.
+        .account_balance(NearToken::from_millinear(1_100))
+        .build());
+}
+
+#[test]
+#[should_panic(expected = "the vault is low on NEAR for storage")]
+fn agent_cannot_propose_into_the_storage_reserve() {
+    let mut v = vault();
+    low_on_near();
+    v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "x".into(), None, None, bill("low"));
+}
+
+#[test]
+#[should_panic(expected = "the vault is low on NEAR for storage")]
+fn agent_cannot_pay_into_the_storage_reserve() {
+    let mut v = vault();
+    low_on_near();
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(USDC), None, bill("low"));
+}
+
+#[test]
+fn owner_can_still_act_when_the_vault_is_low_on_near() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("atlas.testnet"), U128(USDC), None, "x".into(), None, None, bill("p"));
+    testing_env!(VMContextBuilder::new()
+        .current_account_id(acc(VAULT))
+        .predecessor_account_id(acc("kora.testnet"))
+        .attached_deposit(NearToken::from_yoctonear(1))
+        .block_timestamp(DAY)
+        .storage_usage(100_000)
+        .account_balance(NearToken::from_millinear(1_100))
+        .build());
+    v.pause();
+    v.resume();
+    let _ = v.approve(1);
+    let _ = v.withdraw(acc("kora.testnet"), U128(USDC), None);
 }

@@ -55,6 +55,7 @@ The vault holds the USDC and the rules, and decides every payment's band itself.
 | `execute_payment` | Agent key | Pays an allowlisted payee if the amount is within the per-payment and daily caps, and the bill (`bill_ref`) was not paid before |
 | `propose_payment` | Agent key | Files a proposal for anything over the threshold, a new payee or a cross-chain swap. A newer proposal for the same bill replaces the waiting one |
 | `bill_paid_at` | Anyone (view) | When the vault paid a bill, or `null` |
+| `pending_count` | Anyone (view) | How many proposals wait for the owner; at most 50 |
 | `release_bill` | Owner key | Lets a bill be paid again, after the owner confirms a payment never arrived |
 | `check_payment` | Anyone (view) | Returns the band a payment would land in, without moving money |
 | `approve` / `reject` | Owner key | Executes or closes a proposal |
@@ -74,7 +75,7 @@ Two token details the vault handles itself: it attaches the 1 yoctoNEAR that `ft
 
 Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot attach a deposit, so only the owner's full-access key can approve, change the policy or pause.
 
-**Check the rules yourself:** run `cd contract && cargo test`. You see 62 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing`, `pause_blocks_everything_until_resume`, `evm_bill_with_a_huge_fee_is_refused`, `signing_hash_matches_an_independent_encoder`, `agent_cannot_pay_the_same_bill_twice` and `a_failed_transfer_frees_the_bill_to_be_paid_again`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
+**Check the rules yourself:** run `cd contract && cargo test`. You see 68 tests pass, one per rule, including `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `revoked_agent_can_do_nothing`, `pause_blocks_everything_until_resume`, `evm_bill_with_a_huge_fee_is_refused`, `signing_hash_matches_an_independent_encoder`, `agent_cannot_pay_the_same_bill_twice`, `a_failed_transfer_frees_the_bill_to_be_paid_again`, `at_most_50_proposals_wait_at_once` and `owner_can_still_act_when_the_vault_is_low_on_near`. Method details are in [contract/README.md](contract/README.md). For the factory, run `cd factory && cargo test`: 15 tests.
 
 ## Security
 
@@ -106,6 +107,16 @@ The agent never holds a key that can move money freely. Limits live in the contr
 | Prior payments from this vault | Keel's own ledger |
 | Blocklist | Vault blocklist, set by the owner |
 
+**Stolen agent key cannot flood the vault.** At most 50 proposals wait at once, a newer proposal for the same bill deletes the old one, and the agent's calls are refused once the vault's spare NEAR would fall under 0.2 (`the vault is low on NEAR for storage`). The owner can always still approve, pause, withdraw and revoke the agent.
+
+**Stress tests (run them yourself on a throwaway vault).**
+
+1. Run `cd agent && STRESS_VAULT=<your vault> STRESS_OWNER=<its owner> npm run stress`. It signs as the agent key, the owner and an outsider and tries 52 attacks: owner methods with the agent key, private callbacks, blocklisted, new and over-cap payees, zero, negative and u128::MAX amounts, oversized text, the daily cap over many payments, 4 parallel payments of one bill, double approval, expired and superseded offers, 7 malformed EVM transfers, pause and revoke. You see `52 passed, 0 failed` (run on `stress2.keel.testnet`, Nov 2).
+2. Run `npm run stress:flood -- 80`. It files maximum-size proposals with the agent key until the vault refuses. You see it stop at the storage reserve after about 35 proposals, then the owner's withdraw and pause still succeed.
+3. Run `npm test`. Besides the unit tests, about 37,000 generated cases check that Keel never chooses to pay while paused, to a warned or blocked payee, on a spike, beyond the balance, or outside the vault's own band, and that bad amounts like `-5` or `1e3` in `config/bills.json` are rejected.
+
+Also checked by hand on testnet: two agents running at once paid a bill once; with the NEAR RPC or the Base RPC unreachable, the agent logs one line and retries; the factory refuses bad names, a taken name, too small a deposit and non-admin code changes, and a vault creation that runs out of gas reverts fully (the founder loses only the 0.002 NEAR fee).
+
 **Attack demo (`npm run attack`):**
 
 1. A prompt-injected bill tells Keel to pay a blocklisted address.
@@ -136,7 +147,7 @@ Checked live:
 8. **Paying on Base without 1Click.** The agent proposed a 1 USDC transfer on Base Sepolia from `vega.keel.testnet` as #1 ([transaction](https://testnet.nearblocks.io/txns/FjjJnVwJfmc7GmDvPXxEToZqJNj3zf4NhMXcw96Ug7ue)). The founder approved it ([transaction](https://testnet.nearblocks.io/txns/CwtmxfryUoEoCwKUAUHETVx6fKmYkU3fNZHzsUDxM2Bp)). The vault built the transfer, `v1.signer-prod.testnet` signed it, and the vault stored it with an `evm_signed` event. Recovering the signer from the stored transaction with viem gives `0x69aa…cffed`, the vault's own address. Once the address was funded, Keel broadcast it and it landed on Base Sepolia ([transaction](https://sepolia.basescan.org/tx/0x810f796b040edca5df3b1c3c3097d2dc31f5f060bf06e5436166b300f3b29171)).
 9. **A Base bill paid end to end.** For the 15 USDC "Designer invoice, paid in USDC on Base" bill in `config/bills.json`, Keel skipped 1Click (mainnet only), proposed a Chain Signatures transfer as #4, the founder approved it ([transaction](https://testnet.nearblocks.io/txns/EyRxbDQyv4MocVD1DwhWkrgMZuWufrbRJFRxXjmHMK1V)), and Keel broadcast the vault-signed transfer ([transaction](https://sepolia.basescan.org/tx/0xb39efe2b80d77ced7be0bb619055c957b4271fbf490cc7a8bdd1a894a64aa1d3)). The vault's Base address went from 20 to 4 USDC. An earlier proposal, #3, had taken a nonce that #1 then used; Keel flagged it as unable to land and proposed #4 instead.
 10. **No double payment after memory loss.** On `orbit.keel.testnet`, `npm run demo` paid Northwind 80 ([transaction](https://testnet.nearblocks.io/txns/3vcwJbZebqFq8DueC2HP1W5qsrdFwt8NgbDm5tRAD7B9)) and proposed Atlas (#1) and payroll (#2). After deleting `agent/state.json`, the next run reported Northwind paid and Atlas proposed, and signed nothing. Calling `execute_payment` for the same bill directly with the agent key failed on chain with `Keel Vault refused: this bill was already paid`; the vault's balance stayed at 920.
-6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `2eeT4d49yJQszYiFeoht2QSkyYFCnbU2f9ZiAtifmuQB`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
+6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `F3mdCiykAp1nYnj1aJGbRDMeP6r4XBQAhEFbhX2sXhZP`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
 
 ## Cross-chain bills
 
@@ -205,6 +216,8 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
 - **Base address funding:** the vault's Base address needs its own USDC and a little ETH for gas. Keel says how much is missing; it does not top the address up itself. Testnet funds come from Base Sepolia faucets.
 - **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
+- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits. Vaults created now get all of it (`vault_code_hash` `F3mdCiykAp1nYnj1aJGbRDMeP6r4XBQAhEFbhX2sXhZP`).
+- **Agent key allowance:** the factory gives the agent key 0.25 NEAR for gas, about 650 actions at testnet prices. The owner renews it with `set_agent_key`.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 
 ## Libraries and AI-generated code

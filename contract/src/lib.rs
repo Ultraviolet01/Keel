@@ -44,6 +44,13 @@ const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 const MAX_TEXT: usize = 280;
 const MAX_BILL_REF: usize = 64;
+/// At most this many proposals wait for the owner at once, so a stolen agent
+/// key cannot flood the vault's storage or the owner's Approvals page.
+const MAX_PENDING: u32 = 50;
+/// The agent's calls are refused once the vault's NEAR beyond its storage
+/// would drop below this, so the owner always has room to approve, pause
+/// and withdraw.
+const STORAGE_RESERVE: NearToken = NearToken::from_millinear(200);
 /// Methods the agent's key may call, and how much NEAR it may spend on gas.
 const AGENT_METHODS: &str = "execute_payment,propose_payment";
 const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
@@ -103,8 +110,6 @@ pub enum ProposalStatus {
     Signing,
     /// EVM moves: signed; anyone can broadcast `evm_signed.raw_tx`.
     Signed,
-    /// Replaced by a newer proposal for the same bill, for example a fresh quote.
-    Superseded,
 }
 
 #[near(serializers = [borsh, json])]
@@ -179,6 +184,8 @@ pub struct KeelVault {
     paid_bills: LookupMap<String, u64>,
     /// Bills with a pending proposal, and that proposal's id.
     open_bills: LookupMap<String, u64>,
+    /// Proposals waiting for the owner.
+    pending_count: u32,
 }
 
 #[near]
@@ -209,6 +216,7 @@ impl KeelVault {
             evm_route: Some(default_evm_route()),
             paid_bills: LookupMap::new(StorageKey::PaidBills),
             open_bills: LookupMap::new(StorageKey::OpenBills),
+            pending_count: 0,
         }
     }
 
@@ -239,6 +247,7 @@ impl KeelVault {
             "payment_started",
             json!({ "receiver_id": receiver_id, "amount": amount, "by": "agent", "rule": check.reason, "bill_ref": bill_ref }),
         );
+        self.assert_storage_reserve();
         self.pay(receiver_id, amount, memo, None, Some(day), bill_ref)
     }
 
@@ -282,12 +291,13 @@ impl KeelVault {
         if let Some(r) = &bill_ref {
             // A newer proposal for the same bill (a fresh quote, a new nonce)
             // replaces the old one, so only one can ever be approved.
+            // The replaced offer is deleted, so repeating a bill cannot grow
+            // storage; the event keeps the record.
             if let Some(old) = self.open_bills.insert(r.clone(), id) {
-                if let Some(p) = self.proposals.get_mut(&old) {
-                    if p.status == ProposalStatus::Pending {
-                        p.status = ProposalStatus::Superseded;
-                        emit("proposal_superseded", json!({ "id": old, "by": id, "bill_ref": r }));
-                    }
+                if self.proposals.get(&old).map(|p| p.status == ProposalStatus::Pending) == Some(true) {
+                    let p = self.proposals.remove(&old).unwrap();
+                    self.pending_count -= 1;
+                    emit("proposal_superseded", json!({ "id": old, "by": id, "bill_ref": r, "receiver_id": p.receiver_id, "amount": p.amount }));
                 }
             }
         }
@@ -305,8 +315,14 @@ impl KeelVault {
             evm_signed: None,
             bill_ref,
         };
+        require!(
+            self.pending_count < MAX_PENDING,
+            "Keel Vault refused: 50 proposals are already waiting for the owner"
+        );
+        self.pending_count += 1;
         emit("proposal_created", json!(proposal));
         self.proposals.insert(id, proposal);
+        self.assert_storage_reserve();
         id
     }
 
@@ -338,6 +354,7 @@ impl KeelVault {
         }
         let bill_ref = proposal.bill_ref.clone();
         let evm = proposal.evm.clone();
+        self.pending_count -= 1;
         proposal.status = if evm.is_some() {
             ProposalStatus::Signing
         } else {
@@ -417,6 +434,7 @@ impl KeelVault {
             "proposal is not pending"
         );
         proposal.status = ProposalStatus::Rejected;
+        self.pending_count -= 1;
         if let Some(r) = proposal.bill_ref.clone() {
             if self.open_bills.get(&r) == Some(&proposal_id) {
                 self.open_bills.remove(&r);
@@ -654,6 +672,11 @@ impl KeelVault {
         self.proposals.get(&proposal_id).cloned()
     }
 
+    /// How many proposals wait for the owner (at most 50).
+    pub fn pending_count(&self) -> u32 {
+        self.pending_count
+    }
+
     pub fn get_proposals(&self, from_index: Option<u64>, limit: Option<u64>) -> Vec<Proposal> {
         self.proposals
             .values()
@@ -724,7 +747,18 @@ impl KeelVault {
         PaymentCheck { band, reason }
     }
 
-    fn mark_paid(&mut self, bill_ref: &str) {
+    /// Refuses the agent's call if it would leave the vault without NEAR
+    /// headroom for the owner's own actions.
+    fn assert_storage_reserve(&self) {
+        let locked = env::storage_byte_cost().saturating_mul(env::storage_usage() as u128);
+        let free = env::account_balance().saturating_sub(locked);
+        require!(
+            free >= STORAGE_RESERVE,
+            "Keel Vault refused: the vault is low on NEAR for storage; the owner can add NEAR to it"
+        );
+    }
+
+        fn mark_paid(&mut self, bill_ref: &str) {
         check_bill_ref(bill_ref);
         require!(
             self.paid_bills.insert(bill_ref.to_string(), env::block_timestamp_ms()).is_none(),

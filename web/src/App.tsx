@@ -3,12 +3,14 @@ import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
 import { SampleApp } from "./Sample";
-import { ConnectPanel, CreatePanel, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
+import { ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
 import { Activity, Approvals, Overview, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
 
 // `?view=<account>` shows a founder's companies read-only, without a wallet.
 const viewAs = new URLSearchParams(window.location.search).get("view");
+/** NEAR account id rules: 2 to 64 characters, lowercase parts joined by . with - or _ inside. */
+const isAccountId = (id: string) => id.length >= 2 && id.length <= 64 && /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(id);
 
 export default function App() {
   const [wallet, setWallet] = useState<NearWalletBase | null>(null);
@@ -68,6 +70,7 @@ export default function App() {
       setSelected(null);
       return;
     }
+    if (!isAccountId(accountId)) return; // shown as an invalid link, nothing to load
     loadVaults(accountId).catch((e) => setError(String(e)));
   }, [accountId, loadVaults]);
 
@@ -106,6 +109,16 @@ export default function App() {
   };
 
   const canAct = Boolean(wallet) && !readOnly;
+
+  // 0. Read-only link to an invalid account, or to one with no companies.
+  if (readOnly && accountId && (!isAccountId(accountId) || (vaults !== null && vaults.length === 0))) {
+    return (
+      <>
+        <SampleApp />
+        <ViewNotice accountId={accountId} invalid={!isAccountId(accountId)} />
+      </>
+    );
+  }
 
   // 1. Not connected: the app, blurred, behind the Connect wallet panel.
   if (!accountId) {
