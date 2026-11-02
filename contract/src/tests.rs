@@ -225,6 +225,7 @@ fn proposal_flow_approve() {
         U128(8_000 * USDC),
         None,
         "Payroll short 6,920 for Nov 7".into(),
+        None,
     );
     assert_eq!(id, 1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Pending);
@@ -240,7 +241,7 @@ fn proposal_flow_approve() {
 fn proposal_flow_reject() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into());
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
     as_owner(DAY);
     v.reject(1);
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Rejected);
@@ -251,7 +252,7 @@ fn proposal_flow_reject() {
 fn agent_cannot_approve_its_own_proposal() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into());
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
     as_agent_with_deposit(DAY, 1);
     let _ = v.approve(1);
 }
@@ -261,7 +262,7 @@ fn agent_cannot_approve_its_own_proposal() {
 fn blocklisted_payee_is_never_proposed() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into());
+    v.propose_payment(acc("scam.testnet"), U128(950 * USDC), None, "urgent invoice".into(), None);
 }
 
 #[test]
@@ -269,7 +270,7 @@ fn blocklisted_payee_is_never_proposed() {
 fn approval_refused_if_payee_blocked_later() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into());
+    v.propose_payment(acc("stranger.testnet"), U128(50 * USDC), None, "new vendor".into(), None);
     as_owner(DAY);
     v.update_policy(
         PolicyUpdate {
@@ -401,7 +402,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
 fn approved_proposal_marked_executed_on_success() {
     let mut v = vault();
     as_agent(DAY);
-    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into());
+    v.propose_payment(acc("payroll.kora.testnet"), U128(8_000 * USDC), None, "payroll".into(), None);
     as_owner(DAY);
     let _ = v.approve(1);
 
@@ -458,4 +459,37 @@ fn failed_owner_withdrawal_does_not_touch_agent_cap() {
     );
     v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None);
     assert_eq!(v.get_policy().spent_today, U128(60 * USDC));
+}
+
+const MS: u64 = 1_000_000; // block timestamps are in nanoseconds
+
+#[test]
+fn intents_offer_can_be_approved_before_it_expires() {
+    let mut v = vault();
+    as_agent(DAY);
+    let deadline = DAY / MS + 10 * 60 * 1000; // ten minutes from now, in ms
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base via NEAR Intents".into(), Some(deadline));
+    assert_eq!(v.get_proposal(1).unwrap().valid_until_ms, Some(deadline));
+    as_owner(DAY + 5 * 60 * 1_000_000_000);
+    let _ = v.approve(1);
+    assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Executing);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: this offer expired")]
+fn expired_intents_offer_is_never_paid() {
+    let mut v = vault();
+    as_agent(DAY);
+    let deadline = DAY / MS + 10 * 60 * 1000;
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "Move 5 USDC to Base".into(), Some(deadline));
+    as_owner(DAY + 11 * 60 * 1_000_000_000);
+    let _ = v.approve(1);
+}
+
+#[test]
+#[should_panic(expected = "Keel Vault refused: the offer has already expired")]
+fn cannot_propose_an_offer_that_already_expired() {
+    let mut v = vault();
+    as_agent(DAY);
+    v.propose_payment(acc("deposit.1click.near"), U128(5 * USDC), None, "stale".into(), Some(DAY / MS - 1));
 }

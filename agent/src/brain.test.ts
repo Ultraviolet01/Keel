@@ -97,3 +97,23 @@ test("forecast finds the first shortfall", () => {
   assert.equal(firstShortfall(days)?.date, "2026-11-07");
   assert.equal(addDays("2026-11-30", 1), "2026-12-01");
 });
+
+import { deadlineFromNow, quoteBody } from "./intents";
+
+test("1Click quote body: exact input, origin-chain deposit, refunds to the vault", () => {
+  const body = quoteBody({
+    dry: true,
+    originAsset: "nep141:usdc.near",
+    destinationAsset: "nep141:base-usdc.omft.near",
+    amount: "5000000",
+    recipient: "0xabc",
+    refundTo: "kora.keel.near",
+    deadline: deadlineFromNow(30, Date.UTC(2026, 10, 2, 12, 0)),
+  });
+  assert.equal(body.swapType, "EXACT_INPUT");
+  assert.equal(body.depositType, "ORIGIN_CHAIN");
+  assert.equal(body.refundType, "ORIGIN_CHAIN");
+  assert.equal(body.refundTo, "kora.keel.near");
+  assert.equal(body.slippageTolerance, 100);
+  assert.equal(body.deadline, "2026-11-02T12:30:00.000Z");
+});

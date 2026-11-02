@@ -34,3 +34,13 @@ All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` (`
 **NEAR AI (optional):** with `NEARAI_API_KEY` set, NEAR AI Cloud writes the one-sentence reason attached to each proposal (`NEARAI_BASE_URL` and `NEARAI_MODEL` can be changed). Without it, a template writes it. The model only explains a decision the code already made.
 
 Every step is appended to `ledger.jsonl`; `state.json` remembers which bills were handled. Both stay out of git.
+
+## Cross-chain moves (NEAR Intents 1Click)
+
+`src/intents.ts` talks to the 1Click API: token list, quotes, deposit and status. 1Click runs on mainnet only.
+
+1. Run `npm run intents -- tokens USDC`. You see USDC on every chain 1Click supports, with its `assetId`.
+2. Run `npm run intents -- quote --to base --amount 5`. You see a dry quote (nothing is sent): how much USDC arrives on Base, the minimum, and the time estimate.
+3. Run `npm run intents -- status <depositAddress>` to follow a real move until `SUCCESS`, `REFUNDED` or `FAILED`.
+
+A real quote's deposit address expires at the quote's `deadline`, and 1Click warns that funds sent after it may be lost. So Keel files the move as a proposal with `valid_until_ms` set to that deadline, and the vault refuses to approve it once it has passed (tests `expired_intents_offer_is_never_paid` and `intents_offer_can_be_approved_before_it_expires`). Requests without `ONECLICK_JWT` pay an extra 0.25% (the hackathon FAQ says 0.2%).

@@ -91,6 +91,9 @@ pub struct Proposal {
     pub reason: String,
     pub status: ProposalStatus,
     pub created_at_ms: u64,
+    /// For cross-chain moves: the 1Click quote's deadline. Paying its deposit
+    /// address after this time can lose the funds, so approval is refused.
+    pub valid_until_ms: Option<u64>,
 }
 
 /// Owner's changes to the policy. Every field is optional.
@@ -194,12 +197,15 @@ impl KeelVault {
 
     /// Files a proposal for the owner. Used for new payees, amounts over the
     /// cap and cross-chain moves. Blocklisted payees are never proposed.
+    /// `valid_until_ms` marks an offer that expires, such as a NEAR Intents
+    /// deposit address; the vault refuses to approve it after that time.
     pub fn propose_payment(
         &mut self,
         receiver_id: AccountId,
         amount: U128,
         memo: Option<String>,
         reason: String,
+        valid_until_ms: Option<u64>,
     ) -> u64 {
         self.assert_agent();
         require!(!self.paused, "Keel Vault refused: vault is paused");
@@ -210,6 +216,9 @@ impl KeelVault {
         );
         check_text(&reason, "reason");
         check_text(memo.as_deref().unwrap_or(""), "memo");
+        if let Some(t) = valid_until_ms {
+            require!(t > env::block_timestamp_ms(), "Keel Vault refused: the offer has already expired");
+        }
 
         let id = self.next_proposal_id;
         self.next_proposal_id += 1;
@@ -221,6 +230,7 @@ impl KeelVault {
             reason,
             status: ProposalStatus::Pending,
             created_at_ms: env::block_timestamp_ms(),
+            valid_until_ms,
         };
         emit("proposal_created", json!(proposal));
         self.proposals.insert(id, proposal);
@@ -247,6 +257,12 @@ impl KeelVault {
             !self.blocklist.contains(&proposal.receiver_id),
             "Keel Vault refused: payee is on the blocklist"
         );
+        if let Some(t) = proposal.valid_until_ms {
+            require!(
+                env::block_timestamp_ms() < t,
+                "Keel Vault refused: this offer expired; Keel will propose a fresh one"
+            );
+        }
         proposal.status = ProposalStatus::Executing;
         let (receiver_id, amount, memo) =
             (proposal.receiver_id.clone(), proposal.amount, proposal.memo.clone());

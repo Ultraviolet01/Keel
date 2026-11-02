@@ -8,7 +8,8 @@
     "agent": "tsx src/main.ts",
     "demo": "tsx src/demo.ts",
     "test": "tsx --test src/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "intents": "tsx src/intents-cli.ts"
   },
   "dependencies": {
     "near-api-js": "7.3.1"
