@@ -11,7 +11,7 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 
 ## Demo: one full loop in a few seconds
 
-1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=orbit.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
+1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=harbor.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
 2. Run `npm run demo`. You see, for the four bills in `../config/bills.json`:
    - **Northwind Hosting, 80**: paid alone, with a transaction link.
    - **Atlas Freight, 132**: proposed for the owner, because Atlas is not on the allowlist.

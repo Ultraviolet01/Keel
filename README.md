@@ -14,7 +14,7 @@ Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`busin
 
 Everything below runs on NEAR testnet and costs nothing.
 
-**Fastest path:** run `cd agent && npm install && npm run demo -- --dry-run`. In a few seconds you see one full loop on `orbit.keel.testnet`: Keel reads the vault, forecasts 14 days, checks each bill's payee, and refuses the scam bill, with nothing signed. The vault has already paid Northwind and holds proposals for Atlas and payroll, so Keel says so and does not act on them again. To sign for real, prepare the vault once with `scripts/setup-demo-testnet.sh` and drop `--dry-run`; details in [agent/README.md](agent/README.md).
+**Fastest path:** run `cd agent && npm install && npm run demo -- --dry-run`. In a few seconds you see one full loop on `harbor.keel.testnet`: Keel reads the vault, forecasts 14 days, checks each bill's payee, and decides to pay Northwind, propose Atlas and payroll, and refuse the scam bill, with nothing signed. Once someone runs the demo for real, the vault pays each bill once, so later runs report those bills as already paid or proposed. To sign for real, prepare the vault once with `scripts/setup-demo-testnet.sh` and drop `--dry-run`; details in [agent/README.md](agent/README.md).
 
 1. **Install.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm install`. You see the install finish with no errors.
 2. **Configure.** Run `cp .env.example .env` and fill in an owner and an agent testnet account. You see both account ids printed by `npm run check-env`.
@@ -132,7 +132,8 @@ Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can rea
 | `keel.testnet` | Keel factory: creates a vault for each company a founder adds (up to 20 per founder) |
 | `nova.keel.testnet` | A company vault owned by `keel-owner.testnet`, with Keel's agent key `ed25519:GZ1zQGxc…` added by the factory at sign-up; no policy set |
 | `kora.keel.testnet`, `lumen.keel.testnet` | Earlier vaults for the same founder, from before the agent key moved onto the vault; they use the separate agent account `agent.keel.testnet` |
-| `orbit.keel.testnet` | The demo vault for `npm run demo`, owned by `keel-owner.testnet`, created with the code that pays each bill once |
+| `harbor.keel.testnet` | The demo vault for `npm run demo`, owned by `keel-owner.testnet`, created with the current code (once-per-bill rule and flood limits) |
+| `orbit.keel.testnet` | The earlier demo vault, used for the memory-loss test below |
 | `vega.keel.testnet` | A vault created with the Chain Signatures code, owned by `vega-founder.testnet`. Its Base Sepolia address is `0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed` |
 | `usdc.keel-owner.testnet` | Keel Test USDC |
 
@@ -216,7 +217,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
 - **Base address funding:** the vault's Base address needs its own USDC and a little ETH for gas. Keel says how much is missing; it does not top the address up itself. Testnet funds come from Base Sepolia faucets.
 - **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
-- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits. Vaults created now get all of it (`vault_code_hash` `F3mdCiykAp1nYnj1aJGbRDMeP6r4XBQAhEFbhX2sXhZP`).
+- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits. `harbor` and `stress2` have everything. Vaults created now get all of it (`vault_code_hash` `F3mdCiykAp1nYnj1aJGbRDMeP6r4XBQAhEFbhX2sXhZP`).
 - **Agent key allowance:** the factory gives the agent key 0.25 NEAR for gas, about 650 actions at testnet prices. The owner renews it with `set_agent_key`.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 

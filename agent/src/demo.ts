@@ -1,6 +1,6 @@
 // npm run demo: one full Keel loop on one vault, told step by step.
 //
-//   npm run demo                       uses DEMO_VAULT (default orbit.keel.testnet)
+//   npm run demo                       uses DEMO_VAULT (default harbor.keel.testnet)
 //   npm run demo -- --dry-run          decide everything, sign nothing
 //
 // Set the vault up first with scripts/setup-demo-testnet.sh.
@@ -11,7 +11,7 @@ import { loadState, runVault, saveState, type Event } from "./loop";
 const args = process.argv.slice(2);
 const cfg = loadConfig();
 const chain = new Chain(cfg);
-const vault = process.env.DEMO_VAULT || "orbit.keel.testnet";
+const vault = process.env.DEMO_VAULT || "harbor.keel.testnet";
 const dryRun = args.includes("--dry-run");
 const started = Date.now();
 
