@@ -35,6 +35,14 @@
       "due": "+3",
       "memo": "Lisbon contractor, paid in USDC on Arbitrum",
       "chain": "arb"
+    },
+    {
+      "id": "porto-op-nov",
+      "payee": "0x000000000000000000000000000000000000dEaD",
+      "amount": "5.00",
+      "due": "+3",
+      "memo": "Porto designer, paid in USDC on Optimism",
+      "chain": "op"
     }
   ],
   "harbor.keel.testnet": [

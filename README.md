@@ -15,12 +15,13 @@ Everything below runs on NEAR testnet and costs nothing. You need Node.js 22 or 
 Keel's agent signs with a key only Keel's operator holds, so from a fresh clone you run it with `--dry-run`: it reads the live vaults and shows every decision without signing. Everything Keel signed for real is linked under [Live on testnet](#live-on-testnet).
 
 1. **Get the code.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel/agent && npm install`. You see the install finish with no errors. No `.env` is needed for the steps below.
-2. **Watch one full loop.** Run `npm run demo -- --dry-run`. In a few seconds you see Keel read `anchor.keel.testnet` (1,000 test USDC; 100 per payment and 500 per day), forecast 14 days, check each of its five bills and decide:
+2. **Watch one full loop.** Run `npm run demo -- --dry-run`. In a few seconds you see Keel read `anchor.keel.testnet` (1,000 test USDC; 100 per payment and 500 per day), forecast 14 days, check each of its six bills and decide:
    - **Northwind Hosting, 80:** pay alone, because Northwind is allowlisted and 80 is inside both caps.
    - **Atlas Freight, 132:** propose to the owner, because Atlas is not on the allowlist.
    - **"URGENT: supplier changed bank details", 950:** refuse without signing, because the payee is blocklisted. This is the prompt-injection case: the bill's text asks for urgency and the rules ignore it.
    - **Contractor payroll, 450:** propose, because it is over the 100 per-payment cap.
-   - **Lisbon contractor, 12 USDC on Arbitrum:** skip NEAR Intents (mainnet only) and reach the Chain Signatures route, which waits until the vault's Arbitrum Sepolia address holds the USDC and ETH for gas.
+   - **Lisbon contractor, 12 USDC on Arbitrum:** skip NEAR Intents (mainnet only) and reach the Chain Signatures route, which waits until the vault's Arbitrum Sepolia address holds ETH for gas.
+   - **Porto designer, 5 USDC on Optimism:** skip NEAR Intents and propose a Chain Signatures transfer from the vault's own Optimism Sepolia address, which holds the USDC and ETH.
 
    After Keel's operator runs the demo for real, the same command reports those bills as already paid or already proposed, because the vault pays each bill once.
 3. **Watch a bill on Base.** Run `npm run agent -- --once --dry-run --vault vega.keel.testnet`. You see Keel skip NEAR Intents 1Click (mainnet only), fall back to NEAR Chain Signatures, and decide to propose paying 3 USDC from the vault's own Base Sepolia address. You also see two earlier Base transfers reported as already paid.
@@ -152,6 +153,7 @@ Checked live:
 10. **No double payment after memory loss.** On `orbit.keel.testnet`, `npm run demo` paid Northwind 80 ([transaction](https://testnet.nearblocks.io/txns/3vcwJbZebqFq8DueC2HP1W5qsrdFwt8NgbDm5tRAD7B9)) and proposed Atlas (#1) and payroll (#2). After deleting `agent/state.json`, the next run reported Northwind paid and Atlas proposed, and signed nothing. Calling `execute_payment` for the same bill directly with the agent key failed on chain with `Keel Vault refused: this bill was already paid`; the vault's balance stayed at 920.
 11. **One address, several chains.** On `multi.keel.testnet` the agent proposed a 1 USDC transfer on Arbitrum Sepolia and one on Ethereum Sepolia, and the owner approved both. `v1.signer-prod.testnet` signed each: the stored transactions carry chain ids 421614 and 11155111, each chain's Circle USDC contract and a `transfer` of 1,000,000 units, and both recover to the vault's own address `0x1cd65ce3344a4e6ecc53af2d46b482ac714b8418`.
 12. **Optimism.** The owner added the Optimism Sepolia route to `multi` and `anchor` with `set_evm_route` (no new vault needed). `v1.signer-prod.testnet` signed a 1 USDC `transfer` for chain 11155420 with Optimism's Circle USDC contract, recovering to the same vault address.
+13. **A real payment on Optimism.** With 20 USDC and 0.025 ETH on `anchor`'s Optimism Sepolia address, Keel skipped 1Click (mainnet only), proposed a 10 USDC Chain Signatures transfer as #1 ([transaction](https://testnet.nearblocks.io/txns/vJz5TU4eTa6zYLZC8FH1CQh6iEnpD5AfMKUk3oZ8JBX)), the owner approved it and the vault stored the MPC signature ([transaction](https://testnet.nearblocks.io/txns/2Rb8SPw1cHwCdnAehxd22Hwz68zx9MGULhJnC6RWHv6U)), and Keel broadcast it ([transaction](https://sepolia-optimism.etherscan.io/tx/0xdb1cead324fe94772a9c666de29eb1a446de5de2cef38145844637d28d0bae13)). The receipt shows a 10 USDC `Transfer` from the vault's own address; the address went from 20 to 10 USDC and spent 44,843 gas.
 
 ## Cross-chain bills
 
