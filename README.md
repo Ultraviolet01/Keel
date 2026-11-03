@@ -8,6 +8,8 @@ Keel is an AI treasury agent that keeps a small company's stablecoin wallets fun
 
 Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
+**Just want to look?** Open https://keel-ultravioletadewale-1537s-projects.vercel.app (the landing page), then https://keel-ultravioletadewale-1537s-projects.vercel.app/app?view=keel-owner.testnet to see a founder's companies read-only with live testnet data. To act as a founder, open `/app` and connect a NEAR testnet wallet. The site is the `web/` app on Vercel; it holds no keys and every signature happens in the visitor's own wallet.
+
 ## What is real and what is a test
 
 | Part | What was used |
