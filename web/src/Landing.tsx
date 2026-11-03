@@ -2,8 +2,7 @@
 // The ship rides light while Keel pays under the line, then loads past its
 // load line when a payment needs the owner's signature.
 
-const APP = "/app";
-const REPO = "https://github.com/Ultraviolet01/Keel";
+import { APP, REPO, SiteNav } from "./guide";
 
 const CONTAINER_COLORS = ["#0f5d5a", "#5b6870", "#c4922e", "#0f5d5a", "#d9e2e5", "#174a54", "#a9c6d0"];
 
@@ -143,20 +142,7 @@ function Scene() {
 export default function Landing() {
   return (
     <div className="landing">
-      <header className="l-nav">
-        <a className="wordmark" href="/">
-          KEEL
-        </a>
-        <nav>
-          <a href="#how">How it works</a>
-          <a href="#security">Security</a>
-          <a href="/docs">Docs</a>
-          <a href={REPO}>GitHub</a>
-          <a className="btn sm" href={APP}>
-            Open app
-          </a>
-        </nav>
-      </header>
+      <SiteNav />
 
       <section className="l-hero">
         <h1 className="serif">
@@ -166,7 +152,7 @@ export default function Landing() {
         </h1>
         <div className="l-hero-row">
           <p>
-            Keel is an AI agent that pays, rebalances and forecasts across your company's wallets. Your limits are painted into a
+            Keel is an AI agent that forecasts your company's cash, pays its bills and keeps its wallets topped up. Your limits are painted into a
             NEAR contract, so it can't spend past them.
           </p>
           <div className="l-actions">
@@ -188,12 +174,12 @@ export default function Landing() {
           <li>
             <span className="serif n">1</span>
             <h3>Paint the line</h3>
-            <p>Set caps, payees and minimums in your own Keel Vault contract. Only your key can change them.</p>
+            <p>Set caps, payees and bills in your own Keel Vault contract. Only your key can change them.</p>
           </li>
           <li>
             <span className="serif n">2</span>
             <h3>Keel keeps watch</h3>
-            <p>It forecasts every wallet and pays or rebalances through NEAR Intents when something runs short.</p>
+            <p>Every 15 minutes it forecasts your cash, pays what is due inside your limits and keeps your card wallet topped up.</p>
           </li>
           <li>
             <span className="serif n">3</span>
@@ -201,6 +187,9 @@ export default function Landing() {
             <p>Anything over your line waits for your approval, with Keel's reasons attached.</p>
           </li>
         </ol>
+        <a className="l-more" href="/how-it-works">
+          How Keel works in detail
+        </a>
       </section>
 
       <section className="l-dark" id="security">
@@ -214,6 +203,9 @@ export default function Landing() {
             Not "won't". Can't. Keel signs with a NEAR function-call key that can only reach two methods on your vault. The vault
             checks every payment against your line before any money moves.
           </p>
+          <a className="l-more light" href="/security">
+            Read the security page
+          </a>
         </div>
         <div className="keys">
           <span className="keys-label">What Keel's key can call on your vault</span>
@@ -231,7 +223,7 @@ export default function Landing() {
               <span className="owner">Owner only</span>
             </li>
             <li>
-              <span className="mono">add_key</span>
+              <span className="mono">add_payee</span>
               <span className="owner">Owner only</span>
             </li>
             <li>
@@ -248,7 +240,7 @@ export default function Landing() {
           <a className="btn primary" href={APP}>
             Open app
           </a>
-          <a className="btn" href={`${REPO}#readme`}>
+          <a className="btn" href="/docs">
             Read the docs
           </a>
         </div>

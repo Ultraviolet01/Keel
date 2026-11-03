@@ -513,3 +513,8 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
   .docs-body h1 { font-size: 40px; }
   .docs-body table { display: block; overflow-x: auto; }
 }
+.l-more { display: inline-block; margin-top: 24px; color: var(--teal); font-size: 15px; font-weight: 500; }
+.l-more::after { content: " →"; }
+.l-more.light { color: #cfe3e0; }
+.docs-next { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
+.docs-next .btn { margin-top: 0; }
