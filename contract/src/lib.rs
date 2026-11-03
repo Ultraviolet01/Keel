@@ -872,8 +872,8 @@ const VAULT_DECIMALS: u8 = 6;
 /// Circle USDC on each chain (Binance-Peg USDC on BNB Chain, 18 decimals).
 /// Gas is capped at 100k; the fee cap bounds what a bad quote could burn:
 /// 5 gwei on the L2s and BNB Chain (0.0005 ETH or BNB), 50 gwei on Ethereum
-/// (0.005 ETH). BNB Chain has no Circle USDC testnet, so testnet vaults get
-/// Base Sepolia, Ethereum Sepolia and Arbitrum Sepolia.
+/// (0.005 ETH). On BNB Chain testnet the USDC is the faucet's 18-decimal
+/// token, matching Binance-Peg USDC on mainnet.
 fn default_evm_routes() -> Vec<EvmRoute> {
     const GWEI: u128 = 1_000_000_000;
     let r = |chain_id: u64, token: &str, decimals: u8, gwei: u128| EvmRoute {
@@ -888,6 +888,7 @@ fn default_evm_routes() -> Vec<EvmRoute> {
             r(84532, "0x036cbd53842c5426634e7929541ec2318f3dcf7e", 6, 5),
             r(11155111, "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", 6, 50),
             r(421614, "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d", 6, 5),
+            r(97, "0x64544969ed7ebf5f083679233325356ebe738930", 18, 5),
         ]
     } else {
         vec![

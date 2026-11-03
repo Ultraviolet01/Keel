@@ -523,7 +523,7 @@ fn testnet_vault_starts_with_the_base_sepolia_route() {
     let v = vault();
     let r = v.get_evm_route();
     let ids: Vec<u64> = r["routes"].as_array().unwrap().iter().map(|x| x["chain_id"].as_u64().unwrap()).collect();
-    assert_eq!(ids, vec![84532, 11155111, 421614], "Base, Ethereum and Arbitrum Sepolia");
+    assert_eq!(ids, vec![84532, 11155111, 421614, 97], "Base, Ethereum and Arbitrum Sepolia, BNB Chain testnet");
     assert_eq!(r["routes"][0]["token"], BASE_USDC);
     assert_eq!(r["mpc_id"], "v1.signer-prod.testnet");
     assert_eq!(r["path"], "evm");
@@ -973,4 +973,12 @@ fn ethereum_sepolia_allows_a_higher_fee_than_base() {
     let eth_usdc = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
     // 40 gwei: over Base's 5 gwei cap, under Ethereum's 50.
     propose_evm(&mut v, EvmTransfer { chain_id: 11155111, token: eth_usdc.into(), max_fee_per_gas: U128(40_000_000_000), max_priority_fee_per_gas: U128(1_000_000_000), ..evm_transfer() });
+}
+
+#[test]
+fn bnb_chain_testnet_route_scales_to_18_decimals() {
+    let mut v = vault();
+    let usdc97 = "0x64544969ed7ebf5f083679233325356ebe738930";
+    let id = propose_evm(&mut v, EvmTransfer { chain_id: 97, token: usdc97.into(), ..evm_transfer() });
+    assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * 10u128.pow(18))));
 }

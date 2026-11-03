@@ -20,6 +20,7 @@ export const EVM_CHAINS: Record<number, { name: string; rpc: string; explorer: s
   421614: { name: "Arbitrum Sepolia", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
   42161: { name: "Arbitrum", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
   56: { name: "BNB Chain", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
+  97: { name: "BNB Chain testnet", rpc: "https://bsc-testnet-rpc.publicnode.com", explorer: "https://testnet.bscscan.com", gas: "BNB" },
 };
 
 export interface EvmChainBalance {

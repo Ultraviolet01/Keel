@@ -35,7 +35,7 @@ const NAMES: Record<number, { name: string; rpc: string; explorer: string; gas: 
   421614: { name: "arb", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
   42161: { name: "arb", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
   56: { name: "bsc", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
-  97: { name: "bsc", rpc: "https://data-seed-prebsc-1-s1.bnbchain.org:8545", explorer: "https://testnet.bscscan.com", gas: "BNB" },
+  97: { name: "bsc", rpc: "https://bsc-testnet-rpc.publicnode.com", explorer: "https://testnet.bscscan.com", gas: "BNB" },
 };
 
 export function chainInfo(chainId: number) {

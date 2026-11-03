@@ -4,7 +4,7 @@ Rust smart contract (near-sdk 5.30) that holds the company's USDC and enforces t
 
 ## Run the tests
 
-1. Run `cargo test` in this folder. You see 75 tests pass.
+1. Run `cargo test` in this folder. You see 76 tests pass.
 2. Each rule in the root README has a test, for example `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `pause_blocks_everything_until_resume`, `agent_cannot_pay_the_same_bill_twice`, `at_most_50_proposals_wait_at_once` and `signing_hash_matches_an_independent_encoder`.
 
 ## Build the wasm
@@ -18,7 +18,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 
 | Method | Caller | Arguments |
 | --- | --- | --- |
-| `new` | Deployer, once | `owner_id`, `agent_key`, `token_id`. Starts with no policy: caps 0, empty lists. Sets the EVM routes for the network: Base, Ethereum and Arbitrum Sepolia on testnet; Base, Ethereum, Arbitrum and BNB Chain on mainnet |
+| `new` | Deployer, once | `owner_id`, `agent_key`, `token_id`. Starts with no policy: caps 0, empty lists. Sets the EVM routes for the network: Base, Ethereum and Arbitrum Sepolia and BNB Chain testnet on testnet; Base, Ethereum, Arbitrum and BNB Chain on mainnet |
 | `execute_payment` | Agent | `receiver_id`, `amount`, `memo?`, `bill_ref?` |
 | `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason`, `valid_until_ms?`, `evm?`, `bill_ref?`. At most 50 wait at once |
 | `approve` | Owner, 1 yoctoNEAR | `proposal_id`. Refused after `valid_until_ms`; for an `evm` proposal it asks the MPC contract to sign (attach 300 Tgas) |
