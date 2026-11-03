@@ -139,14 +139,24 @@ export function CreatePanel(props: {
     if (!edited) setName(vaultNameFrom(company));
   }, [company, edited]);
 
+  // Names are first come, first served. When one is taken, offer free ones to click.
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
   useEffect(() => {
+    setSuggestions([]);
     if (!name) return setState("empty");
     if (!validVaultName(name)) return setState("invalid");
     setState("checking");
     let stale = false;
     const t = setTimeout(async () => {
       const taken = await accountExists(`${name}.${FACTORY_ID}`).catch(() => false);
-      if (!stale) setState(taken ? "taken" : "free");
+      if (stale) return;
+      setState(taken ? "taken" : "free");
+      if (!taken) return;
+      const base = name.slice(0, 28).replace(/[-_]+$/, "");
+      const options = [`${base}-hq`, `${base}-co`, `${base}2`, `${base}-team`].filter(validVaultName);
+      const free = await Promise.all(options.map(async (o) => ((await accountExists(`${o}.${FACTORY_ID}`).catch(() => true)) ? null : o)));
+      if (!stale) setSuggestions(free.filter((o): o is string => Boolean(o)).slice(0, 3));
     }, 350);
     return () => {
       stale = true;
@@ -169,7 +179,13 @@ export function CreatePanel(props: {
       rememberCompanyName(created, company.trim());
       await props.onCreated(created);
     } catch (e) {
-      setError(friendly(e));
+      // Someone may have taken the name between the check and the click.
+      if (/name is taken/i.test(String(e))) {
+        setState("taken");
+        setError(`Someone chose ${vaultId} a moment ago. Your deposit was not spent; choose another name.`);
+      } else {
+        setError(friendly(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -179,7 +195,7 @@ export function CreatePanel(props: {
     empty: "Lowercase letters, digits, - or _",
     invalid: "2 to 32 lowercase letters, digits, - or _, starting and ending with a letter or digit",
     checking: "Checking",
-    taken: `${vaultId} is taken`,
+    taken: `${vaultId} has already been chosen by someone else. Choose another name.`,
     free: `${vaultId} is available`,
   };
 
@@ -220,6 +236,24 @@ export function CreatePanel(props: {
             <span className="suffix">.{FACTORY_ID}</span>
           </span>
           <span className={`hint ${state}`}>{hint[state]}</span>
+          {state === "taken" && suggestions.length > 0 && (
+            <span className="name-suggest">
+              <span className="muted small">Free:</span>
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="chip"
+                  onClick={() => {
+                    setEdited(true);
+                    setName(s);
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </span>
+          )}
         </label>
 
         <div className="facts">

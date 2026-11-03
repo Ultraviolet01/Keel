@@ -8,7 +8,7 @@ Founders connect a NEAR wallet, create a vault for each company, set its limits 
 2. Run `npm run dev` and open the address it prints. You see the landing page, with the ship riding light under its load line and sinking past it when a payment needs your signature. Click **Open app** (or go to `/app`). You see the app blurred behind a **Connect wallet** panel.
 3. Click **Connect wallet**. You see the NEAR Connect wallet picker (Meteor, Intear, Ledger, Nightly, Ethereum wallets, NEAR CLI).
 4. Sign in with a testnet account holding about 3.5 NEAR. With no company yet, you see **Name your first company** over the blurred app.
-5. Type a company name. You see the vault address filled in, a live check that it is free, and the deposit (about 3.15 NEAR). Click **Create vault** and approve in your wallet.
+5. Type a company name. You see the vault address filled in, a live check that it is free (if someone already chose it, you see "has already been chosen by someone else. Choose another name." and up to three free names to click, such as `anchor-hq`), and the deposit (about 3.15 NEAR). Click **Create vault** and approve in your wallet.
 6. You see the Overview for your new company: a **Finish setting up** checklist (vault created, Keel's agent connected, set limits, add payees, deposit), Active rules showing "Not set", and the sidebar status "Keel is waiting for limits".
 7. Click **Set limits**, enter a per-payment cap, a daily cap and the payees Keel may pay, and approve. You see Active rules update and the status change to "Keel is running".
 8. Open the company card at the top of the sidebar. You see all your companies and **Add company**.
