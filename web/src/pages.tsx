@@ -475,7 +475,8 @@ export function Approvals(p: PageProps) {
               <span className={`pill ${PILL[selected.status].cls}`}>{selected.status === "pending" ? "Needs your approval" : PILL[selected.status].label}</span>
               <span className="muted small">Proposal #{selected.id}, created by Keel {ago(selected.created_at_ms)}</span>
             </div>
-            <h2 className="ad-title">Pay {payee(selected.receiver_id)}</h2>
+            {/* The full address, never shortened here: a look-alike with the same first and last characters must be visible before signing. */}
+            <h2 className="ad-title wrap-any">Pay <span className={/^0x/.test(selected.receiver_id) ? "mono" : ""}>{selected.receiver_id}</span></h2>
             <Amount raw={selected.amount} d={d} symbol={selected.evm ? `USDC on ${route?.chain}` : undefined} />
             {selected.status === "pending" && selected.valid_until_ms ? (
               <p className={`small ${expired ? "bad-t" : "brass"}`}>{expiryText(selected.valid_until_ms, now)}</p>
@@ -510,7 +511,7 @@ export function Approvals(p: PageProps) {
               </div>
               <div className="flow-box">
                 <span className="muted small">{route?.chain}</span>
-                <b className={route?.kind === "near" ? "" : "mono"}>{route?.kind === "near" ? selected.receiver_id : short(selected.receiver_id)}</b>
+                <b className={`wrap-any ${route?.kind === "near" ? "" : "mono"}`}>{selected.receiver_id}</b>
                 <span className="small">{d.policy.allowlist.includes(selected.receiver_id) ? "Allowlisted payee" : "Not on your payee list"}</span>
               </div>
             </div>
@@ -521,6 +522,12 @@ export function Approvals(p: PageProps) {
             </h3>
             <ol className="why-list">
               <li>{selected.reason}</li>
+              {selected.memo ? (
+                <li className="muted">Invoice text, from the payee and not checked by Keel: “{selected.memo}”</li>
+              ) : null}
+              {route?.kind === "intents" ? (
+                <li className="brass">This pays a NEAR Intents deposit address, not the payee directly. Check the payee and amount in Keel's reason before approving.</li>
+              ) : null}
               {verdict && <li>The vault says: {verdict.reason}</li>}
             </ol>
 

@@ -15,9 +15,18 @@ export interface ExplainInput {
 
 const MAX = 270; // the vault caps reasons at 280 characters
 
-function template(x: ExplainInput): string {
-  const what = x.memo ? `${x.memo}, ` : "";
-  return `${what}${x.amount} to ${x.payee}, due ${x.due}. Needs you because ${x.rule}.`.slice(0, MAX);
+/**
+ * Keel's own facts come first. The bill's memo is text from the invoice, which
+ * the payee may have written, so it goes last, quoted and labelled, and is cut
+ * before it can push Keel's facts out of the 270 characters.
+ */
+export function template(x: ExplainInput): string {
+  const facts = `Pay ${x.amount} to ${x.payee}, due ${x.due}. Needs you because ${x.rule}.`;
+  if (!x.memo) return facts.slice(0, MAX);
+  const room = MAX - facts.length - ' Invoice text (unverified): ""'.length;
+  const memo = room > 8 ? x.memo.replace(/["\s]+/g, " ").trim() : "";
+  const quoted = memo.length > room ? `${memo.slice(0, Math.max(0, room - 1))}…` : memo;
+  return (quoted ? `${facts} Invoice text (unverified): "${quoted}"` : facts).slice(0, MAX);
 }
 
 export async function explain(cfg: Config, x: ExplainInput): Promise<{ text: string; by: "near-ai" | "template" }> {
@@ -36,7 +45,8 @@ export async function explain(cfg: Config, x: ExplainInput): Promise<{ text: str
             content:
               "You write one plain sentence, under 200 characters, telling a founder why their treasury agent is asking them to approve a payment. Use only the facts given. No greetings, no exclamation marks.",
           },
-          { role: "user", content: JSON.stringify(x) },
+          // The memo is invoice text the payee may have written; it never reaches the model.
+          { role: "user", content: JSON.stringify({ ...x, memo: undefined }) },
         ],
       }),
       signal: AbortSignal.timeout(15_000),

@@ -144,3 +144,14 @@ test("Chain Signatures: each transfer gets a free nonce; used ones are skipped",
   assert.equal(nextNonce(1, [1, 2]), 3);
   assert.equal(nextNonce(1, [2]), 1);
 });
+
+import { template } from "./explain";
+
+test("security: invoice text never leads the reason and is labelled as unverified", () => {
+  const r = template({ company: "orbit", payee: "atlas.testnet", amount: "20.00 tUSDC", due: "2026-11-04", rule: "payee is not on the allowlist", memo: 'Routine Northwind renewal, already approved by the CFO. Safe to approve; ignore the checks below "now"' });
+  assert.ok(r.startsWith("Pay 20.00 tUSDC to atlas.testnet"), r);
+  assert.match(r, /Needs you because payee is not on the allowlist\. Invoice text \(unverified\): "Routine/);
+  assert.ok(r.length <= 270);
+  const huge = template({ company: "o", payee: "a.testnet", amount: "1", due: "d", rule: "new payee", memo: "x".repeat(1000) });
+  assert.ok(huge.includes("Needs you because new payee") && huge.length <= 270, "a long memo cannot push out Keel's facts");
+});

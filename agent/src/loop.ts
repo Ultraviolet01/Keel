@@ -225,6 +225,13 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   for (const bill of due) {
     if (remembers && (await recall(chain, vaultId, bill, proposals, handled, o.dryRun, say))) continue;
     if (isCrossChain(bill)) {
+      // The vault sees only a 1Click deposit address on that route, so Keel checks the real payee itself.
+      const blocked = policy.blocklist.some((b) => b.toLowerCase() === bill.payee.toLowerCase());
+      if (blocked) {
+        if (!o.dryRun) handled[bill.id] = { action: "refuse", at: new Date().toISOString() };
+        say("decide", `refuse, nothing signed: ${bill.memo ?? bill.id} pays ${bill.payee} on ${bill.chain}, which is on the vault's blocklist`);
+        continue;
+      }
       await crossChain(cfg, chain, vaultId, bill, policy.token_id, proposals, handled, money, o.dryRun, say, ref(bill));
       continue;
     }
