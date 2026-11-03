@@ -12,7 +12,7 @@ Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`busin
 
 | Part | What was used |
 | --- | --- |
-| NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**, paying **Keel Test USDC** (`usdc.keel-owner.testnet`, deployed and minted for Keel; not Circle's USDC) |
+| NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**. Vaults created now, including the demo vault `beacon.keel.testnet`, hold and pay **Circle's testnet USDC on NEAR** (`3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`). Earlier vaults (`anchor`, `orbit`, `nova` and others) used **Keel Test USDC** (`usdc.keel-owner.testnet`, a token minted for Keel), and keep it |
 | Cross-chain payments through NEAR Chain Signatures | Real transactions on **Base, Ethereum, Arbitrum and Optimism Sepolia**, paying **Circle's test USDC** with testnet ETH for gas, signed by NEAR's testnet MPC network (`v1.signer-prod.testnet`). Links under [Live on testnet](#live-on-testnet) |
 | Cross-chain payments through NEAR Intents (1Click) | **Dry quotes only**, from the live 1Click service on mainnet: real prices and routes, nothing sent. NEAR Intents has no testnet, and no mainnet payment has been made |
 
@@ -27,7 +27,8 @@ None of these are needed for `npm run verify` or the dry runs; they are for crea
 | NEAR testnet account with free NEAR | `near account create-account sponsor-by-faucet-service <name>.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create`, or https://near-faucet.io |
 | USDC on Base, Ethereum, Arbitrum or Optimism Sepolia | https://faucet.circle.com (pick the exact network, for example "Base Sepolia", not "Ethereum Sepolia") |
 | Testnet ETH for gas on those chains | https://portal.cdp.coinbase.com/products/faucet (Base Sepolia), https://www.alchemy.com/faucets (Ethereum, Arbitrum, Optimism and Base Sepolia), https://console.optimism.io/faucet (Optimism Sepolia) |
-| Keel Test USDC on NEAR testnet | Minted only by `keel-owner.testnet`, the token's owner; the demo vaults are already funded. Ask the Keel team for some to fund your own vault |
+| USDC on NEAR testnet, for your own vault | https://faucet.circle.com, network "Near Testnet", sent to your vault's account (for example `acme.keel.testnet`) |
+| Keel Test USDC (older vaults only) | Minted only by `keel-owner.testnet`; vaults created now do not use it |
 
 Send to the vault's EVM address on the **same network** you picked in the faucet: the address is the same on every chain, but the funds are not. The address is on the app's Wallets page.
 
@@ -40,18 +41,20 @@ Keel's agent signs with a key only Keel's operator holds, so from a fresh clone 
 **One command for everything below:** run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm run verify`. It installs what it needs and runs every check that needs no keys: typechecks, the agent and app tests, the app build, the contract tests (skipped if Rust is not installed), the demo and cross-chain dry runs against testnet, and the four recorded EVM payments, read back from each chain. You see one `PASS`, `FAIL` or `SKIP` line per check and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`; it exits 1 if anything fails. `npm run verify -- --quick` skips the contract tests and the build.
 
 1. **Get the code.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel/agent && npm install`. You see the install finish with no errors. No `.env` is needed for the steps below.
-2. **Watch one full loop.** Run `npm run demo -- --dry-run`. In a few seconds you see Keel read `anchor.keel.testnet` (1,000 test USDC; 100 per payment and 500 per day), forecast 14 days, check each of its six bills and decide:
-   - **Northwind Hosting, 80:** pay alone, because Northwind is allowlisted and 80 is inside both caps.
-   - **Atlas Freight, 132:** propose to the owner, because Atlas is not on the allowlist.
-   - **"URGENT: supplier changed bank details", 950:** refuse without signing, because the payee is blocklisted. This is the prompt-injection case: the bill's text asks for urgency and the rules ignore it.
-   - **Contractor payroll, 450:** propose, because it is over the 100 per-payment cap.
+2. **Watch one full loop.** Run `npm run demo -- --dry-run`. In a few seconds you see Keel read `beacon.keel.testnet` (Circle's USDC on NEAR testnet; 5 per payment and 25 per day), forecast 14 days, check each of its six bills and decide:
+   - **Northwind Hosting, 4.00:** pay alone, because Northwind is allowlisted and 4 is inside both caps.
+   - **Atlas Freight, 6.60:** propose to the owner, because Atlas is not on the allowlist.
+   - **"URGENT: supplier changed bank details", 47.50:** refuse without signing, because the payee is blocklisted. This is the prompt-injection case: the bill's text asks for urgency and the rules ignore it.
+   - **Contractor payroll, 22.50:** propose, because it is over the 5 per-payment cap.
+
+   If the vault holds less than a bill, Keel proposes it instead of paying, with the reason "vault holds less than this bill".
    - **Lisbon contractor, 12 USDC on Arbitrum:** skip NEAR Intents (mainnet only) and reach the Chain Signatures route, which waits until the vault's Arbitrum Sepolia address holds ETH for gas.
    - **Porto designer, 5 USDC on Optimism:** skip NEAR Intents and propose a Chain Signatures transfer from the vault's own Optimism Sepolia address, which holds the USDC and ETH.
 
    After Keel's operator runs the demo for real, the same command reports those bills as already paid or already proposed, because the vault pays each bill once.
 3. **Watch a bill on Base.** Run `npm run agent -- --once --dry-run --vault vega.keel.testnet`. You see Keel skip NEAR Intents 1Click (mainnet only), fall back to NEAR Chain Signatures, and decide to propose paying 3 USDC from the vault's own Base Sepolia address. You also see two earlier Base transfers reported as already paid.
 4. **Run the tests.** In `agent/`, run `npm test`: 22 tests pass, including about 37,000 generated cases. With Rust installed, run `cargo test` in `contract/` (76 tests) and in `factory/` (15 tests).
-5. **Open the app.** Run `cd ../web && npm install && npm run dev` and open the address it prints, then `/app?view=keel-owner.testnet`. You see that founder's companies read-only with live testnet data: switch to `anchor` or `nova` in the company card, and open Approvals to see Keel's proposals and reasons. Details are in [web/README.md](web/README.md).
+5. **Open the app.** Run `cd ../web && npm install && npm run dev` and open the address it prints, then `/app?view=keel-owner.testnet`. You see that founder's companies read-only with live testnet data: switch to `beacon`, `anchor` or `nova` in the company card, and open Approvals to see Keel's proposals and reasons. Details are in [web/README.md](web/README.md).
 6. **Create your own company (optional).** In the app, click **Open app**, connect a testnet wallet holding about 3.5 NEAR, name your company and click **Create vault**. Or from the command line: `near contract call-function as-transaction keel.testnet create_vault json-args '{"name":"<company>"}' prepaid-gas '300 Tgas' attached-deposit '3.2 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `"<company>.keel.testnet"` returned: your own vault, owned by you, with Keel's agent key already on it and no limits, so every payment needs your approval. The deposit is `min_vault_deposit` from `get_config` on `keel.testnet` (3.15 NEAR now); it pays the vault's storage and stays in the vault.
 7. **Set your limits (optional).** In the app, click **Set limits**. Or call `update_policy` with 1 yoctoNEAR attached: `near contract call-function as-transaction <company>.keel.testnet update_policy json-args '{"update":{"per_payment_cap":"100000000","daily_cap":"500000000","allow":["<payee>.testnet"]},"reason":"initial policy"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`. You see `get_policy` return your values. Pause, resume, approve and reject work the same way, from the sidebar and the Approvals page.
 
@@ -175,12 +178,14 @@ Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can rea
 | `keel.testnet` | Keel factory: creates a vault for each company a founder adds (up to 20 per founder) |
 | `nova.keel.testnet` | The first company vault owned by `keel-owner.testnet`, with Keel's agent key `ed25519:GZ1zQGxc…` added by the factory at sign-up; used for the first live demo |
 | `kora.keel.testnet`, `lumen.keel.testnet` | Earlier vaults for the same founder, from before the agent key moved onto the vault; they use the separate agent account `agent.keel.testnet` |
-| `anchor.keel.testnet` | The demo vault for `npm run demo`, owned by `keel-owner.testnet`, created with the current code. Its address on every EVM chain is `0x3d003b3d8da32261fbba854dc16188cd02436644` |
+| `beacon.keel.testnet` | The demo vault for `npm run demo`, owned by `keel-owner.testnet`, holding Circle's USDC on NEAR testnet. Its address on every EVM chain is `0xf9fe3056ffc0f2e04f8a18bdcb877e979b5ce510` |
+| `anchor.keel.testnet` | The previous demo vault (Keel Test USDC), whose own EVM address `0x3d003b3d8da32261fbba854dc16188cd02436644` made the four Sepolia payments below |
 | `multi.keel.testnet` | Test vault for the multi-chain signing check and the attack suite, owned by `vega-founder.testnet` |
 | `harbor.keel.testnet` | An earlier demo vault with only the Base route |
 | `orbit.keel.testnet` | The earlier demo vault, used for the memory-loss test below |
 | `vega.keel.testnet` | A vault created with the Chain Signatures code, owned by `vega-founder.testnet`. Its Base Sepolia address is `0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed` |
-| `usdc.keel-owner.testnet` | Keel Test USDC |
+| `usdc.keel-owner.testnet` | Keel Test USDC, used by vaults created before Nov 3 |
+| `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` | Circle's USDC on NEAR testnet, used by vaults created now (`set_token` on the factory) |
 
 Checked live:
 
@@ -263,7 +268,7 @@ All variables are optional; `cp .env.example .env` in the repository root to set
 | `NEARAI_API_KEY`, `NEARAI_MODEL` | Optional NEAR AI Cloud key and model for the wording of proposal reasons |
 | `ONECLICK_JWT` | Optional 1Click partner token; removes the 0.2% fee |
 | `EVM_RPC_<chain id>` | Optional RPC URL per EVM chain, for example `EVM_RPC_421614` for Arbitrum Sepolia; defaults are public endpoints |
-| `DEMO_VAULT` | Vault for `npm run demo`, default `anchor.keel.testnet` |
+| `DEMO_VAULT` | Vault for `npm run demo`, default `beacon.keel.testnet` |
 
 The owner's private key is never put in `.env`. Owner actions sign through the NEAR CLI or a wallet.
 
@@ -277,7 +282,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
 - **EVM address funding:** the vault's EVM address needs USDC and a little ETH for gas on each chain it pays from. Keel says how much is missing; it does not top the address up itself. Testnet funds come from each chain's Sepolia faucets.
 - **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
-- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything. Vaults created now get all of it (`vault_code_hash` `GMmhcTLxJa9m8zuR9F2NV1NsGUXFJLg3GpbtjvUswAXd`).
+- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything but use Keel Test USDC; `beacon` is the first on Circle's USDC. Vaults created now get all of it (`vault_code_hash` `GMmhcTLxJa9m8zuR9F2NV1NsGUXFJLg3GpbtjvUswAXd`).
 - **Agent key allowance:** the factory gives the agent key 0.25 NEAR for gas, about 650 actions at testnet prices. The owner renews it with `set_agent_key`.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 

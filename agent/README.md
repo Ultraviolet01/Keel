@@ -13,14 +13,14 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 
 Anyone can run `npm run demo -- --dry-run` to see the decisions below without signing. The steps here are for Keel's operator, who holds the agent key.
 
-1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=anchor.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created, the policy set (100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked) and 1,000 test USDC minted to the vault.
+1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=beacon.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created and the policy set (5 per payment, 25 per day, Northwind and Payroll allowed, the scam account blocked). Then fund the vault with about 35 of Circle's testnet USDC at https://faucet.circle.com ("Near Testnet").
 2. Run `npm run demo`. You see, for the six bills in `../config/bills.json`:
-   - **Northwind Hosting, 80**: paid alone, with a transaction link.
-   - **Atlas Freight, 132**: proposed for the owner, because Atlas is not on the allowlist.
-   - **"URGENT: supplier changed bank details", 950**: refused before signing, because the payee is on the blocklist. This is the prompt-injection case: the bill's text asks for urgency, the rules do not care.
-   - **Contractor payroll, 450**: proposed, because it is over the 100 per-payment cap.
-   - **Lisbon contractor, 12 USDC on Arbitrum**: proposed as a Chain Signatures transfer once the vault's Arbitrum Sepolia address (`0x3d003b3d8da32261fbba854dc16188cd02436644`) holds the USDC and some ETH for gas; until then Keel says what is missing and waits.
-   - **Porto designer, 5 USDC on Optimism**: proposed as a Chain Signatures transfer from the vault's Optimism Sepolia address, which is funded; after the owner approves, the next run broadcasts it.
+   - **Northwind Hosting, 4.00**: paid alone, with a transaction link.
+   - **Atlas Freight, 6.60**: proposed for the owner, because Atlas is not on the allowlist.
+   - **"URGENT: supplier changed bank details", 47.50**: refused before signing, because the payee is on the blocklist. This is the prompt-injection case: the bill's text asks for urgency, the rules do not care.
+   - **Contractor payroll, 22.50**: proposed, because it is over the 5 per-payment cap.
+   - **Lisbon contractor, 1.20 USDC on Arbitrum**: proposed as a Chain Signatures transfer once the vault's Arbitrum Sepolia address (`0xf9fe3056ffc0f2e04f8a18bdcb877e979b5ce510`) holds the USDC and some ETH for gas; until then Keel says what is missing and waits.
+   - **Porto designer, 0.50 USDC on Optimism**: the same, from the vault's Optimism Sepolia address (the same `0xf9fe…e510`).
 3. Open the app's Approvals page for the vault. You see the two proposals waiting, with Keel's reasons.
 4. Run `npm run demo` again. You see Keel report Northwind as already paid by the vault and Atlas and payroll as already proposed, and nothing is signed. The vault pays each bill once, so a fresh demo needs a fresh vault.
 

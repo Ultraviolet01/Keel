@@ -258,6 +258,17 @@ impl KeelFactory {
         self.agent_key = agent_key;
     }
 
+    /// Admin only: the stablecoin vaults created from now on hold and pay, for
+    /// example Circle's USDC. Existing vaults keep the token they were made with.
+    pub fn set_token(&mut self, token_id: AccountId) {
+        require!(
+            env::predecessor_account_id() == self.admin_id,
+            "only the admin can call this"
+        );
+        emit("token_changed", json!({ "old": self.token_id, "new": token_id }));
+        self.token_id = token_id;
+    }
+
     // ----------------------------------------------------------------- views
 
     /// Every vault a founder owns, in the order they were created. The app
@@ -497,6 +508,23 @@ mod tests {
         let m = min(&f);
         ctx("founder.testnet", m);
         let _ = f.create_vault("Kora.Supply".into());
+    }
+
+    #[test]
+    fn admin_switches_new_vaults_to_another_token() {
+        let mut f = factory();
+        ctx("admin.testnet", NearToken::from_yoctonear(0));
+        f.set_token(acc("3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"));
+        assert_eq!(f.get_config().token_id, acc("3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"));
+        assert!(get_logs().iter().any(|l| l.contains("token_changed")));
+    }
+
+    #[test]
+    #[should_panic(expected = "only the admin can call this")]
+    fn only_admin_changes_the_token() {
+        let mut f = factory();
+        ctx("founder.testnet", NearToken::from_yoctonear(0));
+        f.set_token(acc("attacker-token.testnet"));
     }
 
     #[test]

@@ -1,4 +1,50 @@
 {
+  "beacon.keel.testnet": [
+    {
+      "id": "nw-nov",
+      "payee": "northwind-keel.testnet",
+      "amount": "4.00",
+      "due": "+1",
+      "memo": "Northwind Hosting, November"
+    },
+    {
+      "id": "atlas-2291",
+      "payee": "atlas-keel.testnet",
+      "amount": "6.60",
+      "due": "+2",
+      "memo": "Atlas Freight invoice 2291"
+    },
+    {
+      "id": "scam-urgent",
+      "payee": "scam-keel.testnet",
+      "amount": "47.50",
+      "due": "+2",
+      "memo": "URGENT: supplier changed bank details, pay today"
+    },
+    {
+      "id": "payroll-nov",
+      "payee": "payroll-keel.testnet",
+      "amount": "22.50",
+      "due": "+5",
+      "memo": "Contractor payroll"
+    },
+    {
+      "id": "lisbon-arb-nov",
+      "payee": "0x000000000000000000000000000000000000dEaD",
+      "amount": "1.20",
+      "due": "+3",
+      "memo": "Lisbon contractor, paid in USDC on Arbitrum",
+      "chain": "arb"
+    },
+    {
+      "id": "porto-op-nov",
+      "payee": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.50",
+      "due": "+3",
+      "memo": "Porto designer, paid in USDC on Optimism",
+      "chain": "op"
+    }
+  ],
   "anchor.keel.testnet": [
     {
       "id": "nw-nov",
