@@ -3,7 +3,7 @@
 Keel is an AI treasury agent that keeps a small company's stablecoin wallets funded. It can only move money inside limits enforced by a NEAR smart contract, the Keel Vault.
 
 - **Who it is for:** a founder or lean finance lead with several wallets and chains and no treasury staff.
-- **What it does:** reads the vault's balance and upcoming bills, forecasts 14 days ahead, checks every payee, and pays bills: alone when the owner's limits allow it, through a proposal the owner approves otherwise. Bills on other chains (Ethereum, Arbitrum, BNB Chain, Base, Solana and more) are paid through NEAR Intents, with the payee receiving the exact invoice amount, or from the vault's own address on EVM chains through NEAR Chain Signatures.
+- **What it does:** reads the vault's balance and upcoming bills, forecasts 14 days ahead, checks every payee, and pays bills: alone when the owner's limits allow it, through a proposal the owner approves otherwise. Bills on other chains (Ethereum, Arbitrum, Optimism, Base, Solana and more) are paid through NEAR Intents, with the payee receiving the exact invoice amount, or from the vault's own address on EVM chains through NEAR Chain Signatures.
 - **What it cannot do:** spend past a cap, pay a blocklisted address, change its own rules or move NEAR. The vault refuses those calls, whatever the agent decides.
 
 Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
@@ -145,13 +145,13 @@ Checked live:
 3. **The founder fires and rehires the agent.** `revoke_agent` deleted the key ([transaction](https://explorer.testnet.near.org/transactions/2pFH9SePN6REQ172fZbzRFcsiB1tvp5rFagV9PigENC5)) and the agent's next call failed with `Access key ... does not exist`. `set_agent_key` added it back ([transaction](https://explorer.testnet.near.org/transactions/3XJqZ1wSxaxEMn5dd1mvfNYTmMT83uefCfvBzM2K6Vhy)) and the agent's next proposal was accepted as `2`.
 4. **Earlier sign-up.** `keel-owner.testnet` called `create_vault` with `"kora"`. You see `"kora.keel.testnet"` returned and a `vault_created` event ([transaction](https://explorer.testnet.near.org/transactions/GLV4QR6FwuZeTSPWWHrEvZxdsFky4dGVTNKx5H69W4Fy)).
 5. **One founder, several companies.** The same founder added `"lumen"` ([transaction](https://explorer.testnet.near.org/transactions/QX7P8RhhbXG1AbMo87KQNvE2hn6QUEGqRhen6L6bud2)). You see `get_vaults_for_owner` on `keel.testnet` return all three: `kora`, `lumen` and `nova`. Each vault has its own money, policy and agent key.
-6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `Bethy3dRhcqPjLwo9VynAuiTv3og9qAftdp2Wu3U1e8o`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
+6. **Same code everywhere.** `get_config` on `keel.testnet` shows `vault_code_hash` `GMmhcTLxJa9m8zuR9F2NV1NsGUXFJLg3GpbtjvUswAXd`, the base58 SHA-256 of `contract/target/near/keel_vault.wasm` built from this repository at this commit.
 7. **The agent runs the demo.** After `scripts/setup-demo-testnet.sh` (Nova's policy: 100 per payment, 500 per day, Northwind and Payroll allowed, the scam account blocked; 1,000 test USDC), `npm run demo` took 9.6 s: it paid Northwind Hosting 80 alone ([transaction](https://testnet.nearblocks.io/txns/Da5R9fRbMDYnRoVeyadGMD4ikgFUY8fQZir93Lb6ZQyS)), proposed Atlas Freight 132 as #3 because Atlas is not allowlisted ([transaction](https://testnet.nearblocks.io/txns/7vdd1dT2t3cWxUUBxSPCyG74aHwt9Q6LVp7NGupWVs2f)), refused the "URGENT: supplier changed bank details" bill without signing because the payee is blocklisted, and proposed Contractor payroll 450 as #4 because it is over the cap ([transaction](https://testnet.nearblocks.io/txns/5pi9j2RtGvjn2vcUx712ytgJGkrSZyRRKeHCfosCpCS2)). `ft_balance_of` shows `northwind-keel.testnet` holding 80 and the vault 920.
 8. **Paying on Base without 1Click.** The agent proposed a 1 USDC transfer on Base Sepolia from `vega.keel.testnet` as #1 ([transaction](https://testnet.nearblocks.io/txns/FjjJnVwJfmc7GmDvPXxEToZqJNj3zf4NhMXcw96Ug7ue)). The founder approved it ([transaction](https://testnet.nearblocks.io/txns/CwtmxfryUoEoCwKUAUHETVx6fKmYkU3fNZHzsUDxM2Bp)). The vault built the transfer, `v1.signer-prod.testnet` signed it, and the vault stored it with an `evm_signed` event. Recovering the signer from the stored transaction with viem gives `0x69aa…cffed`, the vault's own address. Once the address was funded, Keel broadcast it and it landed on Base Sepolia ([transaction](https://sepolia.basescan.org/tx/0x810f796b040edca5df3b1c3c3097d2dc31f5f060bf06e5436166b300f3b29171)).
 9. **A Base bill paid end to end.** For a 15 USDC "Designer invoice, paid in USDC on Base" bill, Keel skipped 1Click (mainnet only), proposed a Chain Signatures transfer as #4, the founder approved it ([transaction](https://testnet.nearblocks.io/txns/EyRxbDQyv4MocVD1DwhWkrgMZuWufrbRJFRxXjmHMK1V)), and Keel broadcast the vault-signed transfer ([transaction](https://sepolia.basescan.org/tx/0xb39efe2b80d77ced7be0bb619055c957b4271fbf490cc7a8bdd1a894a64aa1d3)). The vault's Base address went from 20 to 4 USDC. An earlier proposal, #3, had taken a nonce that #1 then used; Keel flagged it as unable to land and proposed #4 instead.
 10. **No double payment after memory loss.** On `orbit.keel.testnet`, `npm run demo` paid Northwind 80 ([transaction](https://testnet.nearblocks.io/txns/3vcwJbZebqFq8DueC2HP1W5qsrdFwt8NgbDm5tRAD7B9)) and proposed Atlas (#1) and payroll (#2). After deleting `agent/state.json`, the next run reported Northwind paid and Atlas proposed, and signed nothing. Calling `execute_payment` for the same bill directly with the agent key failed on chain with `Keel Vault refused: this bill was already paid`; the vault's balance stayed at 920.
 11. **One address, several chains.** On `multi.keel.testnet` the agent proposed a 1 USDC transfer on Arbitrum Sepolia and one on Ethereum Sepolia, and the owner approved both. `v1.signer-prod.testnet` signed each: the stored transactions carry chain ids 421614 and 11155111, each chain's Circle USDC contract and a `transfer` of 1,000,000 units, and both recover to the vault's own address `0x1cd65ce3344a4e6ecc53af2d46b482ac714b8418`.
-12. **BNB Chain and 18 decimals.** The owner added the BNB Chain testnet route to `multi` and `anchor` with `set_evm_route` (no new vault needed). For a 1 USDC proposal, the vault fixed `evm_amount` at 1,000,000,000,000,000,000 (18 decimals), and `v1.signer-prod.testnet` signed a `transfer` of exactly that on chain 97, recovering to the same vault address.
+12. **Optimism.** The owner added the Optimism Sepolia route to `multi` and `anchor` with `set_evm_route` (no new vault needed). `v1.signer-prod.testnet` signed a 1 USDC `transfer` for chain 11155420 with Optimism's Circle USDC contract, recovering to the same vault address.
 
 ## Cross-chain bills
 
@@ -159,12 +159,12 @@ A bill with `"chain"` set (and optionally `"token"`, for example `"USDT"`) is pa
 
 | Route | Chains | Depends on | Testnet |
 | --- | --- | --- | --- |
-| 1. NEAR Intents 1Click | 38 chains, 210 tokens on Nov 2: Ethereum, Arbitrum, BNB Chain, Base, Optimism, Polygon, Avalanche, Solana, Tron, TON, Sui, Aptos and more; can swap to the token the payee wants | Defuse's 1Click API | No, mainnet only |
-| 2. NEAR Chain Signatures | Base, Ethereum, Arbitrum and BNB Chain on mainnet; Base, Ethereum and Arbitrum Sepolia and BNB Chain testnet on testnet. USDC only | NEAR validators only (MPC network) | Yes |
+| 1. NEAR Intents 1Click | 38 chains, 210 tokens on Nov 2: Ethereum, Arbitrum, Optimism, Base, Polygon, Avalanche, Solana, Tron, TON, Sui, Aptos and more; can swap to the token the payee wants | Defuse's 1Click API | No, mainnet only |
+| 2. NEAR Chain Signatures | Base, Ethereum, Arbitrum and Optimism, on mainnet and on their Sepolia testnets. USDC only | NEAR validators only (MPC network) | Yes |
 
 Keel tries 1Click first and falls back to Chain Signatures. If neither works, the bill waits and Keel tries again on the next run. Details and a dry run are in [agent/README.md](agent/README.md#cross-chain-bills-two-routes).
 
-**Chain Signatures route.** Each vault controls one EVM address, the same on every chain, derived from its own account by NEAR's MPC contract. The vault signs only one thing: a USDC `transfer` on one of the owner's chains, with gas and fees under that chain's caps (100,000 gas; 5 gwei on Base, Arbitrum and BNB Chain, 50 gwei on Ethereum). It converts amounts to each token's decimals (18 for USDC on BNB Chain). It builds and hashes the transaction itself, so the agent cannot get anything else signed. Signing waits for the owner's approval, and blocklisted 0x addresses are refused. Approving needs 300 Tgas, because the vault waits for the MPC signature.
+**Chain Signatures route.** Each vault controls one EVM address, the same on every chain, derived from its own account by NEAR's MPC contract. The vault signs only one thing: a USDC `transfer` on one of the owner's chains, with gas and fees under that chain's caps (100,000 gas; 5 gwei on Base, Arbitrum and Optimism, 50 gwei on Ethereum). It converts amounts to each token's decimals, so the owner can also add a chain whose stablecoin uses 18. It builds and hashes the transaction itself, so the agent cannot get anything else signed. Signing waits for the owner's approval, and blocklisted 0x addresses are refused. Approving needs 300 Tgas, because the vault waits for the MPC signature.
 
 ### NEAR Intents leg (quotes live, no mainnet move yet)
 
@@ -172,7 +172,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 
 1. **List tokens.** Run `cd agent && npm run intents -- tokens USDC`. You see USDC on each chain 1Click supports (`near`, `eth`, `arb`, `base`, `sol` and more) with its asset id.
 2. **Dry quote.** Run `npm run intents -- quote --to base --amount 5`. You see the expected output and time with nothing sent, for example `5.0 USDC on near -> 4.996979 USDC on base`, about 22 s after the deposit confirms (Nov 2).
-3. **Propose.** For a bill, Keel asks for an exact-output quote, so the payee receives the whole invoice and the fee comes from the vault. It refuses a quote that costs more than 3% over the bill's value, using 1Click's own USD prices. Dry quotes for a 100-unit bill on Nov 2: USDC on Ethereum cost 101.33 USDC (about 27 s), USDC on Arbitrum 101.03 (about 19 s), USDT on Ethereum 101.20; these include a 1% slippage allowance that 1Click refunds if unused. BNB Chain quotes were refused with `Temporary swap limits: minimum swap amount is $1,000` (still on Nov 3, even for $1,000), so BNB Chain bills use the Chain Signatures route while that limit lasts.
+3. **Propose.** For a bill, Keel asks for an exact-output quote, so the payee receives the whole invoice and the fee comes from the vault. It refuses a quote that costs more than 3% over the bill's value, using 1Click's own USD prices. Dry quotes for a 100-unit bill on Nov 2: USDC on Ethereum cost 101.33 USDC (about 27 s), USDC on Arbitrum 101.03 (about 19 s), USDT on Ethereum 101.20; these include a 1% slippage allowance that 1Click refunds if unused.
 4. **Approve.** Keel proposes paying the quote's deposit address, with `valid_until_ms` two minutes before the quote's deadline. The vault refuses to approve it after that time, so funds never go to an inactive address.
 5. **Follow it.** After the owner approves and the vault pays, Keel polls `/v0/status` until `SUCCESS`, `REFUNDED` or `FAILED`.
 
@@ -183,7 +183,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 - NEAR smart contract (Keel Vault)
 - Function-call access keys (scoped agent key)
 - NEAR Intents 1Click API (cross-chain moves)
-- NEAR Chain Signatures (each vault's own address on Base, Ethereum, Arbitrum and BNB Chain, the fallback route when 1Click is down)
+- NEAR Chain Signatures (each vault's own address on Base, Ethereum, Arbitrum and Optimism, the fallback route when 1Click is down)
 - NEAR AI Cloud (optional, writes the wording of a proposal's reason; decisions stay in plain code)
 
 ## Repo layout and configuration
@@ -193,7 +193,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 | `contract/` | Keel Vault smart contract and its tests |
 | `factory/` | Keel factory: one vault per company, created when a founder signs up or adds a company |
 | `agent/` | The agent service: observe, forecast, check, decide, act, reconcile, learn, for every vault on the factory; `agent/stress/` holds the live attack suites |
-| `config/bills.json` | Bills Keel watches for each vault (due dates can be relative, like `+2`; `"chain": "base"`, `"eth"`, `"arb"` or `"bsc"` and optionally `"token"` for other chains) |
+| `config/bills.json` | Bills Keel watches for each vault (due dates can be relative, like `+2`; `"chain": "base"`, `"eth"`, `"arb"` or `"op"` and optionally `"token"` for other chains) |
 | `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair) and `setup-demo-testnet.sh` (demo payees, policy and test USDC for one vault) |
 | `web/` | The app: landing page, wallet sign-in, one vault per company, Overview, Approvals, Activity, Rules and Wallets (Vite, React, TypeScript, NEAR Connect) |
 | `design/` | HTML mockups and screenshots of the screens |
@@ -222,10 +222,9 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 - **Forecast inputs:** bills come from `config/bills.json`, not from an accounting system.
 - **Learning is rule-based:** Keel drafts a cap change after 3 approvals in a row for one payee, and flags any bill more than 25% above that payee's last 3. It never changes a limit itself.
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
-- **EVM address funding:** the vault's EVM address needs USDC and a little gas token (ETH, or BNB on BNB Chain) on each chain it pays from. Keel says how much is missing; it does not top the address up itself. Testnet funds come from each chain's Sepolia faucets.
-- **BNB Chain:** 1Click currently refuses BNB Chain swaps (a temporary $1,000 minimum), so BNB Chain bills go through Chain Signatures. On testnet that uses the BNB Chain faucet's 18-decimal USDC (`0x6454…8930`).
+- **EVM address funding:** the vault's EVM address needs USDC and a little ETH for gas on each chain it pays from. Keel says how much is missing; it does not top the address up itself. Testnet funds come from each chain's Sepolia faucets.
 - **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
-- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything. Vaults created now get all of it (`vault_code_hash` `Bethy3dRhcqPjLwo9VynAuiTv3og9qAftdp2Wu3U1e8o`).
+- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything. Vaults created now get all of it (`vault_code_hash` `GMmhcTLxJa9m8zuR9F2NV1NsGUXFJLg3GpbtjvUswAXd`).
 - **Agent key allowance:** the factory gives the agent key 0.25 NEAR for gas, about 650 actions at testnet prices. The owner renews it with `set_agent_key`.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 

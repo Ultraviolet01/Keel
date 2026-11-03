@@ -19,8 +19,8 @@ export const EVM_CHAINS: Record<number, { name: string; rpc: string; explorer: s
   1: { name: "Ethereum", rpc: "https://ethereum-rpc.publicnode.com", explorer: "https://etherscan.io", gas: "ETH" },
   421614: { name: "Arbitrum Sepolia", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
   42161: { name: "Arbitrum", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
-  56: { name: "BNB Chain", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
-  97: { name: "BNB Chain testnet", rpc: "https://bsc-testnet-rpc.publicnode.com", explorer: "https://testnet.bscscan.com", gas: "BNB" },
+  11155420: { name: "Optimism Sepolia", rpc: "https://sepolia.optimism.io", explorer: "https://sepolia-optimism.etherscan.io", gas: "ETH" },
+  10: { name: "Optimism", rpc: "https://mainnet.optimism.io", explorer: "https://optimistic.etherscan.io", gas: "ETH" },
 };
 
 export interface EvmChainBalance {

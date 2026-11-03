@@ -45,10 +45,10 @@ Every step is appended to `ledger.jsonl`; `state.json` remembers which bills wer
 
 ## Cross-chain bills: two routes
 
-A bill with `"chain"` set in `config/bills.json` (`"base"`, `"eth"`, `"arb"`, `"bsc"`, `"sol"` and any other chain 1Click lists; optionally `"token": "USDT"`) is paid on that chain. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
+A bill with `"chain"` set in `config/bills.json` (`"base"`, `"eth"`, `"arb"`, `"op"`, `"sol"` and any other chain 1Click lists; optionally `"token": "USDT"`) is paid on that chain. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
 
 1. **NEAR Intents 1Click** (mainnet only). Keel gets an exact-output quote, so the payee receives the whole bill, refuses one that costs more than 3% over the bill, and proposes paying the quote's deposit address.
-2. **NEAR Chain Signatures** (testnet and mainnet; Base, Ethereum, Arbitrum and BNB Chain). Keel proposes a USDC transfer from the vault's own EVM address on that chain. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.
+2. **NEAR Chain Signatures** (testnet and mainnet; Base, Ethereum, Arbitrum and Optimism). Keel proposes a USDC transfer from the vault's own EVM address on that chain. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.
 
 If no route works, Keel records nothing and tries again on the next run. Offers that expire before the owner approves are proposed again.
 

@@ -523,7 +523,7 @@ fn testnet_vault_starts_with_the_base_sepolia_route() {
     let v = vault();
     let r = v.get_evm_route();
     let ids: Vec<u64> = r["routes"].as_array().unwrap().iter().map(|x| x["chain_id"].as_u64().unwrap()).collect();
-    assert_eq!(ids, vec![84532, 11155111, 421614, 97], "Base, Ethereum and Arbitrum Sepolia, BNB Chain testnet");
+    assert_eq!(ids, vec![84532, 11155111, 421614, 11155420], "Base, Ethereum, Arbitrum and Optimism Sepolia");
     assert_eq!(r["routes"][0]["token"], BASE_USDC);
     assert_eq!(r["mpc_id"], "v1.signer-prod.testnet");
     assert_eq!(r["path"], "evm");
@@ -934,10 +934,11 @@ fn base_usdc_cannot_be_sent_on_the_arbitrum_route() {
 fn an_18_decimal_token_gets_the_amount_scaled() {
     let mut v = vault();
     as_owner(DAY);
-    let bnb_usdc = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
-    v.set_evm_route(56, Some(EvmRoute { chain_id: 56, token: bnb_usdc.into(), decimals: 18, max_fee_per_gas: U128(5_000_000_000), max_gas: 100_000 }));
-    let id = propose_evm(&mut v, EvmTransfer { chain_id: 56, token: bnb_usdc.into(), ..evm_transfer() });
-    // 5 USDC is 5 * 10^18 units of Binance-Peg USDC.
+    // An owner-added chain whose stablecoin has 18 decimals.
+    let token18 = "0x00000000000000000000000000000000000000c8";
+    v.set_evm_route(100, Some(EvmRoute { chain_id: 100, token: token18.into(), decimals: 18, max_fee_per_gas: U128(5_000_000_000), max_gas: 100_000 }));
+    let id = propose_evm(&mut v, EvmTransfer { chain_id: 100, token: token18.into(), ..evm_transfer() });
+    // 5 USDC is 5 * 10^18 units of an 18-decimal token.
     assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * 10u128.pow(18))));
 }
 
@@ -976,9 +977,9 @@ fn ethereum_sepolia_allows_a_higher_fee_than_base() {
 }
 
 #[test]
-fn bnb_chain_testnet_route_scales_to_18_decimals() {
+fn optimism_sepolia_bill_is_accepted() {
     let mut v = vault();
-    let usdc97 = "0x64544969ed7ebf5f083679233325356ebe738930";
-    let id = propose_evm(&mut v, EvmTransfer { chain_id: 97, token: usdc97.into(), ..evm_transfer() });
-    assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * 10u128.pow(18))));
+    let op_usdc = "0x5fd84259d66cd46123540766be93dfe6d43130d7";
+    let id = propose_evm(&mut v, EvmTransfer { chain_id: 11155420, token: op_usdc.into(), ..evm_transfer() });
+    assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * USDC)));
 }

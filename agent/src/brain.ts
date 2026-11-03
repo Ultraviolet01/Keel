@@ -37,7 +37,7 @@ export interface Bill {
   amount: bigint;
   due: string; // YYYY-MM-DD
   memo?: string;
-  chain?: string; // set for payees on another chain, for example "base", "eth", "arb", "bsc"
+  chain?: string; // set for payees on another chain, for example "base", "eth", "arb", "op"
   token?: string; // what the payee wants on that chain, for example "USDT"; default the vault's token
 }
 

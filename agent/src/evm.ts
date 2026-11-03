@@ -1,4 +1,4 @@
-// The vault's own address on EVM chains (Base, Ethereum, Arbitrum, BNB Chain), controlled through NEAR
+// The vault's own address on EVM chains (Base, Ethereum, Arbitrum, Optimism), controlled through NEAR
 // Chain Signatures. The vault builds and hashes the USDC transfer itself and
 // asks NEAR's MPC network to sign it after the owner approves; Keel only
 // reads the chain, fills in nonce and fees, and broadcasts the signed bytes
@@ -34,9 +34,12 @@ const NAMES: Record<number, { name: string; rpc: string; explorer: string; gas: 
   1: { name: "eth", rpc: "https://ethereum-rpc.publicnode.com", explorer: "https://etherscan.io", gas: "ETH" },
   421614: { name: "arb", rpc: "https://sepolia-rollup.arbitrum.io/rpc", explorer: "https://sepolia.arbiscan.io", gas: "ETH" },
   42161: { name: "arb", rpc: "https://arb1.arbitrum.io/rpc", explorer: "https://arbiscan.io", gas: "ETH" },
-  56: { name: "bsc", rpc: "https://bsc-dataseed.bnbchain.org", explorer: "https://bscscan.com", gas: "BNB" },
-  97: { name: "bsc", rpc: "https://bsc-testnet-rpc.publicnode.com", explorer: "https://testnet.bscscan.com", gas: "BNB" },
+  11155420: { name: "op", rpc: "https://sepolia.optimism.io", explorer: "https://sepolia-optimism.etherscan.io", gas: "ETH" },
+  10: { name: "op", rpc: "https://mainnet.optimism.io", explorer: "https://optimistic.etherscan.io", gas: "ETH" },
 };
+
+/** True for the EVM chains Keel has an RPC for. */
+export const knownChain = (chainId: number) => chainId in NAMES;
 
 export function chainInfo(chainId: number) {
   const c = NAMES[chainId];
@@ -62,7 +65,7 @@ export async function vaultRoute(chain: Chain, vaultId: string) {
   }
 }
 
-/** The vault's route for a bill's chain name ("base", "eth", "arb", "bsc"), if it has one. */
+/** The vault's route for a bill's chain name ("base", "eth", "arb", "op"), if it has one. */
 export function routeFor(routes: EvmRoute[], chainName: string) {
   return routes.find((r) => NAMES[r.chain_id]?.name === chainName);
 }

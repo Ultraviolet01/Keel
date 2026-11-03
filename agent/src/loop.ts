@@ -20,7 +20,7 @@ import {
 import type { Chain, Config } from "./chain";
 import { explain } from "./explain";
 import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
-import { balances, broadcast, chainInfo, client, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
+import { balances, broadcast, chainInfo, client, knownChain, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
 
 const STATE_FILE = resolve(import.meta.dirname, "../state.json");
 const LEDGER_FILE = resolve(import.meta.dirname, "../ledger.jsonl");
@@ -149,7 +149,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // re-quote any offer that expired before the owner approved it.
   // Signed EVM transfers Keel did not propose (owner withdrawals) are sent too.
   for (const p of proposals) {
-    if (p.status === "signed" && !Object.values(handled).some((h) => h.proposalId === p.id)) {
+    if (p.status === "signed" && p.evm && knownChain(p.evm.chain_id) && !Object.values(handled).some((h) => h.proposalId === p.id)) {
       handled[`evm-${p.id}`] = { action: "bridge", route: "chain-signatures", proposalId: p.id, at: new Date().toISOString() };
     }
   }
