@@ -31,6 +31,10 @@ Founders connect a NEAR wallet, create a vault for each company, set its limits 
 
 Company names are kept in this browser only; the chain stores the vault address.
 
+## Test
+
+`npm test` runs the checks for the NEAR Intents deposit-address verification (`src/intents.test.ts`), including one live call to the 1Click API.
+
 ## Build
 
 `npm run build` type-checks and writes `dist/`.
@@ -47,6 +51,7 @@ Company names are kept in this browser only; the chain stores the vault address.
 | `src/Sample.tsx` | The sample treasury shown blurred behind the first panels |
 | `src/vault.ts` | Reads one vault's live state |
 | `src/near.ts` | Network settings, NEAR Connect, JSON-RPC reads, number formats |
+| `src/intents.ts` | Asks 1Click where a deposit address pays before the owner approves it |
 | `src/evm.ts` | The vault's EVM address from Chain Signatures, and its balances on each chain |
 | `src/icons.tsx` | Line icons and Keel's load-line mark |
 | `src/styles.css` | Tokens sampled from the Figma screens |

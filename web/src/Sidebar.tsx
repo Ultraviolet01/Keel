@@ -35,6 +35,8 @@ export function Sidebar(props: {
   onPauseToggle: () => void;
   accountId: string;
   onSignOut?: () => void;
+  /** The selected vault's owner, as the vault itself records it. */
+  owner?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -73,6 +75,7 @@ export function Sidebar(props: {
               <span className="tag">Testnet</span>
             </span>
             <span className="mono">{current ?? "Create one to start"}</span>
+            {current && props.owner ? <span className="tiny muted">Owner: <span className="mono">{props.owner}</span></span> : null}
           </span>
           <ChevronsUpDown className="faint" size={16} />
         </button>

@@ -9,6 +9,7 @@ import type { Send } from "./panels";
 import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
+import { checkDeposit, type DepositCheck } from "./intents";
 
 export interface PageProps {
   vaultId: string;
@@ -42,7 +43,9 @@ function routeOf(x: Proposal) {
     const c = EVM_CHAINS[x.evm.chain_id];
     return { kind: "evm" as const, chain: c?.name ?? `chain ${x.evm.chain_id}`, label: "Signed by NEAR Chain Signatures", detail: `USDC transfer on ${c?.name ?? "EVM"}` };
   }
-  if (x.valid_until_ms) return { kind: "intents" as const, chain: "Other chain", label: "Cross-chain via NEAR Intents", detail: "1Click deposit address" };
+  // NEAR Intents deposit addresses on NEAR are implicit accounts (64 hex
+  // characters). Any payment to one is checked with 1Click, whatever the reason says.
+  if (/^[0-9a-f]{64}$/.test(x.receiver_id)) return { kind: "intents" as const, chain: "Other chain", label: "Cross-chain via NEAR Intents", detail: "1Click deposit address" };
   return { kind: "near" as const, chain: "NEAR", label: "Paid by the vault", detail: "ft_transfer on NEAR" };
 }
 
@@ -409,6 +412,19 @@ export function Approvals(p: PageProps) {
   const now = useNow(pending.some((x) => x.valid_until_ms));
   const expired = !!(selected?.status === "pending" && selected.valid_until_ms && selected.valid_until_ms <= now);
   const route = selected ? routeOf(selected) : null;
+  // On the NEAR Intents route, ask 1Click itself where the deposit address pays.
+  const [deposit, setDeposit] = useState<DepositCheck | null>(null);
+  useEffect(() => {
+    setDeposit(null);
+    if (!selected || selected.status !== "pending" || routeOf(selected).kind !== "intents") return;
+    let live = true;
+    setDeposit({ kind: "loading" });
+    checkDeposit(selected.receiver_id, selected, p.vaultId).then((d) => live && setDeposit(d));
+    return () => {
+      live = false;
+    };
+  }, [selected, p.vaultId]);
+  const depositBlocks = deposit?.kind === "loading" || deposit?.kind === "unknown" || (deposit?.kind === "known" && deposit.problems.length > 0);
 
   useEffect(() => {
     setVerdict(null);
@@ -516,6 +532,8 @@ export function Approvals(p: PageProps) {
               </div>
             </div>
 
+            {deposit ? <DepositBox d={deposit} /> : null}
+
             <h3 className="sec">
               <Shield size={18} />
               Why Keel proposed this
@@ -558,8 +576,8 @@ export function Approvals(p: PageProps) {
                 {p.canAct && (
                   <span className="q-act">
                     <button className="btn danger" disabled={busy} onClick={() => act("reject")}>Reject</button>
-                    <button className="btn primary" disabled={busy || d.policy.paused || expired} onClick={() => act("approve")}>
-                      {busy ? "Approve in wallet" : expired ? "Offer expired" : "Approve and sign"}
+                    <button className="btn primary" disabled={busy || d.policy.paused || expired || depositBlocks} onClick={() => act("approve")}>
+                      {busy ? "Approve in wallet" : expired ? "Offer expired" : depositBlocks ? "Not verified by 1Click" : "Approve and sign"}
                     </button>
                   </span>
                 )}
@@ -855,5 +873,30 @@ function EvmWalletCard({ vaultId }: { vaultId: string }) {
       <span className="muted small">The same address on every chain. Only this vault can sign for it, through NEAR's MPC network, after you approve. Keel pays bills on these chains from here when NEAR Intents is unavailable.</span>
       <button className="btn" onClick={copy}>{copied ? "Copied" : "Copy address to fund it"}</button>
     </section>
+  );
+}
+
+/** What 1Click itself says about a deposit address, shown before the owner signs. */
+function DepositBox({ d }: { d: DepositCheck }) {
+  if (d.kind === "loading") return <p className="small muted">Asking NEAR Intents where this deposit address pays…</p>;
+  if (d.kind === "unreachable")
+    return <p className="small brass">Could not reach 1Click to check this deposit address ({d.detail}). Check the payee and amount yourself before approving.</p>;
+  if (d.kind === "unknown")
+    return (
+      <p className="small bad-t">
+        1Click does not recognise this deposit address. Do not approve: the money would go to an account that NEAR Intents never issued.
+      </p>
+    );
+  return (
+    <div className={`deposit-box ${d.problems.length ? "bad" : "ok"}`}>
+      <b className="small">{d.problems.length ? "1Click's record does not match this proposal" : "Checked with 1Click"}</b>
+      <span className="small">
+        Pays <b>{d.amountOut}</b> to <span className="mono wrap-any">{d.recipient}</span> on <b>{d.chain}</b> ({d.token}). Refunds go to <span className="mono">{d.refundTo}</span>. Status {d.status}.
+      </span>
+      {d.problems.map((x) => (
+        <span key={x} className="small bad-t">{x}</span>
+      ))}
+      <span className="tiny muted">Compare the recipient with the invoice before approving.</span>
+    </div>
   );
 }

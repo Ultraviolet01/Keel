@@ -24,6 +24,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const readOnly = Boolean(viewAs);
   const vault = useVault(selected);
+  // Vault names are first come, first served, so the app always shows who owns
+  // a vault, and checks the vault's own record against the factory's.
+  const [factoryOwner, setFactoryOwner] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setFactoryOwner(undefined);
+    if (!selected) return;
+    view<string | null>(FACTORY_ID, "get_owner", { vault_id: selected }).then(setFactoryOwner, () => setFactoryOwner(undefined));
+  }, [selected]);
 
   // Wallet session: restore on load and follow sign-in / sign-out.
   useEffect(() => {
@@ -196,6 +204,7 @@ export default function App() {
           canAct={canAct}
           busy={busy}
           accountId={accountId}
+          owner={vault.data?.policy.owner_id ?? null}
           onSignOut={readOnly ? undefined : signOut}
           onSelect={(v) => {
             setSelected(v);
@@ -212,6 +221,18 @@ export default function App() {
               connect your own wallet.
             </div>
           )}
+          {vault.data && factoryOwner !== undefined && factoryOwner !== vault.data.policy.owner_id ? (
+            <div className="banner bad-banner">
+              The factory lists <span className="mono">{factoryOwner ?? "no one"}</span> as this vault's owner, but the vault says{" "}
+              <span className="mono">{vault.data.policy.owner_id}</span>. Do not deposit until this is explained.
+            </div>
+          ) : null}
+          {vault.data && !readOnly && accountId && vault.data.policy.owner_id !== accountId ? (
+            <div className="banner bad-banner">
+              You are signed in as <span className="mono">{accountId}</span>, but this vault belongs to{" "}
+              <span className="mono">{vault.data.policy.owner_id}</span>. A similar name does not make it yours.
+            </div>
+          ) : null}
           {error && <p className="error">{error}</p>}
           {vault.error ? (
             <p className="error">This vault could not be read: {vault.error}</p>

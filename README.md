@@ -131,7 +131,13 @@ Also checked by hand on testnet: two agents running at once paid a bill once; wi
 | Replay a vault-signed Optimism transfer on Arbitrum, Base or Ethereum | **Not possible.** The signature covers the chain id; on another chain it recovers to an unrelated empty address. On Optimism its nonce is already used |
 | The factory deploys different code than it publishes | **Checkable.** `view_account` on `anchor` and `multi` shows the code hash the factory published when they were made (`99bW2T…`); vaults have no full-access key, so their code cannot change later |
 
-Still open: on the NEAR Intents route the owner approves a deposit address, so a compromised agent could pair one with a misleading reason; the app warns about this. Vault names are first come, first served.
+Follow-up, Nov 3:
+
+| Attack | Result |
+| --- | --- |
+| A compromised agent proposes paying a deposit address with a misleading reason (NEAR Intents route) | **Fixed.** Before the owner approves a payment to a NEAR Intents deposit address, the app asks 1Click's `/v0/status` itself and shows 1Click's own record: recipient, chain, amount and refund address. Approve stays off if 1Click never issued the address, if refunds would not come back to this vault, or if the quote's amount differs from the proposal. Run `cd web && npm test`: 6 tests, including a live call where the real 1Click API reports a made-up address as unknown |
+| An outsider burns gas against the vault | **Holds.** A fresh faucet account (`griefer-keel.testnet`) sent 10 calls at 300 Tgas each (`execute_payment`, `propose_payment`, `approve`, and both private callbacks). All 10 were refused; the attacker paid 0.0016 NEAR, and the vault's NEAR, storage and the agent key's allowance did not change |
+| Someone registers a look-alike vault name first | **Visible.** Names are first come, first served on NEAR and cannot be reserved, but a name never grants ownership. The app shows each vault's owner, warns when a signed-in founder opens a vault they do not own, and warns if the vault's owner differs from the factory's record. All eight vaults on `keel.testnet` match |
 
 **Prompt-injection demo:** the "URGENT: supplier changed bank details" bill in step 2 of Try it is refused by Keel's own check before anything is signed. When the same payment is forced through the agent key anyway, the vault refuses it on chain (`Keel Vault refused: payee is on the blocklist`, one of the checks in `npm run stress`).
 

@@ -471,3 +471,7 @@ input:focus, textarea:focus { outline: none; border-color: var(--teal); box-shad
 .wrap-any { overflow-wrap: anywhere; }
 .view-banner, .readonly-banner { overflow-wrap: anywhere; }
 .evm-chains td:first-child { white-space: nowrap; }
+.deposit-box { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 10px; margin: 12px 0; border: 1px solid var(--line); }
+.deposit-box.ok { background: var(--teal-tint); }
+.deposit-box.bad { background: var(--bad-tint); }
+.bad-banner { background: var(--bad-tint); color: var(--bad); }
