@@ -8,6 +8,29 @@ Keel is an AI treasury agent that keeps a small company's stablecoin wallets fun
 
 Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
+## What is real and what is a test
+
+| Part | What was used |
+| --- | --- |
+| NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**, paying **Keel Test USDC** (`usdc.keel-owner.testnet`, deployed and minted for Keel; not Circle's USDC) |
+| Cross-chain payments through NEAR Chain Signatures | Real transactions on **Base, Ethereum, Arbitrum and Optimism Sepolia**, paying **Circle's test USDC** with testnet ETH for gas, signed by NEAR's testnet MPC network (`v1.signer-prod.testnet`). Links under [Live on testnet](#live-on-testnet) |
+| Cross-chain payments through NEAR Intents (1Click) | **Dry quotes only**, from the live 1Click service on mainnet: real prices and routes, nothing sent. NEAR Intents has no testnet, and no mainnet payment has been made |
+
+Test tokens have no money value. Nothing in this repository has moved real money.
+
+### Get testnet tokens
+
+None of these are needed for `npm run verify` or the dry runs; they are for creating your own vault or funding a vault's EVM address.
+
+| What | Where |
+| --- | --- |
+| NEAR testnet account with free NEAR | `near account create-account sponsor-by-faucet-service <name>.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create`, or https://near-faucet.io |
+| USDC on Base, Ethereum, Arbitrum or Optimism Sepolia | https://faucet.circle.com (pick the exact network, for example "Base Sepolia", not "Ethereum Sepolia") |
+| Testnet ETH for gas on those chains | https://portal.cdp.coinbase.com/products/faucet (Base Sepolia), https://www.alchemy.com/faucets (Ethereum, Arbitrum, Optimism and Base Sepolia), https://console.optimism.io/faucet (Optimism Sepolia) |
+| Keel Test USDC on NEAR testnet | Minted only by `keel-owner.testnet`, the token's owner; the demo vaults are already funded. Ask the Keel team for some to fund your own vault |
+
+Send to the vault's EVM address on the **same network** you picked in the faucet: the address is the same on every chain, but the funds are not. The address is on the app's Wallets page.
+
 ## Try it in 10 minutes
 
 Everything below runs on NEAR testnet and costs nothing. You need Node.js 22 or newer. Rust and the NEAR CLI are only needed for the contract tests and for creating your own vault.
@@ -197,7 +220,7 @@ Keel tries 1Click first and falls back to Chain Signatures. If neither works, th
 
 ### NEAR Intents leg (quotes live, no mainnet move yet)
 
-NEAR Intents has no testnet, so this route has only been quoted, not used to move money. The plan is a separate mainnet vault capped at 5 USDC, run only with the owner's OK. 1Click was down (HTTP 521) for part of Nov 2, which is why Keel falls back to Chain Signatures.
+NEAR Intents has no testnet, so this route has only been quoted, not used to move money. The code path is complete and tested; a real payment would need a mainnet vault and real USDC, which this submission does not use. 1Click was down (HTTP 521) for part of Nov 2, which is why Keel falls back to Chain Signatures.
 
 1. **List tokens.** Run `cd agent && npm run intents -- tokens USDC`. You see USDC on each chain 1Click supports (`near`, `eth`, `arb`, `base`, `sol` and more) with its asset id.
 2. **Dry quote.** Run `npm run intents -- quote --to base --amount 5`. You see the expected output and time with nothing sent, for example `5.0 USDC on near -> 4.996979 USDC on base`, about 22 s after the deposit confirms (Nov 2).
