@@ -488,3 +488,28 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
 .name-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .name-suggest .chip { font: inherit; font-size: 12px; font-family: var(--mono, monospace); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--teal-tint); color: var(--ink, inherit); cursor: pointer; }
 .name-suggest .chip:hover { border-color: currentColor; }
+
+/* Docs page */
+.docs-wrap { display: grid; grid-template-columns: 220px minmax(0, 760px); gap: 64px; padding: 48px 120px 80px; }
+.docs-toc { position: sticky; top: 112px; align-self: start; display: flex; flex-direction: column; gap: 10px; }
+.docs-toc a { color: var(--ink-2); font-size: 14px; }
+.docs-toc a:hover { color: var(--teal); }
+.docs-body h1 { font-size: 56px; line-height: 1; letter-spacing: -0.03em; margin: 0 0 16px; }
+.docs-body .lead { font-size: 18px; color: var(--ink-2); margin-bottom: 40px; }
+.docs-body h2 { font-size: 24px; margin: 48px 0 12px; scroll-margin-top: 112px; }
+.docs-body p, .docs-body li { font-size: 15px; line-height: 1.65; color: var(--ink-2); }
+.docs-body p { margin: 0 0 14px; }
+.docs-body li { margin-bottom: 8px; }
+.docs-body a:not(.btn) { color: var(--teal); text-decoration: underline; text-underline-offset: 2px; }
+.docs-body table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 14px; }
+.docs-body th, .docs-body td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.docs-body th { color: var(--muted); font-weight: 500; }
+.docs-body code { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+.docs-body .btn { margin-top: 32px; }
+.l-nav nav a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+@media (max-width: 900px) {
+  .docs-wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 24px 16px 56px; }
+  .docs-toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 8px 16px; }
+  .docs-body h1 { font-size: 40px; }
+  .docs-body table { display: block; overflow-x: auto; }
+}

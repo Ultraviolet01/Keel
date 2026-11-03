@@ -150,7 +150,7 @@ export default function Landing() {
         <nav>
           <a href="#how">How it works</a>
           <a href="#security">Security</a>
-          <a href={`${REPO}#readme`}>Docs</a>
+          <a href="/docs">Docs</a>
           <a href={REPO}>GitHub</a>
           <a className="btn sm" href={APP}>
             Open app
