@@ -1,0 +1,12 @@
+{
+  "name": "keel",
+  "private": true,
+  "description": "Keel: an AI treasury agent that pays inside limits a NEAR smart contract enforces",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "verify": "node scripts/verify.mjs"
+  }
+}

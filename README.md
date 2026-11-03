@@ -14,6 +14,8 @@ Everything below runs on NEAR testnet and costs nothing. You need Node.js 22 or 
 
 Keel's agent signs with a key only Keel's operator holds, so from a fresh clone you run it with `--dry-run`: it reads the live vaults and shows every decision without signing. Everything Keel signed for real is linked under [Live on testnet](#live-on-testnet).
 
+**One command for everything below:** run `git clone https://github.com/Ultraviolet01/keel && cd keel && npm run verify`. It installs what it needs and runs every check that needs no keys: typechecks, the agent and app tests, the app build, the contract tests (skipped if Rust is not installed), the demo and cross-chain dry runs against testnet, and the four recorded EVM payments, read back from each chain. You see one `PASS`, `FAIL` or `SKIP` line per check and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`; it exits 1 if anything fails. `npm run verify -- --quick` skips the contract tests and the build.
+
 1. **Get the code.** Run `git clone https://github.com/Ultraviolet01/keel && cd keel/agent && npm install`. You see the install finish with no errors. No `.env` is needed for the steps below.
 2. **Watch one full loop.** Run `npm run demo -- --dry-run`. In a few seconds you see Keel read `anchor.keel.testnet` (1,000 test USDC; 100 per payment and 500 per day), forecast 14 days, check each of its six bills and decide:
    - **Northwind Hosting, 80:** pay alone, because Northwind is allowlisted and 80 is inside both caps.
@@ -221,6 +223,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 | `factory/` | Keel factory: one vault per company, created when a founder signs up or adds a company |
 | `agent/` | The agent service: observe, forecast, check, decide, act, reconcile, learn, for every vault on the factory; `agent/stress/` holds the live attack suites |
 | `config/bills.json` | Bills Keel watches for each vault (due dates can be relative, like `+2`; `"chain": "base"`, `"eth"`, `"arb"` or `"op"` and optionally `"token"` for other chains) |
+| `package.json`, `scripts/verify.mjs` | `npm run verify`: every keyless check with one pass/fail summary |
 | `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair) and `setup-demo-testnet.sh` (demo payees, policy and test USDC for one vault) |
 | `web/` | The app: landing page, wallet sign-in, one vault per company, Overview, Approvals, Activity, Rules and Wallets (Vite, React, TypeScript, NEAR Connect) |
 | `design/` | HTML mockups and screenshots of the screens |
