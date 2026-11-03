@@ -1,0 +1,48 @@
+# Keel's agent, hosted on GitHub Actions: one round over every vault the
+# factory created, every 15 minutes. Each round pays bills that fit a vault's
+# limits and proposes the rest to the owner. The vaults themselves remember what
+# was paid, so nothing carries over between runs.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   KEEL_AGENT_PRIVATE_KEY  required: Keel's function-call agent key (ed25519:...)
+#   ANTHROPIC_API_KEY       optional: Claude writes proposal reasons
+#   NEARAI_API_KEY          optional: NEAR AI writes them instead
+name: agent
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide but sign nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: keel-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  round:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: agent
+      - name: One round over every vault
+        working-directory: agent
+        env:
+          KEEL_AGENT_PRIVATE_KEY: ${{ secrets.KEEL_AGENT_PRIVATE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NEARAI_API_KEY: ${{ secrets.NEARAI_API_KEY }}
+        run: npm run -s agent -- --once ${{ inputs.dry_run && '--dry-run' || '' }}

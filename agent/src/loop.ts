@@ -279,7 +279,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
         const why = await explain(cfg, { company: vaultId.split(".")[0], payee: bill.payee, amount: money(bill.amount), due: bill.due, rule: action.reason, memo: bill.memo });
         const r = await chain.callAsAgent(vaultId, "propose_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, reason: why.text, ...ref(bill) });
         handled[bill.id] = { action: "propose", tx: r.hash, proposalId: Number(r.value), at: new Date().toISOString() };
-        say("act", `proposed #${r.value} for the owner (${why.by === "near-ai" ? "reason written by NEAR AI" : "templated reason"}): ${why.text}`, r.hash);
+        say("act", `proposed #${r.value} for the owner (${why.by === "near-ai" ? "reason written by NEAR AI" : why.by === "claude" ? "reason written by Claude" : "templated reason"}): ${why.text}`, r.hash);
       }
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e);

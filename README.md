@@ -243,7 +243,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 - Function-call access keys (scoped agent key)
 - NEAR Intents 1Click API (cross-chain moves)
 - NEAR Chain Signatures (each vault's own address on Base, Ethereum, Arbitrum and Optimism, the fallback route when 1Click is down)
-- NEAR AI Cloud (optional, writes the wording of a proposal's reason; decisions stay in plain code)
+- NEAR AI Cloud (optional, writes the wording of a proposal's reason; decisions stay in plain code). Claude can write it instead with `ANTHROPIC_API_KEY`
 
 ## Repo layout and configuration
 
@@ -267,16 +267,27 @@ All variables are optional; `cp .env.example .env` in the repository root to set
 | `FACTORY_ACCOUNT_ID` | Keel factory, `keel.testnet` on testnet |
 | `AGENT_KEY_FILE` | Path to Keel's agent key file from `scripts/new-agent-key.mjs`, outside the repository. Needed only to sign |
 | `NEAR_RPC_URL` | NEAR RPC; defaults to FastNEAR's public endpoint |
+| `KEEL_AGENT_PRIVATE_KEY` | Keel's agent key itself (`ed25519:…`), for hosts that keep it in a secret instead of a file, like GitHub Actions. Used before `AGENT_KEY_FILE` |
 | `NEARAI_API_KEY`, `NEARAI_MODEL` | Optional NEAR AI Cloud key and model for the wording of proposal reasons |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | Optional Claude key and model (default `claude-haiku-5-5`) for the same wording, used when `NEARAI_API_KEY` is empty. The bill's invoice text is never sent to either model |
 | `ONECLICK_JWT` | Optional 1Click partner token; removes the 0.2% fee |
 | `EVM_RPC_<chain id>` | Optional RPC URL per EVM chain, for example `EVM_RPC_421614` for Arbitrum Sepolia; defaults are public endpoints |
 | `DEMO_VAULT` | Vault for `npm run demo`, default `beacon.keel.testnet` |
 
 The owner's private key is never put in `.env`. Owner actions sign through the NEAR CLI or a wallet.
 
+## Hosted agent
+
+`.github/workflows/agent.yml` runs `npm run agent -- --once` every 15 minutes on GitHub Actions: one round over every vault on `keel.testnet`. Each vault records what it paid and proposed, so a fresh runner picks up where the last one stopped.
+
+1. To see runs: open the repository's **Actions** tab, then **agent**. Each run's log lists every vault and what Keel did, with transaction links.
+2. To run it now: **Actions**, **agent**, **Run workflow**. Tick **Decide but sign nothing** for a dry run.
+3. To host your own copy: in **Settings**, **Secrets and variables**, **Actions**, add `KEEL_AGENT_PRIVATE_KEY` (the `private_key` from your agent key file). `ANTHROPIC_API_KEY` or `NEARAI_API_KEY` are optional. The key is a function-call key that only reaches `execute_payment` and `propose_payment` on each vault, so a leaked secret cannot change limits or approve anything.
+4. To stop it: **Actions**, **agent**, **…**, **Disable workflow**.
+
 ## Limits and known issues
 
-- **Agent hosting:** Keel's agent runs from its operator's machine with the agent key; it is not hosted yet, so a new vault sees Keel act only while the operator runs it.
+- **Agent hosting:** the agent runs on GitHub Actions every 15 minutes (see [Hosted agent](#hosted-agent)). GitHub can start scheduled runs several minutes late, so a bill due today may wait up to about half an hour.
 - **NEAR Intents:** live quotes work; no mainnet move has been made yet.
 - **Sample figures:** the blurred dashboard behind the sign-in panel (such as 48,215.40 USDC) is sample data.
 - **Forecast inputs:** bills come from `config/bills.json`, not from an accounting system.
@@ -292,7 +303,7 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 
 - [near-sdk 5.30](https://crates.io/crates/near-sdk) and [near-contract-standards 5.30](https://crates.io/crates/near-contract-standards) for the contracts
 - [cargo-near 0.22](https://crates.io/crates/cargo-near) to build them, [near-cli-rs 0.30](https://www.npmjs.com/package/near-cli-rs) to deploy and call them
-- [near-api-js 7.3](https://www.npmjs.com/package/near-api-js) for the agent's signing, run with [tsx](https://www.npmjs.com/package/tsx); optional [NEAR AI Cloud](https://cloud.near.ai) for proposal wording
+- [near-api-js 7.3](https://www.npmjs.com/package/near-api-js) for the agent's signing, run with [tsx](https://www.npmjs.com/package/tsx); optional [NEAR AI Cloud](https://cloud.near.ai) or Claude through [@anthropic-ai/sdk 1.3](https://www.npmjs.com/package/@anthropic-ai/sdk) for proposal wording
 - [viem 2.57](https://viem.sh) for the agent's Base reads and broadcasts; [@noble/hashes 1.8](https://www.npmjs.com/package/@noble/hashes) for keccak in the app (deriving the vault's Base address)
 - [NEAR Connect 0.11](https://www.npmjs.com/package/@hot-labs/near-connect) for wallet sign-in, with [React 19](https://react.dev), [Vite 8](https://vite.dev) and TypeScript 5.9 for the app
 

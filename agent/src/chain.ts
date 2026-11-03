@@ -5,7 +5,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { Account, JsonRpcProvider } from "near-api-js";
+import { Account, JsonRpcProvider, KeyPair } from "near-api-js";
 import type { Policy, Proposal } from "./brain";
 
 export interface Config {
@@ -13,10 +13,14 @@ export interface Config {
   rpcUrl: string;
   factoryId: string;
   agentKeyFile: string;
+  /** The agent key itself, for hosts that keep it in a secret instead of a file (GitHub Actions). */
+  agentPrivateKey?: string;
   explorerTx: string;
   nearAiKey?: string;
   nearAiUrl: string;
   nearAiModel: string;
+  anthropicKey?: string;
+  anthropicModel: string;
 }
 
 /** Reads ../.env (if present) and the environment. */
@@ -39,6 +43,9 @@ export function loadConfig(): Config {
     nearAiKey: e.NEARAI_API_KEY || undefined,
     nearAiUrl: e.NEARAI_BASE_URL || "https://cloud-api.near.ai/v1",
     nearAiModel: e.NEARAI_MODEL || "deepseek-ai/DeepSeek-V3.1",
+    anthropicKey: e.ANTHROPIC_API_KEY || undefined,
+    anthropicModel: e.ANTHROPIC_MODEL || "claude-haiku-5-5",
+    agentPrivateKey: e.KEEL_AGENT_PRIVATE_KEY || undefined,
   };
 }
 
@@ -115,9 +122,9 @@ export class Chain {
     });
   }
 
-  /** True when Keel's private agent key is on this machine, so it can sign. */
+  /** True when Keel's private agent key is here (KEEL_AGENT_PRIVATE_KEY or the key file), so it can sign. */
   canSign(): boolean {
-    return existsSync(this.cfg.agentKeyFile);
+    return Boolean(this.cfg.agentPrivateKey) || existsSync(this.cfg.agentKeyFile);
   }
 
   /**
@@ -132,9 +139,15 @@ export class Chain {
   private key() {
     if (!this.agentKey) {
       if (!this.canSign()) {
-        throw new Error(`signing needs Keel's agent key file (${this.cfg.agentKeyFile}); without it, run with --dry-run`);
+        throw new Error(`signing needs Keel's agent key (KEEL_AGENT_PRIVATE_KEY or ${this.cfg.agentKeyFile}); without it, run with --dry-run`);
       }
-      this.agentKey = JSON.parse(readFileSync(this.cfg.agentKeyFile, "utf8"));
+      if (this.cfg.agentPrivateKey) {
+        const pk = this.cfg.agentPrivateKey.trim();
+        const public_key = KeyPair.fromString(pk as `ed25519:${string}`).getPublicKey().toString();
+        this.agentKey = { public_key, private_key: pk };
+      } else {
+        this.agentKey = JSON.parse(readFileSync(this.cfg.agentKeyFile, "utf8"));
+      }
     }
     return this.agentKey!;
   }
