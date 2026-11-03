@@ -2,7 +2,7 @@
 
 Founders connect a NEAR wallet, create a vault for each company, set its limits and approve what Keel proposes. Talks to the factory at `keel.testnet` on NEAR testnet. The layout follows the Figma screens (Landing, Overview, Approvals, Activity, Rules, Wallets, measured from 2x exports) and the mockups in `design/mockups/`.
 
-**Hosted:** https://keel-ultravioletadewale-1537s-projects.vercel.app, built by Vercel from `web/` on every push to `main` (`web/vercel.json`: Vite build, every path served by `index.html` so `/app` opens directly). It needs no environment variables.
+**Hosted:** https://keel-treasury.vercel.app, built by Vercel from `web/` on every push to `main` (`web/vercel.json`: Vite build, every path served by `index.html` so `/app` opens directly). It needs no environment variables.
 
 ## Run it
 
