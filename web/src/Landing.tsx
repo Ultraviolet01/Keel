@@ -2,6 +2,7 @@
 // The ship rides light while Keel pays under the line, then loads past its
 // load line when a payment needs the owner's signature.
 
+import { useEffect, useState } from "react";
 import { APP, REPO, SiteNav } from "./guide";
 
 const CONTAINER_COLORS = ["#0f5d5a", "#5b6870", "#c4922e", "#0f5d5a", "#d9e2e5", "#174a54", "#a9c6d0"];
@@ -20,6 +21,7 @@ function deckY(x: number) {
 function Ship() {
   return (
     <g className="ship">
+      <g className="ship-bob">
       {/* reflection under the hull */}
       <path d="M268 506 H1150 Q1170 506 1166 530 L1160 560 Q1155 572 1135 572 H300 Q275 572 270 548 Z" fill="#9cb8c0" />
       {/* bridge and funnel */}
@@ -67,6 +69,7 @@ function Ship() {
           100 USDC per payment
         </text>
       </g>
+      </g>
     </g>
   );
 }
@@ -103,7 +106,23 @@ function Waves({ y, offset = 0, speed = "slow" }: { y: number; offset?: number; 
   );
 }
 
+/** True on phone and small tablet widths, where the scene frames the whole ship. */
+function useNarrow() {
+  const query = "(max-width: 900px)";
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = () => setNarrow(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  return narrow;
+}
+
 function Scene() {
+  // Desktop fills the width and crops top and bottom; narrow screens show
+  // the whole ship, from the mast to the water under the hull.
+  const narrow = useNarrow();
   return (
     <div className="scene" role="img" aria-label="A container ship marked with its load line. Light loads stay under the line; a heavy one sinks past it and waits for the owner.">
       <div className="scene-caption">
@@ -116,7 +135,7 @@ function Scene() {
           <span>Over the line, so it waits for your signature</span>
         </div>
       </div>
-      <svg viewBox="0 0 1440 640" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <svg viewBox={narrow ? "200 96 1060 544" : "0 0 1440 640"} preserveAspectRatio={narrow ? "xMidYMid meet" : "xMidYMax slice"} aria-hidden="true">
         <g stroke="#e3e9e9" strokeWidth="1">
           {[120, 330, 540, 750, 960, 1170, 1380].map((x) => (
             <line key={x} x1={x} x2={x} y1="0" y2="430" />

@@ -283,19 +283,41 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
 .cap span { font-size: 14px; font-weight: 500; color: var(--teal); }
 .cap.heavy { position: absolute; top: 0; left: 0; opacity: 0; }
 .cap.heavy span { color: var(--brass); }
-.ship { animation: keel-load 8s var(--ease) infinite; }
-.cap.light { animation: keel-cap-light 8s var(--ease) infinite; }
-.cap.heavy { animation: keel-cap-heavy 8s var(--ease) infinite; }
-@keyframes keel-load { 0%, 40% { transform: translateY(0); } 52%, 88% { transform: translateY(34px); } 100% { transform: translateY(0); } }
-@keyframes keel-cap-light { 0%, 40% { opacity: 1; } 48%, 92% { opacity: 0; } 100% { opacity: 1; } }
-@keyframes keel-cap-heavy { 0%, 44% { opacity: 0; } 52%, 88% { opacity: 1; } 96%, 100% { opacity: 0; } }
+/* Ship motion, matched to the Figma prototype: a constant swell (bob and a
+   slight rock, about 2 s) with the load on top. It rides light for 2.2 s,
+   settles 45 px over 0.9 s when the big payment loads, holds, and rises back
+   over 1.1 s. Each move eases in and out; nothing ever stands still. */
+.ship { animation: keel-load 8s infinite; }
+.ship-bob { animation: keel-swell 2s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate; transform-box: fill-box; transform-origin: 50% 70%; }
+.cap.light { animation: keel-cap-light 8s infinite; }
+.cap.heavy { animation: keel-cap-heavy 8s infinite; }
+@keyframes keel-load {
+  0%, 27.5% { transform: translateY(0); animation-timing-function: cubic-bezier(0.55, 0, 0.45, 1); }
+  39%, 71% { transform: translateY(45px); animation-timing-function: cubic-bezier(0.5, 0, 0.4, 1); }
+  85%, 100% { transform: translateY(0); }
+}
+@keyframes keel-swell {
+  from { transform: translateY(0) rotate(0deg); }
+  to { transform: translateY(3.5px) rotate(0.35deg); }
+}
+@keyframes keel-cap-light {
+  0%, 27% { opacity: 1; transform: translateY(0); animation-timing-function: ease-in; }
+  33% { opacity: 0; transform: translateY(-6px); }
+  80% { opacity: 0; transform: translateY(6px); animation-timing-function: ease-out; }
+  86%, 100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes keel-cap-heavy {
+  0%, 34% { opacity: 0; transform: translateY(6px); animation-timing-function: ease-out; }
+  40%, 70% { opacity: 1; transform: translateY(0); animation-timing-function: ease-in; }
+  76%, 100% { opacity: 0; transform: translateY(-6px); }
+}
 .waves { animation: keel-waves 6s linear infinite; }
 .waves.mid { animation-duration: 4.5s; }
 .waves.fast { animation-duration: 3.5s; opacity: 0.6; }
 .waves.back { animation-direction: reverse; animation-duration: 5.5s; }
 @keyframes keel-waves { from { transform: translateX(0); } to { transform: translateX(70px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ship, .cap.light, .cap.heavy, .waves { animation: none; }
+  .ship, .ship-bob, .cap.light, .cap.heavy, .waves { animation: none; }
 }
 
 .l-how { padding: 120px 120px 112px; }
@@ -325,8 +347,9 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
   .l-hero, .l-how, .l-dark, .l-cta { padding-left: 16px; padding-right: 16px; }
   .l-hero h1 { font-size: 48px; }
   .l-hero-row { flex-direction: column; align-items: flex-start; }
-  .scene { height: 360px; }
-  .scene-caption { left: 16px; top: 20px; }
+  .scene { height: auto; padding-top: 72px; }
+  .scene svg { position: relative; display: block; height: auto; aspect-ratio: 1060 / 544; }
+  .scene-caption { left: 16px; right: 16px; top: 8px; }
   .cap b { font-size: 18px; }
   .l-how { padding-top: 64px; padding-bottom: 64px; }
   .l-how ol { grid-template-columns: 1fr; gap: 32px; }
