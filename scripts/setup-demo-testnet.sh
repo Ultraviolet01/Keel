@@ -76,7 +76,7 @@ elif [ "$TOKEN" = "$CIRCLE_USDC" ]; then
   step "Fund $VAULT with Circle's testnet USDC"
   echo "Open https://faucet.circle.com, pick \"Near Testnet\", and send USDC to:"
   echo "  $VAULT"
-  echo "About 35 USDC covers the demo bills (two faucet requests)."
+  echo "About 25 USDC covers the demo bills (20 from one faucet request is enough to run it)."
 else
   step "Fund $VAULT with $TOKEN yourself"
 fi

@@ -45,7 +45,7 @@ Keel's agent signs with a key only Keel's operator holds, so from a fresh clone 
    - **Northwind Hosting, 4.00:** pay alone, because Northwind is allowlisted and 4 is inside both caps.
    - **Atlas Freight, 6.60:** propose to the owner, because Atlas is not on the allowlist.
    - **"URGENT: supplier changed bank details", 47.50:** refuse without signing, because the payee is blocklisted. This is the prompt-injection case: the bill's text asks for urgency and the rules ignore it.
-   - **Contractor payroll, 22.50:** propose, because it is over the 5 per-payment cap.
+   - **Contractor payroll, 12.50:** propose, because it is over the 5 per-payment cap.
 
    If the vault holds less than a bill, Keel proposes it instead of paying, with the reason "vault holds less than this bill".
    - **Lisbon contractor, 12 USDC on Arbitrum:** skip NEAR Intents (mainnet only) and reach the Chain Signatures route, which waits until the vault's Arbitrum Sepolia address holds ETH for gas.

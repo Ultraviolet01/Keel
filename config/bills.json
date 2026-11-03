@@ -24,7 +24,7 @@
     {
       "id": "payroll-nov",
       "payee": "payroll-keel.testnet",
-      "amount": "22.50",
+      "amount": "12.50",
       "due": "+5",
       "memo": "Contractor payroll"
     },
