@@ -41,6 +41,45 @@ export interface Bill {
   token?: string; // what the payee wants on that chain, for example "USDT"; default the vault's token
 }
 
+/** A bill as the vault stores it, listed by the owner with `add_bill`. */
+export interface VaultBill {
+  id: string;
+  payee: string;
+  amount: string; // smallest units
+  due: string; // YYYY-MM-DD, the first or only due date
+  monthly: boolean;
+  chain?: string | null;
+  label: string;
+  memo?: string | null;
+}
+
+/**
+ * The owner's bills as Keel pays them. A one-off bill is paid once under its
+ * id. A monthly bill is paid once a month as `<id>:<YYYY-MM>`, on the same day
+ * of the month as its first due date (the last day in shorter months). Only
+ * this month and next are produced, and none before the first due date, so a
+ * new monthly bill never pays months that already went by.
+ */
+export function vaultBills(raw: VaultBill[], today: string): Bill[] {
+  const out: Bill[] = [];
+  for (const b of raw) {
+    const base = { payee: b.payee, amount: BigInt(b.amount), memo: b.memo ? `${b.label}: ${b.memo}` : b.label, ...(b.chain ? { chain: b.chain } : {}) };
+    if (!b.monthly) {
+      out.push({ ...base, id: b.id, due: b.due });
+      continue;
+    }
+    const day = Number(b.due.slice(8, 10));
+    let [y, m] = today.split("-").map(Number);
+    for (let i = 0; i < 2; i++) {
+      const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const due = `${y}-${String(m).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
+      if (due >= b.due) out.push({ ...base, id: `${b.id}:${due.slice(0, 7)}`, due });
+      [y, m] = m === 12 ? [y + 1, 1] : [y, m + 1];
+    }
+  }
+  return out;
+}
+
 /** Bills paid on another chain go through NEAR Intents and always need the owner. */
 export function isCrossChain(b: Bill): boolean {
   return Boolean(b.chain && b.chain !== "near");

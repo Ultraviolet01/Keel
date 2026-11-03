@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
+import { addDays, vaultBills, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
 
 const U = 1_000_000n; // 1 USDC
 
@@ -154,4 +154,21 @@ test("security: invoice text never leads the reason and is labelled as unverifie
   assert.ok(r.length <= 270);
   const huge = template({ company: "o", payee: "a.testnet", amount: "1", due: "d", rule: "new payee", memo: "x".repeat(1000) });
   assert.ok(huge.includes("Needs you because new payee") && huge.length <= 270, "a long memo cannot push out Keel's facts");
+});
+
+test("owner-listed bills: one-off kept as is, monthly paid this month and next, never before it starts", () => {
+  const one = { id: "nw", payee: "northwind-keel.testnet", amount: "4000000", due: "2026-11-04", monthly: false, chain: null, label: "Northwind", memo: null };
+  const pay = { id: "payroll", payee: "payroll-keel.testnet", amount: "12500000", due: "2026-10-31", monthly: true, chain: null, label: "Payroll", memo: "November" };
+  const later = { ...pay, id: "rent", due: "2026-12-15" };
+  const arb = { ...one, id: "lisbon", payee: "0x000000000000000000000000000000000000dead", chain: "arb" };
+  const out = vaultBills([one, pay, later, arb], "2026-11-03");
+  assert.deepEqual(out.find((b) => b.id === "nw"), { id: "nw", payee: "northwind-keel.testnet", amount: 4_000_000n, due: "2026-11-04", memo: "Northwind" });
+  // October 31 becomes November 30 and December 31; October itself already went by.
+  assert.deepEqual(out.filter((b) => b.id.startsWith("payroll")).map((b) => [b.id, b.due, b.memo]), [
+    ["payroll:2026-11", "2026-11-30", "Payroll: November"],
+    ["payroll:2026-12", "2026-12-31", "Payroll: November"],
+  ]);
+  assert.deepEqual(out.filter((b) => b.id.startsWith("rent")).map((b) => b.id), ["rent:2026-12"], "a monthly bill that starts in December skips November");
+  assert.equal(out.find((b) => b.id === "lisbon")?.chain, "arb");
+  assert.deepEqual(vaultBills([{ ...pay, due: "2026-12-05" }], "2026-12-20").map((b) => b.id), ["payroll:2026-12", "payroll:2027-01"], "year rolls over");
 });

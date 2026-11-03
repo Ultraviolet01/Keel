@@ -15,6 +15,7 @@ import {
   type TokenMetadata,
 } from "./near";
 import { Copy, LoadLine, Shield, Wallet, X } from "./icons";
+import { BILL_CHAINS, billId, isEvmAddress } from "./bills";
 
 /** Sends one function call from the signed-in wallet; resolves to the outcome. */
 export type Send = (
@@ -529,6 +530,109 @@ export function PayPanel(props: { vaultId: string; token: TokenMetadata; balance
         {(error || (to && amount && problem)) && <p className="error">{error ?? problem}</p>}
         <button className="btn primary lg block" onClick={pay} disabled={busy || Boolean(problem)}>
           {busy ? "Approve in your wallet" : "Pay from the vault"}
+        </button>
+      </section>
+    </Overlay>
+  );
+}
+
+export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: Send; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [label, setLabel] = useState("");
+  const [chain, setChain] = useState("");
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [due, setDue] = useState(() => new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
+  const [monthly, setMonthly] = useState(false);
+  const [memo, setMemo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const payee = to.trim().toLowerCase();
+  const raw = parseToken(amount || "0", props.token.decimals);
+  const problem = !label.trim()
+    ? "Name the bill, for example Northwind hosting"
+    : !payee
+      ? "Enter who to pay"
+      : chain && !isEvmAddress(payee)
+        ? `Enter the payee's 0x address on ${BILL_CHAINS[chain]}`
+        : !chain && !ACCOUNT.test(payee)
+          ? `${to} is not a NEAR account id`
+          : raw === null || raw === "0"
+            ? `Enter an amount in ${props.token.symbol}`
+            : !/^\d{4}-\d{2}-\d{2}$/.test(due)
+              ? "Pick a due date"
+              : null;
+
+  const save = async () => {
+    if (problem || !raw) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const bill = { id: billId(label), payee, amount: raw, due, monthly, chain: chain || null, label: label.trim(), memo: memo.trim() || null };
+      await props.send(props.vaultId, "add_bill", { bill }, { deposit: "1", gas: "30000000000000" });
+      await props.onSaved();
+      props.onClose();
+    } catch (e) {
+      setError(friendly(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={props.onClose}>
+      <section className="card panel form" role="dialog" aria-labelledby="bill-title">
+        <div className="panel-top">
+          <span className="panel-icon">
+            <Wallet />
+          </span>
+          <CloseButton onClose={props.onClose} />
+        </div>
+        <h1 className="serif" id="bill-title">Add a bill</h1>
+        <p className="lead">
+          Keel pays it when it is due, inside your limits: an allowlisted payee within your caps is paid on its own, anything else comes to you for approval. Saved on the vault with your
+          signature.
+        </p>
+        <label className="field">
+          <span className="label">What is it</span>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Northwind hosting" maxLength={80} autoFocus />
+        </label>
+        <label className="field">
+          <span className="label">Paid on</span>
+          <select value={chain} onChange={(e) => setChain(e.target.value)}>
+            <option value="">NEAR</option>
+            {Object.entries(BILL_CHAINS).map(([k, name]) => (
+              <option key={k} value={k}>
+                {name}, from the vault's own address
+              </option>
+            ))}
+          </select>
+          {chain && <span className="hint">Bills on other chains always come to you for approval first.</span>}
+        </label>
+        <label className="field">
+          <span className="label">Pay to</span>
+          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder={chain ? "0x…" : "northwind.testnet"} />
+        </label>
+        <label className="field">
+          <span className="label">Amount</span>
+          <span className="input-group">
+            <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="80" />
+            <span className="suffix">{props.token.symbol}</span>
+          </span>
+        </label>
+        <label className="field">
+          <span className="label">{monthly ? "First due date" : "Due date"}</span>
+          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={monthly} onChange={(e) => setMonthly(e.target.checked)} /> Repeats every month on this day
+        </label>
+        <label className="field">
+          <span className="label">Note (optional)</span>
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" maxLength={140} />
+        </label>
+        {(error || (label && to && amount && problem)) && <p className="error">{error ?? problem}</p>}
+        <button className="btn primary lg block" onClick={save} disabled={busy || Boolean(problem)}>
+          {busy ? "Approve in your wallet" : "Add bill"}
         </button>
       </section>
     </Overlay>

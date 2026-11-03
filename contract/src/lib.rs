@@ -23,6 +23,10 @@
 //! transfer itself and asks NEAR's MPC network to sign it after the owner
 //! approves. No third-party server is involved.
 //!
+//! The owner lists the bills Keel should watch with `add_bill`. Only the
+//! owner's signature can add one, so the agent never invents work, and every
+//! bill still goes through the same bands when Keel pays it.
+//!
 //! Amounts are in the token's smallest unit (USDC has 6 decimals, so
 //! 100 USDC is `100000000`).
 
@@ -47,6 +51,10 @@ const MAX_BILL_REF: usize = 64;
 /// At most this many proposals wait for the owner at once, so a stolen agent
 /// key cannot flood the vault's storage or the owner's Approvals page.
 const MAX_PENDING: u32 = 50;
+/// At most this many bills are listed at once.
+const MAX_BILLS: u32 = 50;
+/// The EVM chains a bill can name, as the agent and the app call them.
+const BILL_CHAINS: [&str; 4] = ["base", "eth", "arb", "op"];
 /// The agent's calls are refused once the vault's NEAR beyond its storage
 /// would drop below this, so the owner always has room to approve, pause
 /// and withdraw.
@@ -79,6 +87,7 @@ enum StorageKey {
     PaidBills,
     OpenBills,
     EvmRoutes,
+    Bills,
 }
 
 /// Which band a payment lands in.
@@ -135,6 +144,30 @@ pub struct Proposal {
     pub bill_ref: Option<String>,
 }
 
+/// A bill the owner asked Keel to pay. `id` is the `bill_ref` its payment
+/// carries; a monthly bill is paid once a month as `<id>:<YYYY-MM>`.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug)]
+pub struct Bill {
+    pub id: String,
+    /// A NEAR account, or a 0x address when `chain` is set.
+    pub payee: String,
+    pub amount: U128,
+    /// First (or only) due date, YYYY-MM-DD.
+    pub due: String,
+    #[serde(default)]
+    pub monthly: bool,
+    /// For bills paid on another chain: "base", "eth", "arb" or "op".
+    #[serde(default)]
+    pub chain: Option<String>,
+    /// What the bill is, shown to the owner, for example "Northwind hosting".
+    pub label: String,
+    #[serde(default)]
+    pub memo: Option<String>,
+    #[serde(default)]
+    pub added_at_ms: u64,
+}
+
 /// Owner's changes to the policy. Every field is optional.
 #[near(serializers = [json])]
 #[derive(Default)]
@@ -189,6 +222,8 @@ pub struct KeelVault {
     open_bills: LookupMap<String, u64>,
     /// Proposals waiting for the owner.
     pending_count: u32,
+    /// Bills the owner listed for Keel to pay.
+    bills: IterableMap<String, Bill>,
 }
 
 #[near]
@@ -226,6 +261,7 @@ impl KeelVault {
             paid_bills: LookupMap::new(StorageKey::PaidBills),
             open_bills: LookupMap::new(StorageKey::OpenBills),
             pending_count: 0,
+            bills: IterableMap::new(StorageKey::Bills),
         }
     }
 
@@ -573,6 +609,43 @@ impl KeelVault {
         self.pay(receiver_id, amount, memo, None, None, None)
     }
 
+    /// Lists a bill for Keel to pay. Keel still pays it only inside the
+    /// policy: within the limits it pays alone, otherwise it proposes it.
+    #[payable]
+    pub fn add_bill(&mut self, bill: Bill) {
+        self.assert_owner();
+        check_bill_ref(&bill.id);
+        require!(!bill.id.contains(':'), "bill id cannot contain ':'");
+        require!(!self.bills.contains_key(&bill.id), "a bill with that id is already listed");
+        require!((self.bills.len() as u32) < MAX_BILLS, "50 bills are already listed; cancel one first");
+        require!(bill.amount.0 > 0, "amount must be above zero");
+        require!(is_date(&bill.due), "due must be a date like 2026-11-30");
+        require!(!bill.label.trim().is_empty(), "label is missing");
+        check_text(&bill.label, "label");
+        check_text(bill.memo.as_deref().unwrap_or(""), "memo");
+        match &bill.chain {
+            Some(c) => {
+                require!(BILL_CHAINS.contains(&c.as_str()), "chain must be base, eth, arb or op");
+                require!(
+                    evm::normalize_address(&bill.payee).as_deref() == Some(bill.payee.as_str()),
+                    "payee must be a lowercase 0x address on that chain"
+                );
+            }
+            None => require!(bill.payee.parse::<AccountId>().is_ok(), "payee must be a NEAR account id"),
+        }
+        let bill = Bill { added_at_ms: env::block_timestamp_ms(), ..bill };
+        emit("bill_added", json!(bill));
+        self.bills.insert(bill.id.clone(), bill);
+    }
+
+    /// Stops Keel watching a bill. Payments already made stay in the ledger.
+    #[payable]
+    pub fn cancel_bill(&mut self, id: String) {
+        self.assert_owner();
+        require!(self.bills.remove(&id).is_some(), "no bill with that id");
+        emit("bill_cancelled", json!({ "id": id, "by": self.owner_id }));
+    }
+
     /// Lets a bill be paid again. For the rare case where the owner confirms
     /// a payment never arrived, such as a signed EVM transfer whose nonce was
     /// used by another one.
@@ -679,6 +752,11 @@ impl KeelVault {
             allowlist: self.allowlist.iter().cloned().collect(),
             blocklist: self.blocklist.iter().cloned().collect(),
         }
+    }
+
+    /// The bills the owner listed, in no particular order.
+    pub fn get_bills(&self) -> Vec<Bill> {
+        self.bills.values().cloned().collect()
     }
 
     /// When the vault started paying this bill (ms), or null if it never did.
@@ -905,6 +983,16 @@ fn today() -> u64 {
 
 fn check_bill_ref(r: &str) {
     require!(!r.is_empty() && r.len() <= MAX_BILL_REF, "bill_ref must be 1 to 64 characters");
+}
+
+/// YYYY-MM-DD with a real month and a day from 1 to 31.
+fn is_date(d: &str) -> bool {
+    let b = d.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| d.get(r).filter(|x| x.bytes().all(|c| c.is_ascii_digit())).and_then(|x| x.parse::<u32>().ok());
+    matches!((num(0..4), num(5..7), num(8..10)), (Some(y), Some(m), Some(day)) if y >= 2000 && (1..=12).contains(&m) && (1..=31).contains(&day))
 }
 
 fn check_text(text: &str, field: &str) {

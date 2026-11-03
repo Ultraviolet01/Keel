@@ -983,3 +983,117 @@ fn optimism_sepolia_bill_is_accepted() {
     let id = propose_evm(&mut v, EvmTransfer { chain_id: 11155420, token: op_usdc.into(), ..evm_transfer() });
     assert_eq!(v.get_proposal(id).unwrap().evm_amount, Some(U128(5 * USDC)));
 }
+
+// ------------------------------------------------------------------ bills
+
+fn listed(id: &str, payee: &str, usdc: u128) -> Bill {
+    Bill {
+        id: id.into(),
+        payee: payee.into(),
+        amount: U128(usdc * USDC),
+        due: "2026-11-30".into(),
+        monthly: false,
+        chain: None,
+        label: "Northwind hosting".into(),
+        memo: None,
+        added_at_ms: 0,
+    }
+}
+
+#[test]
+fn owner_adds_lists_and_cancels_bills() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(listed("nw-nov", "northwind.testnet", 40));
+    v.add_bill(Bill { chain: Some("arb".into()), payee: "0x000000000000000000000000000000000000dead".into(), monthly: true, ..listed("lisbon", "x", 12) });
+    let bills = v.get_bills();
+    assert_eq!(bills.len(), 2);
+    assert!(bills.iter().any(|b| b.id == "lisbon" && b.monthly && b.chain.as_deref() == Some("arb")));
+    assert!(get_logs().iter().any(|l| l.contains("\"bill_added\"")));
+    as_owner(DAY);
+    v.cancel_bill("nw-nov".into());
+    assert_eq!(v.get_bills().len(), 1);
+    assert!(get_logs().iter().any(|l| l.contains("\"bill_cancelled\"")));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn agent_cannot_add_a_bill() {
+    let mut v = vault();
+    set_ctx(VAULT, DAY, 1);
+    v.add_bill(listed("nw-nov", "northwind.testnet", 40));
+}
+
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn adding_a_bill_needs_a_full_access_key() {
+    let mut v = vault();
+    set_ctx("kora.testnet", DAY, 0);
+    v.add_bill(listed("nw-nov", "northwind.testnet", 40));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn stranger_cannot_cancel_a_bill() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(listed("nw-nov", "northwind.testnet", 40));
+    set_ctx("mallory.testnet", DAY, 1);
+    v.cancel_bill("nw-nov".into());
+}
+
+#[test]
+#[should_panic(expected = "a bill with that id is already listed")]
+fn bill_ids_are_unique() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(listed("nw-nov", "northwind.testnet", 40));
+    v.add_bill(listed("nw-nov", "northwind.testnet", 41));
+}
+
+#[test]
+fn bad_bills_are_refused() {
+    let cases: Vec<(Bill, &str)> = vec![
+        (listed("", "northwind.testnet", 1), "bill_ref must be 1 to 64 characters"),
+        (listed("a:b", "northwind.testnet", 1), "bill id cannot contain ':'"),
+        (listed("zero", "northwind.testnet", 0), "amount must be above zero"),
+        (Bill { due: "2026-13-01".into(), ..listed("d", "northwind.testnet", 1) }, "due must be a date"),
+        (Bill { due: "next week".into(), ..listed("d", "northwind.testnet", 1) }, "due must be a date"),
+        (Bill { label: " ".into(), ..listed("l", "northwind.testnet", 1) }, "label is missing"),
+        (Bill { label: "x".repeat(281), ..listed("l", "northwind.testnet", 1) }, "label is longer"),
+        (listed("p", "Not A Near Account", 1), "payee must be a NEAR account id"),
+        (Bill { chain: Some("solana".into()), ..listed("c", "0x000000000000000000000000000000000000dead", 1) }, "chain must be"),
+        (Bill { chain: Some("base".into()), ..listed("c", "northwind.testnet", 1) }, "payee must be a lowercase 0x address"),
+        (Bill { chain: Some("base".into()), ..listed("c", "0x000000000000000000000000000000000000DEAD", 1) }, "payee must be a lowercase 0x address"),
+    ];
+    for (b, want) in cases {
+        let id = b.id.clone();
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut v = vault();
+            as_owner(DAY);
+            v.add_bill(b);
+        }))
+        .expect_err(&format!("bill {id:?} should be refused"));
+        let msg = err.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(msg.contains(want), "bill {id:?}: wanted {want:?}, got {msg:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "50 bills are already listed")]
+fn at_most_50_bills() {
+    let mut v = vault();
+    as_owner(DAY);
+    for i in 0..51 {
+        v.add_bill(listed(&format!("b{i}"), "northwind.testnet", 1));
+    }
+}
+
+#[test]
+fn a_listed_bill_still_goes_through_the_bands() {
+    // Listing a bill gives the agent nothing extra: over the cap it can only propose.
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(listed("big", "northwind.testnet", 150));
+    assert_eq!(v.check_payment(acc("northwind.testnet"), U128(150 * USDC)).band, Band::NeedsApproval);
+}

@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { Account, JsonRpcProvider, KeyPair } from "near-api-js";
-import type { Policy, Proposal } from "./brain";
+import type { Policy, Proposal, VaultBill } from "./brain";
 
 export interface Config {
   network: string;
@@ -76,6 +76,9 @@ export class Chain {
       method_name: method,
       args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
     });
+    // A failed view (for example a method the vault's code does not have) comes back as result.error.
+    const failed = (r as { error?: string }).error;
+    if (failed || !r.result) throw new Error(`${contractId}.${method}: ${failed ?? "no result"}`);
     return JSON.parse(Buffer.from(r.result).toString()) as T;
   }
 
@@ -113,6 +116,16 @@ export class Chain {
 
   async balance(tokenId: string, accountId: string): Promise<bigint> {
     return BigInt(await this.view<string>(tokenId, "ft_balance_of", { account_id: accountId }));
+  }
+
+  /** The bills the owner listed on the vault; none for vaults created before `add_bill`. */
+  async bills(vaultId: string): Promise<VaultBill[]> {
+    try {
+      return await this.view<VaultBill[]>(vaultId, "get_bills");
+    } catch (e) {
+      if (/MethodNotFound|MethodResolveError|CodeDoesNotExist/.test(String(e))) return [];
+      throw e;
+    }
   }
 
   checkPayment(vaultId: string, receiverId: string, amount: bigint) {

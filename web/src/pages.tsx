@@ -10,6 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
+import { BILL_CHAINS, billDues } from "./bills";
 
 export interface PageProps {
   vaultId: string;
@@ -21,6 +22,7 @@ export interface PageProps {
   onSetLimits: () => void;
   onDeposit: () => void;
   onNewPayment: () => void;
+  onAddBill: () => void;
   onPauseToggle: () => void;
 }
 
@@ -129,6 +131,8 @@ export function Overview(p: PageProps) {
   const funded = d.balance !== "0";
   const payees = d.policy.allowlist.length > 0;
   const agentOn = Boolean(d.policy.agent_key || d.policy.agent_id);
+  // Vaults from before bills could be listed have bills === null and skip this step.
+  const hasBills = d.bills === null || d.bills.length > 0;
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
   const sub = `${today}, ${pending.length ? `${pending.length} ${pending.length === 1 ? "item needs" : "items need"} you` : "nothing needs you"}`;
 
@@ -148,7 +152,7 @@ export function Overview(p: PageProps) {
         )}
       </Head>
 
-      {!(limits && payees && funded) && (
+      {!(limits && payees && funded && hasBills) && (
         <section className="setup">
           <div>
             <h2 className="serif">Finish setting up {companyName(p.vaultId)}</h2>
@@ -170,6 +174,11 @@ export function Overview(p: PageProps) {
             <Step done={funded} title={`Deposit ${d.token.symbol}`} note={`Send ${d.token.symbol} on NEAR to ${p.vaultId}`}>
               <button className="btn sm" onClick={p.onDeposit}>Deposit</button>
             </Step>
+            {d.bills !== null && (
+              <Step done={hasBills} title="Add the bills Keel should pay" note="Hosting, payroll, suppliers: what, to whom, how much and when">
+                {p.canAct && <button className="btn sm" onClick={p.onAddBill}>Add bill</button>}
+              </Step>
+            )}
           </div>
         </section>
       )}
@@ -216,8 +225,10 @@ export function Overview(p: PageProps) {
         <VaultCard p={p} />
         <section className="card card-pad add-wallet">
           <b>Wallets on other chains</b>
-          <span className="muted small">Payroll on Base, vendors on Arbitrum. Linked through NEAR Intents.</span>
-          <span className="tag">Coming with Intents</span>
+          <span className="muted small">The vault's own address on Base, Ethereum, Arbitrum and Optimism, signed through NEAR Chain Signatures.</span>
+          <button className="btn sm" style={{ alignSelf: "flex-start" }} onClick={() => p.go("wallets")}>
+            See addresses
+          </button>
         </section>
       </div>
 
@@ -237,15 +248,82 @@ export function Overview(p: PageProps) {
           <Decisions rows={[...d.proposals].reverse().slice(0, 4)} d={d} />
         </section>
         <div className="stack">
-          <section className="card card-pad">
-            <h2>Upcoming payments</h2>
-            <p className="sub">Next 14 days</p>
-            <div className="empty">No bills yet. Bills Keel watches, like payroll and suppliers, will show here with their status.</div>
-          </section>
+          <UpcomingBills p={p} />
           <RulesCard d={d} />
         </div>
       </div>
     </>
+  );
+}
+
+function UpcomingBills({ p }: { p: PageProps }) {
+  const d = p.data;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const dues = d.bills ? billDues(d.bills, new Date().toISOString().slice(0, 10)) : [];
+  const status = (ref: string) => {
+    if (d.paid[ref]) return { label: "Paid", cls: "ok" };
+    const prop = d.proposals.find((x) => x.bill_ref === ref && ["pending", "executing", "signing", "signed"].includes(x.status));
+    if (prop) return prop.status === "pending" ? { label: "Needs approval", cls: "warn" } : { label: "Paying", cls: "warn" };
+    return { label: "Scheduled", cls: "muted" };
+  };
+  const cancel = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    try {
+      await p.send(p.vaultId, "cancel_bill", { id }, { deposit: "1", gas: "30000000000000" });
+      await p.reload();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e).slice(0, 160));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section className="card card-pad">
+      <div className="card-head">
+        <div>
+          <h2>Upcoming payments</h2>
+          <p className="sub">Bills Keel pays inside your limits</p>
+        </div>
+        {p.canAct && d.bills !== null && (
+          <button className="link-btn lg" onClick={p.onAddBill}>
+            Add bill
+          </button>
+        )}
+      </div>
+      {d.bills === null ? (
+        <div className="empty">This vault was created before bills could be listed on it, so Keel reads its bills from the repository's config/bills.json.</div>
+      ) : dues.length === 0 ? (
+        <div className="empty">No bills yet. Add one, like hosting or payroll, and Keel pays it when it is due.</div>
+      ) : (
+        <ul className="bills">
+          {dues.map((x) => {
+            const st = status(x.ref);
+            return (
+              <li key={x.ref}>
+                <b>{x.bill.label}</b>
+                <span className="bill-amt">{amt(x.bill.amount, d)}</span>
+                <span className="bill-meta">
+                  {x.bill.chain ? `${short(x.bill.payee)} on ${BILL_CHAINS[x.bill.chain] ?? x.bill.chain}` : payee(x.bill.payee)} · due{" "}
+                  {new Date(`${x.due}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}
+                  {x.bill.monthly ? " · monthly" : ""}
+                </span>
+                <span className="bill-side">
+                  {st.label && <span className={`pill ${st.cls}`}>{st.label}</span>}
+                  {p.canAct && (
+                    <button className="link-btn" disabled={busy === x.bill.id} onClick={() => cancel(x.bill.id)}>
+                      {busy === x.bill.id ? "Approve in wallet" : "Remove"}
+                    </button>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {error && <p className="error">{error}</p>}
+    </section>
   );
 }
 
@@ -264,11 +342,31 @@ function Step(props: { done: boolean; title: string; note: string; mono?: boolea
 
 /** The 14-day chart. With no bills on file the balance runs flat, labelled honestly. */
 function Forecast({ d }: { d: VaultData }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const dayMs = 86_400_000;
   const days = Array.from({ length: 5 }, (_, i) => {
     const t = new Date();
     t.setDate(t.getDate() + Math.round((i * 13) / 4));
     return t.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
   });
+  // Unpaid NEAR bills in the next 14 days draw the balance down on their due day.
+  // Bills on other chains are paid from the vault's EVM address, not this balance.
+  const end = new Date(Date.parse(`${today}T00:00:00Z`) + 14 * dayMs).toISOString().slice(0, 10);
+  const dues = (d.bills ? billDues(d.bills, today) : []).filter((x) => !x.bill.chain && !d.paid[x.ref] && x.due <= end);
+  const start = BigInt(d.balance);
+  const steps: { day: number; bal: bigint }[] = [{ day: 0, bal: start }];
+  let bal = start;
+  for (const x of dues) {
+    bal -= BigInt(x.bill.amount);
+    steps.push({ day: Math.max(0, (Date.parse(`${x.due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / dayMs), bal });
+  }
+  const max = start > 0n ? start : 1n;
+  const xAt = (day: number) => 40 + (820 * day) / 14;
+  const yAt = (v: bigint) => (v <= 0n ? 180 : 180 - Number((v * 120n) / max));
+  let path = `M40 ${yAt(start)}`;
+  for (const st of steps.slice(1)) path += ` H${xAt(st.day).toFixed(1)} V${yAt(st.bal)}`;
+  path += " H860";
+  const short = bal < 0n;
   const top = d.balance === "0" ? "" : usd(d.balance, d).split(".")[0];
   return (
     <div className="forecast">
@@ -279,8 +377,8 @@ function Forecast({ d }: { d: VaultData }) {
           <line x1="40" x2="860" y1="105" y2="105" />
           <line x1="40" x2="860" y1="180" y2="180" />
         </g>
-        <path d={d.balance === "0" ? "M40 180 H860" : "M40 60 H860"} stroke="#0b5c55" strokeWidth="2.5" fill="none" />
-        {d.balance !== "0" && <path d="M40 60 H860 V180 H40 Z" fill="#eef3f3" opacity="0.7" />}
+        {start > 0n && <path d={`${path} V180 H40 Z`} fill="#eef3f3" opacity="0.7" />}
+        <path d={path} stroke="#0b5c55" strokeWidth="2.5" fill="none" />
       </svg>
       <div className="axis-y">
         <span className="mono">{top}</span>
@@ -291,7 +389,15 @@ function Forecast({ d }: { d: VaultData }) {
           <span key={x}>{x}</span>
         ))}
       </div>
-      <p className="muted tiny">No bills on file yet, so Keel forecasts a flat balance.</p>
+      <p className="muted tiny">
+        {d.bills === null
+          ? "This vault's bills live in the repository's config/bills.json; the chart shows its balance only."
+          : dues.length === 0
+            ? "No unpaid bills in the next 14 days, so the balance stays flat."
+            : short
+              ? `${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} in the next 14 days ${dues.length === 1 ? "comes" : "come"} to ${usd(start - bal, d)} ${d.token.symbol}, ${usd(-bal, d)} more than the vault holds. Deposit before they fall due.`
+              : `${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} in the next 14 days ${dues.length === 1 ? "comes" : "come"} to ${usd(start - bal, d)} ${d.token.symbol}; ${usd(bal, d)} stays in the vault.`}
+      </p>
     </div>
   );
 }

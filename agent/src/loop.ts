@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs
 import { resolve } from "node:path";
 import {
   addDays,
+  vaultBills,
   approvalsFor,
   checkCounterparty,
   decide,
@@ -133,7 +134,10 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const meta = await chain.view<{ symbol: string; decimals: number }>(policy.token_id, "ft_metadata");
   const [balance, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
-  const bills = loadBills(vaultId, meta.decimals, o.today, (msg) => say("observe", msg));
+  // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
+  const listed = vaultBills(await chain.bills(vaultId), o.today);
+  const ids = new Set(listed.map((b) => b.id));
+  const bills = [...listed, ...loadBills(vaultId, meta.decimals, o.today, (msg) => say("observe", msg)).filter((b) => !ids.has(b.id))];
   const handled = (state.handled[vaultId] ??= {});
   const open = bills.filter((b) => !handled[b.id]);
   say("observe", `balance ${money(balance)}, ${proposals.filter((p) => p.status === "pending").length} proposals waiting, ${open.length} open bills`);
