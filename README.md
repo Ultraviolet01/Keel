@@ -254,7 +254,7 @@ NEAR Intents has no testnet, so this route has only been quoted, not used to mov
 | `agent/` | The agent service: observe, forecast, check, decide, act, reconcile, learn, for every vault on the factory; `agent/stress/` holds the live attack suites |
 | `config/bills.json` | Bills Keel watches for each vault (due dates can be relative, like `+2`; `"chain": "base"`, `"eth"`, `"arb"` or `"op"` and optionally `"token"` for other chains) |
 | `package.json`, `scripts/verify.mjs` | `npm run verify`: every keyless check with one pass/fail summary |
-| `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair) and `setup-demo-testnet.sh` (demo payees, policy and test USDC for one vault) |
+| `scripts/` | `deploy-factory-testnet.sh`, `new-agent-key.mjs` (Keel's agent keypair), `rotate-agent-key.sh` (switch an owner's vaults to a new agent key) and `setup-demo-testnet.sh` (demo payees, policy and test USDC for one vault) |
 | `web/` | The app: landing page, wallet sign-in, one vault per company, Overview, Approvals, Activity, Rules and Wallets (Vite, React, TypeScript, NEAR Connect) |
 | `design/` | HTML mockups and screenshots of the screens |
 | `test-token/` | Keel Test USDC, a NEP-141 token with 6 decimals for testnet only |
