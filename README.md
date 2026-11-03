@@ -157,10 +157,10 @@ Checked live:
 14. **Full run, Nov 3: NEAR plus four EVM testnets.** On `multi.keel.testnet`, Keel paid Northwind 80 alone ([transaction](https://testnet.nearblocks.io/txns/73Sc4yFKA1AUtL7csQP4hicE4yauMq8ZWV4MDSQdmepM)), proposed Atlas 132 as #16 (new payee), refused the scam bill without signing, and proposed payroll 450 as #17 because the vault held only 447 after Northwind; the owner approved #16 and Atlas received 132 ([transaction](https://testnet.nearblocks.io/txns/HfXRAvR5hpP5p6WcyhUUSqbZgs2YuWLPXdXkhcM3bGT5)). On `anchor.keel.testnet`, a 1 USDC bill on each EVM testnet gave:
     - **Optimism Sepolia:** proposed, approved, signed by the MPC network and paid ([transaction](https://sepolia-optimism.etherscan.io/tx/0xa7312eb69bde5c12aade691af65f96e293fa291a0c3524eb2cd2b272f33b468f)).
     - **Arbitrum Sepolia:** proposed, approved, signed and paid ([transaction](https://sepolia.arbiscan.io/tx/0x4864319fc6f117023ba00a343641c6f2eae02e573ef756dca5aa2ca16d9417d2)).
-    - **Base Sepolia:** not proposed; Keel reported `has no ETH for gas` (the address held USDC but no ETH).
+    - **Base Sepolia:** first not proposed; Keel reported `has no ETH for gas` (the address held USDC but no ETH). Once ETH arrived, the next run proposed it as #4, the owner approved, and it paid ([transaction](https://sepolia.basescan.org/tx/0x4df6011a6fcc8f5896c29f5cb3e773d5f8cfcda6effc02d893c051123b3fd674)).
     - **Ethereum Sepolia:** not proposed; Keel reported `holds 0 USDC, needs 1 USDC; top it up` (the address held ETH but no USDC).
 
-    Both receipts show a 1 USDC `Transfer` from the vault's own address `0x3d003b3d8da32261fbba854dc16188cd02436644`, 44,843 gas each.
+    All three receipts show a 1 USDC `Transfer` from the vault's own address `0x3d003b3d8da32261fbba854dc16188cd02436644`, 44,843 gas each.
 
 ## Cross-chain bills
 
