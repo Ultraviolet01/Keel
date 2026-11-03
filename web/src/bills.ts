@@ -8,6 +8,8 @@ export interface VaultBill {
   amount: string; // smallest units
   due: string; // YYYY-MM-DD, the first or only due date
   monthly: boolean;
+  yearly?: boolean;
+  category?: string | null;
   chain?: string | null;
   label: string;
   memo?: string | null;
@@ -21,6 +23,34 @@ export interface BillDue {
   due: string;
 }
 
+export const CATEGORIES: Record<string, string> = {
+  software: "Software and subscriptions",
+  hosting: "Domains and hosting",
+  contractors: "Contractors",
+  payroll: "Payroll",
+  rent: "Rent and office",
+  taxes: "Taxes",
+  card: "Company card top-up",
+  other: "Other",
+};
+
+/** An approved payee the owner named on the vault. */
+export interface VaultPayee {
+  account_id: string;
+  name: string;
+  kind: string;
+  keep_at?: string | null;
+}
+
+export const PAYEE_KINDS: Record<string, { label: string; note: string }> = {
+  vendor: { label: "Vendor", note: "A supplier with a NEAR account" },
+  employee: { label: "Employee or contractor", note: "Someone the company pays for work" },
+  card: { label: "Company card wallet", note: "The wallet a crypto card spends from; card subscriptions charge the card" },
+  offramp: { label: "Bank off-ramp", note: "A deposit address that turns USDC into a bank transfer" },
+  own: { label: "Your own wallet", note: "Another wallet the company owns" },
+  other: { label: "Other", note: "" },
+};
+
 export const BILL_CHAINS: Record<string, string> = { base: "Base", eth: "Ethereum", arb: "Arbitrum", op: "Optimism" };
 
 /**
@@ -31,6 +61,15 @@ export const BILL_CHAINS: Record<string, string> = { base: "Base", eth: "Ethereu
 export function billDues(bills: VaultBill[], today: string): BillDue[] {
   const out: BillDue[] = [];
   for (const b of bills) {
+    if (b.yearly) {
+      const [y0] = today.split("-").map(Number);
+      for (const y of [y0, y0 + 1]) {
+        const md = b.due.slice(5) === "02-29" && new Date(Date.UTC(y, 1, 29)).getUTCMonth() !== 1 ? "02-28" : b.due.slice(5);
+        const due = `${y}-${md}`;
+        if (due >= b.due) out.push({ bill: b, ref: `${b.id}:${y}`, due });
+      }
+      continue;
+    }
     if (!b.monthly) {
       out.push({ bill: b, ref: b.id, due: b.due });
       continue;

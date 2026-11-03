@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { companyName } from "./near";
-import { Check, ChevronsUpDown, Grid, Inbox, List, Pause, Play, Plus, Sliders, Wallet } from "./icons";
+import { Check, ChevronsUpDown, Grid, Inbox, List, Pause, Play, Plus, Sliders, Users, Wallet } from "./icons";
 import type { KeelState } from "./vault";
 
-export type Page = "overview" | "approvals" | "activity" | "rules" | "wallets";
+export type Page = "overview" | "approvals" | "activity" | "payees" | "rules" | "wallets";
 
 const NAV: { page: Page; label: string; Icon: typeof Grid }[] = [
   { page: "overview", label: "Overview", Icon: Grid },
   { page: "approvals", label: "Approvals", Icon: Inbox },
   { page: "activity", label: "Activity", Icon: List },
+  { page: "payees", label: "Payees", Icon: Users },
   { page: "rules", label: "Rules", Icon: Sliders },
   { page: "wallets", label: "Wallets", Icon: Wallet },
 ];

@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import {
   addDays,
   vaultBills,
+  topUps,
   approvalsFor,
   checkCounterparty,
   decide,
@@ -135,7 +136,11 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const [balance, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
   // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
-  const listed = vaultBills(await chain.bills(vaultId), o.today);
+  // Top-ups for the owner's card and own wallets that run below their target.
+  const payees = (await chain.payees(vaultId)).filter((p) => p.keep_at && !policy.blocklist.includes(p.account_id));
+  const held: Record<string, bigint> = {};
+  for (const p of payees) held[p.account_id] = await chain.balance(policy.token_id, p.account_id).catch(() => 0n);
+  const listed = [...vaultBills(await chain.bills(vaultId), o.today), ...topUps(payees, held, o.today)];
   const ids = new Set(listed.map((b) => b.id));
   const bills = [...listed, ...loadBills(vaultId, meta.decimals, o.today, (msg) => say("observe", msg)).filter((b) => !ids.has(b.id))];
   const handled = (state.handled[vaultId] ??= {});

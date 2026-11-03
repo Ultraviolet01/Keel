@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, vaultBills, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
+import { addDays, vaultBills, topUps, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
 
 const U = 1_000_000n; // 1 USDC
 
@@ -171,4 +171,20 @@ test("owner-listed bills: one-off kept as is, monthly paid this month and next, 
   assert.deepEqual(out.filter((b) => b.id.startsWith("rent")).map((b) => b.id), ["rent:2026-12"], "a monthly bill that starts in December skips November");
   assert.equal(out.find((b) => b.id === "lisbon")?.chain, "arb");
   assert.deepEqual(vaultBills([{ ...pay, due: "2026-12-05" }], "2026-12-20").map((b) => b.id), ["payroll:2026-12", "payroll:2027-01"], "year rolls over");
+});
+
+test("yearly bills: this year's and next year's, never before they start; 29 February falls on the 28th", () => {
+  const domain = { id: "domain", payee: "registrar.testnet", amount: "15000000", due: "2026-12-10", monthly: false, yearly: true, label: "Domain", memo: null };
+  assert.deepEqual(vaultBills([domain], "2026-11-03").map((b) => [b.id, b.due]), [["domain:2026", "2026-12-10"], ["domain:2027", "2027-12-10"]]);
+  assert.deepEqual(vaultBills([{ ...domain, due: "2026-03-01" }], "2026-11-03").map((b) => b.id), ["domain:2026", "domain:2027"]);
+  assert.deepEqual(vaultBills([{ ...domain, due: "2028-02-29" }], "2029-01-05").map((b) => b.due), ["2029-02-28", "2030-02-28"]);
+});
+
+test("card top-ups: only below target, for the difference, once per day by id", () => {
+  const card = { account_id: "card-keel.testnet", name: "Company card", kind: "card", keep_at: "300000000" };
+  const vendor = { account_id: "northwind-keel.testnet", name: "Northwind", kind: "vendor", keep_at: null };
+  const out = topUps([card, vendor], { "card-keel.testnet": 120_000_000n }, "2026-11-03");
+  assert.deepEqual(out, [{ id: "top:card-keel.testnet:2026-11-03", payee: "card-keel.testnet", amount: 180_000_000n, due: "2026-11-03", memo: "Top up Company card to its target balance" }]);
+  assert.deepEqual(topUps([card], { "card-keel.testnet": 300_000_000n }, "2026-11-03"), [], "at target: nothing");
+  assert.ok(topUps([{ ...card, account_id: "x".repeat(64) }], {}, "2026-11-03")[0].id.length <= 64, "bill_ref stays within the vault's 64 characters");
 });

@@ -993,6 +993,8 @@ fn listed(id: &str, payee: &str, usdc: u128) -> Bill {
         amount: U128(usdc * USDC),
         due: "2026-11-30".into(),
         monthly: false,
+        yearly: false,
+        category: None,
         chain: None,
         label: "Northwind hosting".into(),
         memo: None,
@@ -1096,4 +1098,81 @@ fn a_listed_bill_still_goes_through_the_bands() {
     as_owner(DAY);
     v.add_bill(listed("big", "northwind.testnet", 150));
     assert_eq!(v.check_payment(acc("northwind.testnet"), U128(150 * USDC)).band, Band::NeedsApproval);
+}
+
+#[test]
+fn bills_can_repeat_yearly_with_a_category() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(Bill { yearly: true, category: Some("hosting".into()), label: "Domain renewal".into(), ..listed("domain", "northwind.testnet", 15) });
+    let b = &v.get_bills()[0];
+    assert!(b.yearly && !b.monthly && b.category.as_deref() == Some("hosting"));
+}
+
+#[test]
+#[should_panic(expected = "monthly or yearly, not both")]
+fn a_bill_cannot_repeat_both_ways() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(Bill { yearly: true, monthly: true, ..listed("x", "northwind.testnet", 1) });
+}
+
+#[test]
+#[should_panic(expected = "category must be")]
+fn bill_category_must_be_known() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(Bill { category: Some("yachts".into()), ..listed("x", "northwind.testnet", 1) });
+}
+
+fn payee(id: &str, kind: &str, keep_at: Option<u128>) -> Payee {
+    Payee { account_id: acc(id), name: "Company card".into(), kind: kind.into(), keep_at: keep_at.map(|k| U128(k * USDC)) }
+}
+
+#[test]
+fn adding_a_payee_allowlists_it_and_removing_it_takes_it_off() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(payee("card.kora.testnet", "card", Some(300)));
+    assert!(v.get_policy().allowlist.contains(&acc("card.kora.testnet")));
+    assert_eq!(v.get_payees()[0].keep_at, Some(U128(300 * USDC)));
+    assert_eq!(v.check_payment(acc("card.kora.testnet"), U128(50 * USDC)).band, Band::RunsAlone);
+    as_owner(DAY);
+    v.remove_payee(acc("card.kora.testnet"));
+    assert!(!v.get_policy().allowlist.contains(&acc("card.kora.testnet")));
+    assert!(v.get_payees().is_empty());
+}
+
+#[test]
+fn disallowing_or_blocking_a_payee_drops_its_name() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(payee("card.kora.testnet", "card", None));
+    v.add_payee(Payee { name: "Rent".into(), ..payee("rent.kora.testnet", "offramp", None) });
+    v.update_policy(PolicyUpdate { disallow: vec![acc("card.kora.testnet")], block: vec![acc("rent.kora.testnet")], ..Default::default() }, "cleanup".into());
+    assert!(v.get_payees().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn agent_cannot_add_a_payee() {
+    let mut v = vault();
+    set_ctx(VAULT, DAY, 1);
+    v.add_payee(payee("evil.testnet", "vendor", None));
+}
+
+#[test]
+#[should_panic(expected = "cannot allow a blocklisted payee")]
+fn blocklisted_account_cannot_become_a_payee() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(payee("scam.testnet", "vendor", None));
+}
+
+#[test]
+#[should_panic(expected = "only a card or your own wallet can be kept topped up")]
+fn only_cards_and_own_wallets_get_topped_up() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(payee("northwind.testnet", "vendor", Some(100)));
 }

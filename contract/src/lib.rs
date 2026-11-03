@@ -55,6 +55,11 @@ const MAX_PENDING: u32 = 50;
 const MAX_BILLS: u32 = 50;
 /// The EVM chains a bill can name, as the agent and the app call them.
 const BILL_CHAINS: [&str; 4] = ["base", "eth", "arb", "op"];
+/// What a bill is for, so the forecast and reports can group spending.
+const BILL_CATEGORIES: [&str; 8] = ["software", "hosting", "contractors", "payroll", "rent", "taxes", "card", "other"];
+/// What a payee is. A card or own wallet can carry a `keep_at` balance that Keel tops up.
+const PAYEE_KINDS: [&str; 6] = ["vendor", "employee", "card", "offramp", "own", "other"];
+const MAX_PAYEES: u32 = 100;
 /// The agent's calls are refused once the vault's NEAR beyond its storage
 /// would drop below this, so the owner always has room to approve, pause
 /// and withdraw.
@@ -88,6 +93,7 @@ enum StorageKey {
     OpenBills,
     EvmRoutes,
     Bills,
+    Payees,
 }
 
 /// Which band a payment lands in.
@@ -157,6 +163,12 @@ pub struct Bill {
     pub due: String,
     #[serde(default)]
     pub monthly: bool,
+    /// Paid once a year as `<id>:<YYYY>`, on the month and day of `due`.
+    #[serde(default)]
+    pub yearly: bool,
+    /// One of software, hosting, contractors, payroll, rent, taxes, card, other.
+    #[serde(default)]
+    pub category: Option<String>,
     /// For bills paid on another chain: "base", "eth", "arb" or "op".
     #[serde(default)]
     pub chain: Option<String>,
@@ -166,6 +178,21 @@ pub struct Bill {
     pub memo: Option<String>,
     #[serde(default)]
     pub added_at_ms: u64,
+}
+
+/// An approved payee with the owner's name for it. Adding one also puts the
+/// account on the allowlist.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug)]
+pub struct Payee {
+    pub account_id: AccountId,
+    pub name: String,
+    /// vendor, employee, card, offramp, own or other.
+    pub kind: String,
+    /// For a card or the owner's own wallet: Keel tops it up to this many
+    /// token units when it holds less, inside the vault's limits.
+    #[serde(default)]
+    pub keep_at: Option<U128>,
 }
 
 /// Owner's changes to the policy. Every field is optional.
@@ -224,6 +251,8 @@ pub struct KeelVault {
     pending_count: u32,
     /// Bills the owner listed for Keel to pay.
     bills: IterableMap<String, Bill>,
+    /// Names and kinds of approved payees.
+    payees: IterableMap<AccountId, Payee>,
 }
 
 #[near]
@@ -262,6 +291,7 @@ impl KeelVault {
             open_bills: LookupMap::new(StorageKey::OpenBills),
             pending_count: 0,
             bills: IterableMap::new(StorageKey::Bills),
+            payees: IterableMap::new(StorageKey::Payees),
         }
     }
 
@@ -518,12 +548,14 @@ impl KeelVault {
         );
         for account in &update.disallow {
             self.allowlist.remove(account);
+            self.payees.remove(account);
         }
         for account in &update.unblock {
             self.blocklist.remove(account);
         }
         for account in &update.block {
             self.allowlist.remove(account);
+            self.payees.remove(account);
             self.blocklist.insert(account.clone());
         }
         for account in &update.allow {
@@ -620,6 +652,10 @@ impl KeelVault {
         require!((self.bills.len() as u32) < MAX_BILLS, "50 bills are already listed; cancel one first");
         require!(bill.amount.0 > 0, "amount must be above zero");
         require!(is_date(&bill.due), "due must be a date like 2026-11-30");
+        require!(!(bill.monthly && bill.yearly), "a bill repeats monthly or yearly, not both");
+        if let Some(c) = &bill.category {
+            require!(BILL_CATEGORIES.contains(&c.as_str()), "category must be software, hosting, contractors, payroll, rent, taxes, card or other");
+        }
         require!(!bill.label.trim().is_empty(), "label is missing");
         check_text(&bill.label, "label");
         check_text(bill.memo.as_deref().unwrap_or(""), "memo");
@@ -636,6 +672,41 @@ impl KeelVault {
         let bill = Bill { added_at_ms: env::block_timestamp_ms(), ..bill };
         emit("bill_added", json!(bill));
         self.bills.insert(bill.id.clone(), bill);
+    }
+
+    /// Approves a payee with a name, for example "Company card". Also puts the
+    /// account on the allowlist, so Keel may pay it within the caps.
+    #[payable]
+    pub fn add_payee(&mut self, payee: Payee) {
+        self.assert_owner();
+        require!(
+            !self.blocklist.contains(&payee.account_id),
+            "cannot allow a blocklisted payee; unblock it first"
+        );
+        require!(!payee.name.trim().is_empty(), "name is missing");
+        check_text(&payee.name, "name");
+        require!(PAYEE_KINDS.contains(&payee.kind.as_str()), "kind must be vendor, employee, card, offramp, own or other");
+        if let Some(k) = payee.keep_at {
+            require!(payee.kind == "card" || payee.kind == "own", "only a card or your own wallet can be kept topped up");
+            require!(k.0 > 0, "keep_at must be above zero");
+        }
+        require!(
+            self.payees.contains_key(&payee.account_id) || (self.payees.len() as u32) < MAX_PAYEES,
+            "100 payees are already named; remove one first"
+        );
+        self.allowlist.insert(payee.account_id.clone());
+        emit("payee_added", json!(payee));
+        self.payees.insert(payee.account_id.clone(), payee);
+    }
+
+    /// Removes a payee's name and takes it off the allowlist.
+    #[payable]
+    pub fn remove_payee(&mut self, account_id: AccountId) {
+        self.assert_owner();
+        let named = self.payees.remove(&account_id).is_some();
+        let allowed = self.allowlist.remove(&account_id);
+        require!(named || allowed, "that account is not a payee");
+        emit("payee_removed", json!({ "account_id": account_id, "by": self.owner_id }));
     }
 
     /// Stops Keel watching a bill. Payments already made stay in the ledger.
@@ -752,6 +823,12 @@ impl KeelVault {
             allowlist: self.allowlist.iter().cloned().collect(),
             blocklist: self.blocklist.iter().cloned().collect(),
         }
+    }
+
+    /// Approved payees the owner named. The allowlist in `get_policy` is the
+    /// full list Keel may pay; this adds names, kinds and top-up targets.
+    pub fn get_payees(&self) -> Vec<Payee> {
+        self.payees.values().cloned().collect()
     }
 
     /// The bills the owner listed, in no particular order.

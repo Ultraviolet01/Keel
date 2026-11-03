@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { Account, JsonRpcProvider, KeyPair } from "near-api-js";
-import type { Policy, Proposal, VaultBill } from "./brain";
+import type { Policy, Proposal, VaultBill, VaultPayee } from "./brain";
 
 export interface Config {
   network: string;
@@ -122,6 +122,16 @@ export class Chain {
   async bills(vaultId: string): Promise<VaultBill[]> {
     try {
       return await this.view<VaultBill[]>(vaultId, "get_bills");
+    } catch (e) {
+      if (/MethodNotFound|MethodResolveError|CodeDoesNotExist/.test(String(e))) return [];
+      throw e;
+    }
+  }
+
+  /** The payees the owner named on the vault; none for older vaults. */
+  async payees(vaultId: string): Promise<VaultPayee[]> {
+    try {
+      return await this.view<VaultPayee[]>(vaultId, "get_payees");
     } catch (e) {
       if (/MethodNotFound|MethodResolveError|CodeDoesNotExist/.test(String(e))) return [];
       throw e;

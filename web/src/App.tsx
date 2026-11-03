@@ -3,8 +3,8 @@ import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
 import { SampleApp } from "./Sample";
-import { BillPanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
-import { Activity, Approvals, Overview, Rules, Wallets, type PageProps } from "./pages";
+import { BillPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
+import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
 
 // `?view=<account>` shows a founder's companies read-only, without a wallet.
@@ -19,7 +19,7 @@ export default function App() {
   const [vaults, setVaults] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("overview");
-  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | "bill" | null>(null);
+  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | "bill" | "payee" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readOnly = Boolean(viewAs);
@@ -188,10 +188,11 @@ export default function App() {
           onDeposit: () => setPanel("deposit"),
           onNewPayment: () => setPanel("pay"),
           onAddBill: () => setPanel("bill"),
+          onAddPayee: () => setPanel("payee"),
           onPauseToggle: togglePause,
         }
       : null;
-  const PageView = { overview: Overview, approvals: Approvals, activity: Activity, rules: Rules, wallets: Wallets }[page];
+  const PageView = { overview: Overview, approvals: Approvals, activity: Activity, payees: Payees, rules: Rules, wallets: Wallets }[page];
 
   return (
     <>
@@ -267,7 +268,10 @@ export default function App() {
         <PayPanel vaultId={selected} token={d.token} balance={d.balance} send={send} onClose={() => setPanel(null)} onPaid={vault.reload} />
       )}
       {panel === "bill" && selected && d && (
-        <BillPanel vaultId={selected} token={d.token} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
+        <BillPanel vaultId={selected} token={d.token} policy={d.policy} payees={d.payees} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
+      )}
+      {panel === "payee" && selected && d && (
+        <PayeePanel vaultId={selected} token={d.token} policy={d.policy} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
       )}
       {panel === "deposit" && selected && d && (
         <DepositPanel vaultId={selected} token={d.token} tokenId={d.policy.token_id} onClose={() => setPanel(null)} />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
-import { billDues, type VaultBill } from "./bills";
+import { billDues, type VaultBill, type VaultPayee } from "./bills";
 
 export interface VaultData {
   policy: Policy;
@@ -12,6 +12,8 @@ export interface VaultData {
   bills: VaultBill[] | null;
   /** When the vault paid each bill_ref of the listed bills (ms), if it did. */
   paid: Record<string, number>;
+  /** Payees the owner named; null for vaults created before payees had names. */
+  payees: VaultPayee[] | null;
 }
 
 async function loadBills(vaultId: string): Promise<{ bills: VaultBill[] | null; paid: Record<string, number> }> {
@@ -37,14 +39,15 @@ export function useVault(vaultId: string | null) {
     if (!vaultId) return;
     try {
       const policy = await view<Policy>(vaultId, "get_policy");
-      const [token, balance, gas, proposals, listed] = await Promise.all([
+      const [token, balance, gas, proposals, listed, payees] = await Promise.all([
         view<TokenMetadata>(policy.token_id, "ft_metadata"),
         view<string>(policy.token_id, "ft_balance_of", { account_id: vaultId }),
         spendableNear(vaultId),
         view<Proposal[]>(vaultId, "get_proposals", { from_index: 0, limit: 100 }),
         loadBills(vaultId),
+        view<VaultPayee[]>(vaultId, "get_payees").catch(() => null),
       ]);
-      setData({ policy, token, balance, gas, proposals, ...listed });
+      setData({ policy, token, balance, gas, proposals, ...listed, payees });
       setError(null);
     } catch (e) {
       setError(String(e));

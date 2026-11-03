@@ -15,7 +15,7 @@ import {
   type TokenMetadata,
 } from "./near";
 import { Copy, LoadLine, Shield, Wallet, X } from "./icons";
-import { BILL_CHAINS, billId, isEvmAddress } from "./bills";
+import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, billId, isEvmAddress, type VaultPayee } from "./bills";
 
 /** Sends one function call from the signed-in wallet; resolves to the outcome. */
 export type Send = (
@@ -536,22 +536,56 @@ export function PayPanel(props: { vaultId: string; token: TokenMetadata; balance
   );
 }
 
-export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: Send; onClose: () => void; onSaved: () => Promise<void> }) {
+type InvoiceDraft = {
+  vendor?: string | null;
+  amount?: string | null;
+  currency?: string | null;
+  due?: string | null;
+  invoice_number?: string | null;
+  payment_address?: string | null;
+  chain?: string | null;
+  category?: string | null;
+  repeats?: "once" | "monthly" | "yearly" | null;
+};
+
+/** Sends an invoice to /api/read-invoice (a Vercel function that asks Claude). */
+async function readInvoice(file: File): Promise<InvoiceDraft> {
+  if (file.size > 3_000_000) throw new Error("That file is over 3 MB. Use a smaller PDF or photo.");
+  const data = await new Promise<string>((ok, bad) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => bad(r.error);
+    r.readAsDataURL(file);
+  });
+  const res = await fetch("/api/read-invoice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data, media_type: file.type }) });
+  if (res.status === 404) throw new Error("Invoice reading runs on the hosted app only. Fill in the bill by hand here.");
+  const body = (await res.json().catch(() => ({}))) as { draft?: InvoiceDraft; error?: string };
+  if (!res.ok || !body.draft) throw new Error(body.error ?? `Could not read the invoice (${res.status}).`);
+  return body.draft;
+}
+
+export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy: Policy; payees: VaultPayee[] | null; send: Send; onClose: () => void; onSaved: () => Promise<void> }) {
   const [label, setLabel] = useState("");
   const [chain, setChain] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [due, setDue] = useState(() => new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
-  const [monthly, setMonthly] = useState(false);
+  const [repeat, setRepeat] = useState<"once" | "monthly" | "yearly">("once");
+  const [category, setCategory] = useState("other");
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [fromInvoice, setFromInvoice] = useState<InvoiceDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const payee = to.trim().toLowerCase();
   const raw = parseToken(amount || "0", props.token.decimals);
+  const named = (props.payees ?? []).find((x) => x.account_id === payee);
+  const approved = !chain && props.policy.allowlist.includes(payee);
+  const blocked = props.policy.blocklist.includes(payee);
   const problem = !label.trim()
-    ? "Name the bill, for example Northwind hosting"
+    ? "Name the bill, for example Domain renewal"
     : !payee
-      ? "Enter who to pay"
+      ? "Pick a payee or enter who to pay"
       : chain && !isEvmAddress(payee)
         ? `Enter the payee's 0x address on ${BILL_CHAINS[chain]}`
         : !chain && !ACCOUNT.test(payee)
@@ -562,12 +596,58 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: 
               ? "Pick a due date"
               : null;
 
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    setReading(true);
+    setError(null);
+    try {
+      const d = await readInvoice(file);
+      setFromInvoice(d);
+      if (d.vendor) setLabel([d.vendor, d.invoice_number && `invoice ${d.invoice_number}`].filter(Boolean).join(", ").slice(0, 80));
+      if (d.amount) setAmount(d.amount);
+      if (d.due && /^\d{4}-\d{2}-\d{2}$/.test(d.due)) setDue(d.due);
+      if (d.category && CATEGORIES[d.category]) setCategory(d.category);
+      if (d.repeats) setRepeat(d.repeats);
+      if (d.invoice_number) setMemo(`Invoice ${d.invoice_number}`.slice(0, 140));
+      // A payee you already named wins over anything the invoice says.
+      const match = (props.payees ?? []).find((x) => d.vendor && x.name.toLowerCase().includes(d.vendor.toLowerCase().split(" ")[0]));
+      if (match) {
+        setChain("");
+        setTo(match.account_id);
+      } else if (d.payment_address) {
+        const addr = d.payment_address.trim().toLowerCase();
+        if (isEvmAddress(addr)) {
+          setChain(d.chain && BILL_CHAINS[d.chain] ? d.chain : "base");
+          setTo(addr);
+        } else if (ACCOUNT.test(addr)) {
+          setChain("");
+          setTo(addr);
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReading(false);
+    }
+  };
+
   const save = async () => {
     if (problem || !raw) return;
     setBusy(true);
     setError(null);
     try {
-      const bill = { id: billId(label), payee, amount: raw, due, monthly, chain: chain || null, label: label.trim(), memo: memo.trim() || null };
+      const bill = {
+        id: billId(label),
+        payee,
+        amount: raw,
+        due,
+        monthly: repeat === "monthly",
+        yearly: repeat === "yearly",
+        category,
+        chain: chain || null,
+        label: label.trim(),
+        memo: memo.trim() || null,
+      };
       await props.send(props.vaultId, "add_bill", { bill }, { deposit: "1", gas: "30000000000000" });
       await props.onSaved();
       props.onClose();
@@ -577,6 +657,17 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: 
       setBusy(false);
     }
   };
+
+  // How Keel will treat this bill, said before the owner signs.
+  const outcome = blocked
+    ? { cls: "invalid", text: "This account is on your blocklist. Keel will refuse to pay it." }
+    : chain
+      ? { cls: "", text: "Paid from the vault's own address on that chain. Keel proposes it to you each time; nothing moves without your approval." }
+      : approved
+        ? { cls: "free", text: `${named ? named.name : "An approved payee"}. Keel pays it on its own when it is due, if it is within your caps.` }
+        : payee
+          ? { cls: "taken", text: "Not one of your approved payees. Keel will propose it to you each time. Add it on the Payees page to let Keel pay it on its own." }
+          : null;
 
   return (
     <Overlay onClose={props.onClose}>
@@ -588,14 +679,43 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: 
           <CloseButton onClose={props.onClose} />
         </div>
         <h1 className="serif" id="bill-title">Add a bill</h1>
-        <p className="lead">
-          Keel pays it when it is due, inside your limits: an allowlisted payee within your caps is paid on its own, anything else comes to you for approval. Saved on the vault with your
-          signature.
-        </p>
+        <p className="lead">Keel pays it when it is due, inside your limits. Saved on the vault with your signature.</p>
+        <label className="field">
+          <span className="label">Start from an invoice (optional)</span>
+          <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" disabled={reading} onChange={(e) => onFile(e.target.files?.[0])} />
+          <span className="hint">{reading ? "Claude is reading the invoice…" : "PDF or photo, up to 3 MB. Claude fills in the fields; you check them before signing."}</span>
+        </label>
+        {fromInvoice && (
+          <p className="hint">
+            Filled in from the invoice. Check every field.
+            {fromInvoice.currency && fromInvoice.currency.toUpperCase() !== props.token.symbol.toUpperCase() && ` The invoice is in ${fromInvoice.currency}; the vault pays ${props.token.symbol}.`}
+            {fromInvoice.payment_address && !approved && " The payment address came from the invoice and is not one of your payees: invoices can be forged, so confirm it with the vendor."}
+          </p>
+        )}
         <label className="field">
           <span className="label">What is it</span>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Northwind hosting" maxLength={80} autoFocus />
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Domain renewal" maxLength={80} />
         </label>
+        <div className="two">
+          <label className="field">
+            <span className="label">Category</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {Object.entries(CATEGORIES).map(([k, name]) => (
+                <option key={k} value={k}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="label">Repeats</span>
+            <select value={repeat} onChange={(e) => setRepeat(e.target.value as "once" | "monthly" | "yearly")}>
+              <option value="once">Once</option>
+              <option value="monthly">Every month</option>
+              <option value="yearly">Every year</option>
+            </select>
+          </label>
+        </div>
         <label className="field">
           <span className="label">Paid on</span>
           <select value={chain} onChange={(e) => setChain(e.target.value)}>
@@ -606,33 +726,129 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; send: 
               </option>
             ))}
           </select>
-          {chain && <span className="hint">Bills on other chains always come to you for approval first.</span>}
         </label>
         <label className="field">
           <span className="label">Pay to</span>
-          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder={chain ? "0x…" : "northwind.testnet"} />
+          {!chain && props.payees && props.payees.length > 0 && (
+            <select value={named ? payee : ""} onChange={(e) => e.target.value && setTo(e.target.value)}>
+              <option value="">Pick an approved payee…</option>
+              {props.payees.map((x) => (
+                <option key={x.account_id} value={x.account_id}>
+                  {x.name} ({x.account_id})
+                </option>
+              ))}
+            </select>
+          )}
+          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder={chain ? "0x…" : "or type a NEAR account, like northwind.testnet"} />
+          {outcome && <span className={`hint ${outcome.cls}`}>{outcome.text}</span>}
         </label>
-        <label className="field">
-          <span className="label">Amount</span>
-          <span className="input-group">
-            <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="80" />
-            <span className="suffix">{props.token.symbol}</span>
-          </span>
-        </label>
-        <label className="field">
-          <span className="label">{monthly ? "First due date" : "Due date"}</span>
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={monthly} onChange={(e) => setMonthly(e.target.checked)} /> Repeats every month on this day
-        </label>
+        <div className="two">
+          <label className="field">
+            <span className="label">Amount</span>
+            <span className="input-group">
+              <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15" />
+              <span className="suffix">{props.token.symbol}</span>
+            </span>
+          </label>
+          <label className="field">
+            <span className="label">{repeat === "once" ? "Due date" : "First due date"}</span>
+            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          </label>
+        </div>
         <label className="field">
           <span className="label">Note (optional)</span>
           <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" maxLength={140} />
         </label>
         {(error || (label && to && amount && problem)) && <p className="error">{error ?? problem}</p>}
-        <button className="btn primary lg block" onClick={save} disabled={busy || Boolean(problem)}>
+        <button className="btn primary lg block" onClick={save} disabled={busy || reading || Boolean(problem)}>
           {busy ? "Approve in your wallet" : "Add bill"}
+        </button>
+      </section>
+    </Overlay>
+  );
+}
+
+export function PayeePanel(props: { vaultId: string; token: TokenMetadata; policy: Policy; send: Send; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [account, setAccount] = useState("");
+  const [kind, setKind] = useState("vendor");
+  const [keepAt, setKeepAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const id = account.trim().toLowerCase();
+  const tops = kind === "card" || kind === "own";
+  const keepRaw = keepAt ? parseToken(keepAt, props.token.decimals) : null;
+  const problem = !name.trim()
+    ? "Name the payee, for example Company card"
+    : !ACCOUNT.test(id)
+      ? "Enter the payee's NEAR account"
+      : props.policy.blocklist.includes(id)
+        ? "That account is on your blocklist; unblock it on the Rules page first"
+        : keepAt && (keepRaw === null || keepRaw === "0")
+          ? `Enter the balance to keep in ${props.token.symbol}`
+          : null;
+
+  const save = async () => {
+    if (problem) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payee = { account_id: id, name: name.trim(), kind, keep_at: tops && keepRaw ? keepRaw : null };
+      await props.send(props.vaultId, "add_payee", { payee }, { deposit: "1", gas: "30000000000000" });
+      await props.onSaved();
+      props.onClose();
+    } catch (e) {
+      setError(friendly(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={props.onClose}>
+      <section className="card panel form" role="dialog" aria-labelledby="payee-title">
+        <div className="panel-top">
+          <span className="panel-icon">
+            <Shield />
+          </span>
+          <CloseButton onClose={props.onClose} />
+        </div>
+        <h1 className="serif" id="payee-title">Approve a payee</h1>
+        <p className="lead">
+          Keel may pay an approved payee on its own, within your caps. Get the account from the vendor, card provider or off-ramp directly, never from an email or invoice alone.
+        </p>
+        <label className="field">
+          <span className="label">Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Company card" maxLength={80} autoFocus />
+        </label>
+        <label className="field">
+          <span className="label">Kind</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {Object.entries(PAYEE_KINDS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          {PAYEE_KINDS[kind].note && <span className="hint">{PAYEE_KINDS[kind].note}</span>}
+        </label>
+        <label className="field">
+          <span className="label">NEAR account</span>
+          <input className="mono-input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="card.yourcompany.testnet" />
+        </label>
+        {tops && (
+          <label className="field">
+            <span className="label">Keep this much in it (optional)</span>
+            <span className="input-group">
+              <input className="num" inputMode="decimal" value={keepAt} onChange={(e) => setKeepAt(e.target.value)} placeholder="300" />
+              <span className="suffix">{props.token.symbol}</span>
+            </span>
+            <span className="hint">Keel tops it back up to this when it holds less, at most once a day and within your caps.</span>
+          </label>
+        )}
+        {(error || (name && account && problem)) && <p className="error">{error ?? problem}</p>}
+        <button className="btn primary lg block" onClick={save} disabled={busy || Boolean(problem)}>
+          {busy ? "Approve in your wallet" : "Approve payee"}
         </button>
       </section>
     </Overlay>

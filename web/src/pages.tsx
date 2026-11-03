@@ -10,7 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { BILL_CHAINS, billDues } from "./bills";
+import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, billDues } from "./bills";
 
 export interface PageProps {
   vaultId: string;
@@ -23,6 +23,7 @@ export interface PageProps {
   onDeposit: () => void;
   onNewPayment: () => void;
   onAddBill: () => void;
+  onAddPayee: () => void;
   onPauseToggle: () => void;
 }
 
@@ -307,7 +308,8 @@ function UpcomingBills({ p }: { p: PageProps }) {
                 <span className="bill-meta">
                   {x.bill.chain ? `${short(x.bill.payee)} on ${BILL_CHAINS[x.bill.chain] ?? x.bill.chain}` : payee(x.bill.payee)} · due{" "}
                   {new Date(`${x.due}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}
-                  {x.bill.monthly ? " · monthly" : ""}
+                  {x.bill.monthly ? " · monthly" : x.bill.yearly ? " · yearly" : ""}
+                  {x.bill.category && CATEGORIES[x.bill.category] ? ` · ${CATEGORIES[x.bill.category]}` : ""}
                 </span>
                 <span className="bill-side">
                   {st.label && <span className={`pill ${st.cls}`}>{st.label}</span>}
@@ -771,6 +773,72 @@ export function Activity(p: PageProps) {
 }
 
 // -------------------------------------------------------------------- rules
+
+export function Payees(p: PageProps) {
+  const d = p.data;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const named = new Map((d.payees ?? []).map((x) => [x.account_id, x]));
+  // Every approved account, named or not, plus blocked ones at the end.
+  const rows = [...d.policy.allowlist.map((id) => ({ id, payee: named.get(id), blocked: false })), ...d.policy.blocklist.map((id) => ({ id, payee: undefined, blocked: true }))];
+  const remove = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    try {
+      if (d.payees) await p.send(p.vaultId, "remove_payee", { account_id: id }, { deposit: "1", gas: "30000000000000" });
+      else await p.send(p.vaultId, "update_policy", { update: { disallow: [id] }, reason: `Removed payee ${id}` }, { deposit: "1", gas: "30000000000000" });
+      await p.reload();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e).slice(0, 160));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      <Head title="Payees" sub="Where Keel may send money on its own, within your caps. Anyone else needs your approval each time.">
+        {p.canAct && d.payees !== null && (
+          <button className="btn primary" onClick={p.onAddPayee}>
+            Approve a payee
+          </button>
+        )}
+      </Head>
+      <section className="card card-pad">
+        <p className="sub">
+          Card subscriptions such as domains, software and cloud charge your company card; approve the card's wallet here with a balance to keep, and Keel tops it up. Bank-only bills go to a bank off-ramp you approve here.
+        </p>
+        {d.payees === null && <p className="muted small">This vault was created before payees could be named; it shows the allowlist from your rules. Add payees with Set limits.</p>}
+        {rows.length === 0 ? (
+          <div className="empty">No payees yet. Approve your vendors, your company card wallet and your bank off-ramp, and Keel can pay them without asking you.</div>
+        ) : (
+          <ul className="bills">
+            {rows.map((r) => (
+              <li key={r.id}>
+                <b>{r.payee?.name ?? (r.blocked ? "Blocked" : "Approved payee")}</b>
+                <span className="bill-side">
+                  {r.blocked ? <span className="pill bad">Blocked</span> : <span className="pill ok">Approved by you</span>}
+                </span>
+                <span className="bill-meta">
+                  <span className="mono">{r.id}</span>
+                  {r.payee ? ` · ${PAYEE_KINDS[r.payee.kind]?.label ?? r.payee.kind}` : ""}
+                  {r.payee?.keep_at ? ` · kept at ${amt(r.payee.keep_at, d)}` : ""}
+                </span>
+                <span className="bill-side">
+                  {p.canAct && !r.blocked && (
+                    <button className="link-btn" disabled={busy === r.id} onClick={() => remove(r.id)}>
+                      {busy === r.id ? "Approve in wallet" : "Remove"}
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {error && <p className="error">{error}</p>}
+      </section>
+    </>
+  );
+}
 
 export function Rules(p: PageProps) {
   const d = p.data;

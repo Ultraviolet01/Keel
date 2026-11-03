@@ -48,9 +48,37 @@ export interface VaultBill {
   amount: string; // smallest units
   due: string; // YYYY-MM-DD, the first or only due date
   monthly: boolean;
+  yearly?: boolean;
+  category?: string | null;
   chain?: string | null;
   label: string;
   memo?: string | null;
+}
+
+/** An approved payee the owner named on the vault. */
+export interface VaultPayee {
+  account_id: string;
+  name: string;
+  kind: string;
+  keep_at?: string | null; // smallest units; Keel tops a card or own wallet up to this
+}
+
+/**
+ * Top-ups for the owner's card and own wallets that hold less than their
+ * keep_at. Each is an ordinary bill for today, so it goes through the same
+ * checks: within the caps Keel sends it, otherwise it proposes it. The bill id
+ * carries the date, so the vault allows at most one top-up per wallet per day.
+ */
+export function topUps(payees: VaultPayee[], balances: Record<string, bigint>, today: string): Bill[] {
+  const out: Bill[] = [];
+  for (const p of payees) {
+    if (!p.keep_at) continue;
+    const target = BigInt(p.keep_at);
+    const has = balances[p.account_id] ?? 0n;
+    if (has >= target) continue;
+    out.push({ id: `top:${p.account_id.slice(0, 45)}:${today}`, payee: p.account_id, amount: target - has, due: today, memo: `Top up ${p.name} to its target balance` });
+  }
+  return out;
 }
 
 /**
@@ -64,6 +92,16 @@ export function vaultBills(raw: VaultBill[], today: string): Bill[] {
   const out: Bill[] = [];
   for (const b of raw) {
     const base = { payee: b.payee, amount: BigInt(b.amount), memo: b.memo ? `${b.label}: ${b.memo}` : b.label, ...(b.chain ? { chain: b.chain } : {}) };
+    if (b.yearly) {
+      // Same month and day every year; 29 February falls on the 28th in other years.
+      const [y0] = today.split("-").map(Number);
+      for (const y of [y0, y0 + 1]) {
+        const md = b.due.slice(5) === "02-29" && new Date(Date.UTC(y, 1, 29)).getUTCMonth() !== 1 ? "02-28" : b.due.slice(5);
+        const due = `${y}-${md}`;
+        if (due >= b.due) out.push({ ...base, id: `${b.id}:${y}`, due });
+      }
+      continue;
+    }
     if (!b.monthly) {
       out.push({ ...base, id: b.id, due: b.due });
       continue;
