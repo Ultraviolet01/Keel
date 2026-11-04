@@ -45,7 +45,7 @@ export default function Docs() {
           stays in the vault. Keel's agent is connected the moment the vault exists.
         </li>
         <li>
-          <b>Set your limits.</b> Click <b>Set limits</b>: a per-payment cap and a daily cap. Until you set them, Keel can only propose.
+          <b>Set your limits.</b> Click <b>Set limits</b>: a per-payment cap, a daily cap and a cash buffer, the least the vault should ever hold. Until you set the caps, Keel can only propose.
         </li>
         <li>
           <b>Approve your payees.</b> Open <b>Payees</b> and add the vendors, people and wallets Keel may pay on its own.
@@ -112,6 +112,10 @@ export default function Docs() {
         <li>
           <b>Your own wallet</b>: another wallet the company owns; it can also have a balance to keep.
         </li>
+        <li>
+          <b>Yield destination</b>: an account the company owns that earns yield. Set the most Keel may move at once. Keel moves only cash above your
+          buffer and the next 14 days of bills, once a day, and only with a cash buffer set.
+        </li>
       </ul>
       <p>Removing a payee takes it off the allowlist. From then on, payments to it need your approval.</p>
 
@@ -120,6 +124,11 @@ export default function Docs() {
         A bill tells Keel what to pay, to whom, how much and when. Add it from the Overview page with <b>Add bill</b>. Each bill has a category
         (software, domains and hosting, contractors, payroll, rent, taxes, card top-up, other) and repeats once, every month or every year.
         Bills are saved on the vault with your signature: Keel cannot add one itself.
+      </p>
+      <p>
+        <b>Critical bills and the cash buffer:</b> tick <b>Critical</b> for bills that must never wait, like payroll. When paying a bill would take the
+        vault below your cash buffer, Keel pays critical bills first and asks you about them; other bills show <b>Deferred: cash buffer</b> and wait
+        until they are due, then come to you. The vault enforces the buffer itself.
       </p>
       <p>
         <b>From an invoice:</b> upload a PDF or photo (up to 3 MB) in the Add bill form. Claude reads the vendor, amount, due date, invoice number

@@ -7,6 +7,7 @@ import {
   addDays,
   vaultBills,
   topUps,
+  idleMove,
   approvalsFor,
   checkCounterparty,
   decide,
@@ -137,7 +138,8 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
   // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
   // Top-ups for the owner's card and own wallets that run below their target.
-  const payees = (await chain.payees(vaultId)).filter((p) => p.keep_at && !policy.blocklist.includes(p.account_id));
+  const allPayees = (await chain.payees(vaultId)).filter((p) => !policy.blocklist.includes(p.account_id));
+  const payees = allPayees.filter((p) => p.keep_at);
   const held: Record<string, bigint> = {};
   for (const p of payees) held[p.account_id] = await chain.balance(policy.token_id, p.account_id).catch(() => 0n);
   const listed = [...vaultBills(await chain.bills(vaultId), o.today), ...topUps(payees, held, o.today)];
@@ -229,6 +231,14 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const due = open
     .filter((b) => new Date(`${b.due}T00:00:00Z`) <= dueBy)
     .sort((a, b) => Number(Boolean(b.critical)) - Number(Boolean(a.critical)) || a.due.localeCompare(b.due));
+  // Idle cash last: only what is left above the buffer and the next 14 days of bills.
+  const horizon = addDays(o.today, 14);
+  const upcoming = open.filter((b) => !isCrossChain(b) && b.due <= horizon && !policy.blocklist.includes(b.payee)).reduce((t, b) => t + b.amount, 0n);
+  const idle = idleMove(allPayees, balance, BigInt(policy.min_balance ?? "0"), upcoming, o.today, 10n ** BigInt(meta.decimals));
+  if (idle) {
+    say("forecast", `idle cash: ${money(idle.amount)} above the buffer and the next 14 days of bills, for ${idle.payee}`);
+    due.push(idle);
+  }
   let available = balance;
   // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
   const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);

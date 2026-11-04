@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, vaultBills, topUps, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
+import { addDays, vaultBills, topUps, idleMove, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
 
 const U = 1_000_000n; // 1 USDC
 
@@ -210,4 +210,17 @@ test("cash buffer: pays when it holds, defers a non-critical bill before it is d
 test("critical flag survives from the vault's bill", () => {
   const out = vaultBills([{ id: "payroll", payee: "payroll.testnet", amount: "1", due: "2026-11-30", monthly: true, critical: true, label: "Payroll" }], "2026-11-03");
   assert.ok(out.every((b) => b.critical));
+});
+
+test("idle cash: only surplus above the buffer and upcoming bills, capped per move, never without a buffer", () => {
+  const dest = { account_id: "savings.testnet", name: "Treasury savings", kind: "yield", max_move: String(200n * U) };
+  const card = { account_id: "card.testnet", name: "Card", kind: "card", keep_at: String(50n * U) };
+  // 1,000 held, 300 buffer, 400 of bills coming: 300 surplus, capped at 200.
+  const m = idleMove([card, dest], 1000n * U, 300n * U, 400n * U, "2026-11-04", U);
+  assert.deepEqual(m, { id: "idle:savings.testnet:2026-11-04", payee: "savings.testnet", amount: 200n * U, due: "2026-11-04", memo: "Move idle cash to Treasury savings" });
+  assert.equal(idleMove([dest], 1000n * U, 300n * U, 650n * U, "2026-11-04", U)?.amount, 50n * U, "under the cap: the whole surplus");
+  assert.equal(idleMove([dest], 1000n * U, 300n * U, 700n * U, "2026-11-04", U), null, "no surplus: nothing moves");
+  assert.equal(idleMove([dest], 1000n * U, 0n, 0n, "2026-11-04", U), null, "no buffer: nothing moves");
+  assert.equal(idleMove([card], 1000n * U, 300n * U, 0n, "2026-11-04", U), null, "no yield destination: nothing moves");
+  assert.equal(idleMove([dest], 300n * U + U / 2n, 300n * U, 0n, "2026-11-04", U), null, "dust under one token stays put");
 });

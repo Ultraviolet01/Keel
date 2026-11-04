@@ -41,6 +41,8 @@ export interface VaultPayee {
   name: string;
   kind: string;
   keep_at?: string | null;
+  /** For a yield destination: the most Keel moves there at once. */
+  max_move?: string | null;
 }
 
 export const PAYEE_KINDS: Record<string, { label: string; note: string }> = {
@@ -49,6 +51,10 @@ export const PAYEE_KINDS: Record<string, { label: string; note: string }> = {
   card: { label: "Company card wallet", note: "The wallet a crypto card spends from; card subscriptions charge the card" },
   offramp: { label: "Bank off-ramp", note: "A deposit address that turns USDC into a bank transfer" },
   own: { label: "Your own wallet", note: "Another wallet the company owns" },
+  yield: {
+    label: "Yield destination",
+    note: "An account the company owns that earns yield. Keel moves only cash above your buffer and the next 14 days of bills, up to the limit you set per move, once a day",
+  },
   other: { label: "Other", note: "" },
 };
 

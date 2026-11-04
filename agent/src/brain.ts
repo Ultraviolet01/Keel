@@ -65,6 +65,22 @@ export interface VaultPayee {
   name: string;
   kind: string;
   keep_at?: string | null; // smallest units; Keel tops a card or own wallet up to this
+  max_move?: string | null; // smallest units; the most Keel moves to a yield destination at once
+}
+
+/**
+ * Idle cash: what is left above the cash buffer and every bill due in the next
+ * 14 days goes to the owner's yield destination, at most its max_move and at
+ * most once a day (the bill id carries the date). Nothing moves without a
+ * buffer, and the vault re-checks the buffer and the limit itself.
+ */
+export function idleMove(payees: VaultPayee[], balance: bigint, buffer: bigint, upcoming: bigint, today: string, unit: bigint): Bill | null {
+  const dest = payees.find((p) => p.kind === "yield" && p.max_move);
+  if (!dest || buffer <= 0n) return null;
+  const surplus = balance - buffer - upcoming;
+  if (surplus < unit) return null;
+  const max = BigInt(dest.max_move!);
+  return { id: `idle:${dest.account_id.slice(0, 45)}:${today}`, payee: dest.account_id, amount: surplus < max ? surplus : max, due: today, memo: `Move idle cash to ${dest.name}` };
 }
 
 /**

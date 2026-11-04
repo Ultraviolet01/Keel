@@ -60,8 +60,9 @@ const MAX_BILLS: u32 = 50;
 const BILL_CHAINS: [&str; 4] = ["base", "eth", "arb", "op"];
 /// What a bill is for, so the forecast and reports can group spending.
 const BILL_CATEGORIES: [&str; 8] = ["software", "hosting", "contractors", "payroll", "rent", "taxes", "card", "other"];
-/// What a payee is. A card or own wallet can carry a `keep_at` balance that Keel tops up.
-const PAYEE_KINDS: [&str; 6] = ["vendor", "employee", "card", "offramp", "own", "other"];
+/// What a payee is. A card or own wallet can carry a `keep_at` balance that
+/// Keel tops up; a yield destination carries a `max_move` limit per move.
+const PAYEE_KINDS: [&str; 7] = ["vendor", "employee", "card", "offramp", "own", "yield", "other"];
 const MAX_PAYEES: u32 = 100;
 /// The agent's calls are refused once the vault's NEAR beyond its storage
 /// would drop below this, so the owner always has room to approve, pause
@@ -201,6 +202,10 @@ pub struct Payee {
     /// token units when it holds less, inside the vault's limits.
     #[serde(default)]
     pub keep_at: Option<U128>,
+    /// For a yield destination: the most Keel may move there in one payment.
+    /// Keel moves only cash above the buffer, so a buffer must be set.
+    #[serde(default)]
+    pub max_move: Option<U128>,
 }
 
 /// Owner's changes to the policy. Every field is optional.
@@ -331,6 +336,12 @@ impl KeelVault {
         let check = self.evaluate(&receiver_id, amount.0);
         if check.band != Band::RunsAlone {
             env::panic_str(&format!("Keel Vault refused: {}", check.reason));
+        }
+        // Idle cash: moves to a yield destination stay under its per-move limit
+        // and always go through the cash buffer check.
+        if let Some(max) = self.payees.get(&receiver_id).and_then(|p| p.max_move) {
+            require!(amount.0 <= max.0, "Keel Vault refused: over the most Keel may move to this yield destination at once");
+            require!(self.min_balance > 0, "Keel Vault refused: set a cash buffer before Keel moves idle cash");
         }
         if let Some(r) = &bill_ref {
             self.mark_paid(r);
@@ -721,7 +732,12 @@ impl KeelVault {
         );
         require!(!payee.name.trim().is_empty(), "name is missing");
         check_text(&payee.name, "name");
-        require!(PAYEE_KINDS.contains(&payee.kind.as_str()), "kind must be vendor, employee, card, offramp, own or other");
+        require!(PAYEE_KINDS.contains(&payee.kind.as_str()), "kind must be vendor, employee, card, offramp, own, yield or other");
+        if payee.kind == "yield" {
+            require!(payee.max_move.map_or(false, |m| m.0 > 0), "a yield destination needs max_move, the most Keel may move there at once");
+        } else {
+            require!(payee.max_move.is_none(), "only a yield destination has max_move");
+        }
         if let Some(k) = payee.keep_at {
             require!(payee.kind == "card" || payee.kind == "own", "only a card or your own wallet can be kept topped up");
             require!(k.0 > 0, "keep_at must be above zero");

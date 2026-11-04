@@ -834,6 +834,7 @@ export function Payees(p: PageProps) {
                   <span className="mono">{r.id}</span>
                   {r.payee ? ` · ${PAYEE_KINDS[r.payee.kind]?.label ?? r.payee.kind}` : ""}
                   {r.payee?.keep_at ? ` · kept at ${amt(r.payee.keep_at, d)}` : ""}
+                  {r.payee?.max_move ? ` · idle cash, up to ${amt(r.payee.max_move, d)} per move` : ""}
                 </span>
                 <span className="bill-side">
                   {p.canAct && !r.blocked && (

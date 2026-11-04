@@ -1127,7 +1127,7 @@ fn bill_category_must_be_known() {
 }
 
 fn payee(id: &str, kind: &str, keep_at: Option<u128>) -> Payee {
-    Payee { account_id: acc(id), name: "Company card".into(), kind: kind.into(), keep_at: keep_at.map(|k| U128(k * USDC)) }
+    Payee { account_id: acc(id), name: "Company card".into(), kind: kind.into(), keep_at: keep_at.map(|k| U128(k * USDC)), max_move: None }
 }
 
 #[test]
@@ -1288,4 +1288,65 @@ fn bills_can_be_critical() {
     as_owner(DAY);
     v.add_bill(Bill { critical: true, ..listed("payroll", "payroll.kora.testnet", 50) });
     assert!(v.get_bills()[0].critical);
+}
+
+// ------------------------------------------------------------ idle cash
+
+fn yield_payee(max: u128) -> Payee {
+    Payee { account_id: acc("savings.kora.testnet"), name: "Treasury savings".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)) }
+}
+
+#[test]
+fn yield_destination_needs_a_per_move_limit() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(yield_payee(200));
+    assert_eq!(v.get_payees()[0].max_move, Some(U128(200 * USDC)));
+    let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut v = vault();
+        as_owner(DAY);
+        v.add_payee(Payee { max_move: None, ..yield_payee(1) });
+    }))
+    .expect_err("a yield destination without max_move is refused");
+    assert!(err.downcast_ref::<String>().unwrap().contains("needs max_move"));
+}
+
+#[test]
+#[should_panic(expected = "only a yield destination has max_move")]
+fn only_yield_destinations_have_max_move() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(Payee { kind: "vendor".into(), ..yield_payee(10) });
+}
+
+#[test]
+#[should_panic(expected = "over the most Keel may move to this yield destination at once")]
+fn idle_move_over_the_limit_is_refused() {
+    let mut v = buffered(100);
+    as_owner(DAY);
+    v.add_payee(yield_payee(50));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("savings.kora.testnet"), U128(60 * USDC), None, None);
+}
+
+#[test]
+#[should_panic(expected = "set a cash buffer before Keel moves idle cash")]
+fn idle_move_needs_a_cash_buffer() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(yield_payee(50));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("savings.kora.testnet"), U128(10 * USDC), None, None);
+}
+
+#[test]
+fn idle_move_within_the_limit_goes_through_the_buffer_check() {
+    let mut v = buffered(100);
+    as_owner(DAY);
+    v.add_payee(yield_payee(50));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("savings.kora.testnet"), U128(50 * USDC), None, Some("idle:savings:2026-11-04".into()));
+    // Holding 120 with a 100 buffer, moving 50 would leave 70: refused.
+    as_callback(balance(120));
+    assert!(matches!(v.on_balance_checked(acc("savings.kora.testnet"), U128(50 * USDC), None, 1, Some("idle:savings:2026-11-04".into())), PromiseOrValue::Value(false)));
 }

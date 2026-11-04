@@ -73,6 +73,7 @@ const HOW = [
   ["parts", "Three parts"],
   ["loop", "Every 15 minutes"],
   ["bill", "One bill, start to finish"],
+  ["decisions", "Treasury decisions"],
   ["chains", "Paying on other chains"],
   ["claude", "Where AI is used"],
   ["learn", "What Keel learns"],
@@ -158,6 +159,46 @@ export function HowItWorks() {
         <li>Next December the same bill comes round again. The vault pays each year's bill once, never twice.</li>
       </ol>
 
+      <h2 id="decisions">Treasury decisions</h2>
+      <p>Besides paying bills, Keel makes five kinds of treasury decision for one company. This is what each does today.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Decision</th>
+            <th>What Keel does</th>
+            <th>Control</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Defer</td>
+            <td>Holds back a bill that is not critical when paying it would take the vault below your cash buffer, until it is due; then asks you</td>
+            <td>Cash buffer, enforced by the vault; critical bills go first</td>
+          </tr>
+          <tr>
+            <td>Deploy idle</td>
+            <td>Moves cash above your buffer and the next 14 days of bills to a yield destination you approved, once a day</td>
+            <td>Approved destination and a per-move limit, both enforced by the vault</td>
+          </tr>
+          <tr>
+            <td>Escalate</td>
+            <td>Proposes anything outside your limits, with a plain-English reason</td>
+            <td>Always needs you</td>
+          </tr>
+          <tr>
+            <td>Transfer</td>
+            <td>Keeps your card and own wallets topped up on NEAR. Moving USDC between the vault and its own addresses on other chains needs a bridge: Keel quotes it through NEAR Intents on mainnet; on testnet you fund those addresses yourself</td>
+            <td>Approved payees and caps; other chains always need you</td>
+          </tr>
+          <tr>
+            <td>Convert</td>
+            <td>Quotes swaps through NEAR Intents on mainnet. This version does not swap; the vault holds USDC only</td>
+            <td>Not active yet</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="muted small">On testnet the yield destination is a test account standing in for a yield pool; Keel does not integrate a yield protocol yet.</p>
+
       <h2 id="chains">Paying on other chains</h2>
       <p>
         Each vault has its own address on Base, Ethereum, Arbitrum and Optimism, created through NEAR Chain Signatures: only the vault can sign for
@@ -210,6 +251,8 @@ export function Security() {
         <li>Only approved payees, only within the per-payment and daily caps. Everything else becomes a proposal for you.</li>
         <li>Blocklisted payees are refused outright, on NEAR and on other chains.</li>
         <li>Each bill is paid at most once, even if Keel restarts with no memory or is tricked into retrying.</li>
+        <li>With a cash buffer set, the vault reads its own balance before every agent payment and refuses any that would leave less than the buffer.</li>
+        <li>Idle cash goes only to a yield destination you approved, never more than its per-move limit, and never without a buffer.</li>
         <li>Pause stops every payment at once.</li>
       </ul>
 

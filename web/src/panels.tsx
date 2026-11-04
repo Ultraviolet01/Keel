@@ -795,11 +795,16 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
   const [account, setAccount] = useState("");
   const [kind, setKind] = useState("vendor");
   const [keepAt, setKeepAt] = useState("");
+  const [maxMove, setMaxMove] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = account.trim().toLowerCase();
   const tops = kind === "card" || kind === "own";
   const keepRaw = keepAt ? parseToken(keepAt, props.token.decimals) : null;
+  const isYield = kind === "yield";
+  const maxRaw = maxMove ? parseToken(maxMove, props.token.decimals) : null;
+  // Older vaults have no yield kind or cash buffer; the option only appears where the vault enforces it.
+  const yieldReady = props.policy.min_balance !== undefined;
   const problem = !name.trim()
     ? "Name the payee, for example Company card"
     : !ACCOUNT.test(id)
@@ -808,14 +813,18 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
         ? "That account is on your blocklist; unblock it on the Rules page first"
         : keepAt && (keepRaw === null || keepRaw === "0")
           ? `Enter the balance to keep in ${props.token.symbol}`
-          : null;
+          : isYield && (maxRaw === null || maxRaw === "0")
+            ? `Enter the most Keel may move at once, in ${props.token.symbol}`
+            : isYield && props.policy.min_balance === "0"
+              ? "Set a cash buffer in Set limits first: Keel moves only cash above it"
+              : null;
 
   const save = async () => {
     if (problem) return;
     setBusy(true);
     setError(null);
     try {
-      const payee = { account_id: id, name: name.trim(), kind, keep_at: tops && keepRaw ? keepRaw : null };
+      const payee = { account_id: id, name: name.trim(), kind, keep_at: tops && keepRaw ? keepRaw : null, ...(yieldReady ? { max_move: isYield ? maxRaw : null } : {}) };
       await props.send(props.vaultId, "add_payee", { payee }, { deposit: "1", gas: "30000000000000" });
       await props.onSaved();
       props.onClose();
@@ -846,7 +855,9 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
         <label className="field">
           <span className="label">Kind</span>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            {Object.entries(PAYEE_KINDS).map(([k, v]) => (
+            {Object.entries(PAYEE_KINDS)
+              .filter(([k]) => k !== "yield" || yieldReady)
+              .map(([k, v]) => (
               <option key={k} value={k}>
                 {v.label}
               </option>
@@ -858,6 +869,16 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
           <span className="label">NEAR account</span>
           <input className="mono-input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="card.yourcompany.testnet" />
         </label>
+        {isYield && (
+          <label className="field">
+            <span className="label">Most Keel may move at once</span>
+            <span className="input-group">
+              <input className="num" inputMode="decimal" value={maxMove} onChange={(e) => setMaxMove(e.target.value)} placeholder="200" />
+              <span className="suffix">{props.token.symbol}</span>
+            </span>
+            <span className="hint">The vault refuses any larger move. Bringing money back is up to you, from that account.</span>
+          </label>
+        )}
         {tops && (
           <label className="field">
             <span className="label">Keep this much in it (optional)</span>
