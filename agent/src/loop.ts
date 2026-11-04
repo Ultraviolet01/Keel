@@ -299,6 +299,13 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     try {
       if (action.kind === "pay") {
         const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) });
+        // The transaction can succeed while the vault declines inside it: a
+        // cash-buffer refusal or a failed token transfer both end in false.
+        // Nothing was paid, the bill stays open, and Keel looks again next run.
+        if (r.value === false) {
+          say("act", "the vault did not pay: it would break the cash buffer, or the token transfer failed. The bill stays open", r.hash);
+          continue;
+        }
         handled[bill.id] = { action: "pay", tx: r.hash, at: new Date().toISOString() };
         available -= bill.amount;
         say("act", `paid alone: ${action.reason}`, r.hash);
