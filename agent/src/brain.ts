@@ -9,6 +9,8 @@ export interface Policy {
   per_payment_cap: string;
   daily_cap: string;
   spent_today: string;
+  /** Cash buffer the agent's payments must leave in the vault; missing on older vaults. */
+  min_balance?: string;
   paused: boolean;
   allowlist: string[];
   blocklist: string[];
@@ -39,6 +41,7 @@ export interface Bill {
   memo?: string;
   chain?: string; // set for payees on another chain, for example "base", "eth", "arb", "op"
   token?: string; // what the payee wants on that chain, for example "USDT"; default the vault's token
+  critical?: boolean; // paid first, and never deferred for the cash buffer
 }
 
 /** A bill as the vault stores it, listed by the owner with `add_bill`. */
@@ -50,6 +53,7 @@ export interface VaultBill {
   monthly: boolean;
   yearly?: boolean;
   category?: string | null;
+  critical?: boolean;
   chain?: string | null;
   label: string;
   memo?: string | null;
@@ -91,7 +95,13 @@ export function topUps(payees: VaultPayee[], balances: Record<string, bigint>, t
 export function vaultBills(raw: VaultBill[], today: string): Bill[] {
   const out: Bill[] = [];
   for (const b of raw) {
-    const base = { payee: b.payee, amount: BigInt(b.amount), memo: b.memo ? `${b.label}: ${b.memo}` : b.label, ...(b.chain ? { chain: b.chain } : {}) };
+    const base = {
+      payee: b.payee,
+      amount: BigInt(b.amount),
+      memo: b.memo ? `${b.label}: ${b.memo}` : b.label,
+      ...(b.chain ? { chain: b.chain } : {}),
+      ...(b.critical ? { critical: true } : {}),
+    };
     if (b.yearly) {
       // Same month and day every year; 29 February falls on the 28th in other years.
       const [y0] = today.split("-").map(Number);
@@ -206,7 +216,8 @@ export type Action =
   | { kind: "pay"; reason: string }
   | { kind: "propose"; reason: string }
   | { kind: "refuse"; reason: string }
-  | { kind: "wait"; reason: string };
+  | { kind: "wait"; reason: string }
+  | { kind: "defer"; reason: string };
 
 export interface DecideInput {
   bill: Bill;
@@ -217,6 +228,8 @@ export interface DecideInput {
   /** Band from the vault's own check_payment view. */
   vaultBand: "runs_alone" | "needs_approval" | "blocked";
   vaultReason: string;
+  /** Today, YYYY-MM-DD; a deferred bill comes to the owner once it is due. */
+  today?: string;
 }
 
 /** What Keel does with one bill that is due. The vault re-checks everything. */
@@ -224,6 +237,14 @@ export function decide(x: DecideInput): Action {
   const { bill, policy, balance } = x;
   if (policy.paused) return { kind: "wait", reason: "payments are paused by the owner" };
   if (x.counterparty.verdict === "block") return { kind: "refuse", reason: `refused: ${x.counterparty.reasons.join("; ")}` };
+  // Cash buffer: a payment may not leave the vault below the owner's minimum.
+  // The vault enforces it too; Keel decides what to do instead of paying.
+  const buffer = BigInt(policy.min_balance ?? "0");
+  if (buffer > 0n && balance - bill.amount < buffer) {
+    if (bill.critical) return { kind: "propose", reason: "critical bill, but paying it would take the vault below your cash buffer; approve to pay it anyway" };
+    if (x.today && bill.due > x.today) return { kind: "defer", reason: "paying it now would take the vault below your cash buffer; waiting until it is due or more cash comes in" };
+    return { kind: "propose", reason: "due now, but paying it would take the vault below your cash buffer; approve to pay it anyway or deposit more" };
+  }
   if (balance < bill.amount) {
     return { kind: "propose", reason: `vault holds less than this bill; needs a deposit or your approval to wait` };
   }

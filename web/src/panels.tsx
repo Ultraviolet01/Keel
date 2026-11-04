@@ -316,6 +316,9 @@ export function LimitsPanel(props: {
   const show = (raw: string) => (raw === "0" ? "" : formatToken(raw, token.decimals).replace(/\.00$/, ""));
   const [perPayment, setPerPayment] = useState(show(policy.per_payment_cap));
   const [perDay, setPerDay] = useState(show(policy.daily_cap));
+  // Older vaults ignore min_balance, so the field only shows where the vault enforces it.
+  const hasBuffer = policy.min_balance !== undefined;
+  const [buffer, setBuffer] = useState(show(policy.min_balance ?? "0"));
   const [payees, setPayees] = useState(policy.allowlist.join("\n"));
   const [blocked, setBlocked] = useState(policy.blocklist.join("\n"));
   const [reason, setReason] = useState("");
@@ -324,12 +327,13 @@ export function LimitsPanel(props: {
 
   const per = parseToken(perPayment || "0", token.decimals);
   const day = parseToken(perDay || "0", token.decimals);
+  const floor = parseToken(buffer || "0", token.decimals);
   const allow = lines(payees);
   const block = lines(blocked);
   const badAccount = [...allow, ...block].find((a) => !ACCOUNT.test(a) || a.length < 2 || a.length > 64);
   const both = allow.find((a) => block.includes(a));
   const problem =
-    per === null || day === null
+    per === null || day === null || floor === null
       ? `Enter amounts in ${token.symbol}, for example 100 or 100.50`
       : BigInt(per) > BigInt(day)
         ? "The per-payment cap cannot be more than the daily cap"
@@ -340,12 +344,13 @@ export function LimitsPanel(props: {
             : null;
 
   const save = async () => {
-    if (problem || per === null || day === null) return;
+    if (problem || per === null || day === null || floor === null) return;
     setBusy(true);
     setError(null);
     const update = {
       per_payment_cap: per,
       daily_cap: day,
+      ...(hasBuffer ? { min_balance: floor } : {}),
       allow: allow.filter((a) => !policy.allowlist.includes(a)),
       disallow: policy.allowlist.filter((a) => !allow.includes(a)),
       block: block.filter((a) => !policy.blocklist.includes(a)),
@@ -392,6 +397,16 @@ export function LimitsPanel(props: {
             </span>
           </label>
         </div>
+        {hasBuffer && (
+          <label className="field">
+            <span className="label">Cash buffer</span>
+            <span className="input-group">
+              <input className="num" inputMode="decimal" value={buffer} onChange={(e) => setBuffer(e.target.value)} placeholder="500" />
+              <span className="suffix">{token.symbol}</span>
+            </span>
+            <span className="hint">Keel never pays if the vault would hold less than this. Bills not marked critical wait until they are due, then come to you.</span>
+          </label>
+        )}
         <label className="field">
           <span className="label">Payees Keel may pay alone</span>
           <textarea className="mono-input" rows={3} value={payees} onChange={(e) => setPayees(e.target.value)} placeholder={"northwind.near\npayroll.kora.near"} />
@@ -573,6 +588,7 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
   const [repeat, setRepeat] = useState<"once" | "monthly" | "yearly">("once");
   const [category, setCategory] = useState("other");
   const [memo, setMemo] = useState("");
+  const [critical, setCritical] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [fromInvoice, setFromInvoice] = useState<InvoiceDraft | null>(null);
@@ -644,6 +660,7 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
         monthly: repeat === "monthly",
         yearly: repeat === "yearly",
         category,
+        ...(props.policy.min_balance !== undefined ? { critical } : {}),
         chain: chain || null,
         label: label.trim(),
         memo: memo.trim() || null,
@@ -759,6 +776,11 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
           <span className="label">Note (optional)</span>
           <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" maxLength={140} />
         </label>
+        {props.policy.min_balance !== undefined && (
+          <label className="check">
+            <input type="checkbox" checked={critical} onChange={(e) => setCritical(e.target.checked)} /> Critical: pay this first, even when cash is tight
+          </label>
+        )}
         {(error || (label && to && amount && problem)) && <p className="error">{error ?? problem}</p>}
         <button className="btn primary lg block" onClick={save} disabled={busy || reading || Boolean(problem)}>
           {busy ? "Approve in your wallet" : "Add bill"}

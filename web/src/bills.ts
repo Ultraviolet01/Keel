@@ -10,6 +10,7 @@ export interface VaultBill {
   monthly: boolean;
   yearly?: boolean;
   category?: string | null;
+  critical?: boolean;
   chain?: string | null;
   label: string;
   memo?: string | null;

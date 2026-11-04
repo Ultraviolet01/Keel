@@ -268,6 +268,13 @@ function UpcomingBills({ p }: { p: PageProps }) {
     if (prop) return prop.status === "pending" ? { label: "Needs approval", cls: "warn" } : { label: "Paying", cls: "warn" };
     return { label: "Scheduled", cls: "muted" };
   };
+  // Same rule as the agent: a non-critical NEAR bill due within three days
+  // waits while paying it would take the vault below the cash buffer.
+  const buffer = BigInt(d.policy.min_balance ?? "0");
+  const soon = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const deferred = (x: { bill: { amount: string; chain?: string | null; critical?: boolean }; due: string }) =>
+    buffer > 0n && !x.bill.chain && !x.bill.critical && x.due <= soon && x.due > today && BigInt(d.balance) - BigInt(x.bill.amount) < buffer;
   const cancel = async (id: string) => {
     setBusy(id);
     setError(null);
@@ -300,7 +307,8 @@ function UpcomingBills({ p }: { p: PageProps }) {
       ) : (
         <ul className="bills">
           {dues.map((x) => {
-            const st = status(x.ref);
+            const base = status(x.ref);
+            const st = base.label === "Scheduled" && deferred(x) ? { label: "Deferred: cash buffer", cls: "warn" } : base;
             return (
               <li key={x.ref}>
                 <b>{x.bill.label}</b>
@@ -310,6 +318,7 @@ function UpcomingBills({ p }: { p: PageProps }) {
                   {new Date(`${x.due}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}
                   {x.bill.monthly ? " · monthly" : x.bill.yearly ? " · yearly" : ""}
                   {x.bill.category && CATEGORIES[x.bill.category] ? ` · ${CATEGORIES[x.bill.category]}` : ""}
+                  {x.bill.critical ? " · critical" : ""}
                 </span>
                 <span className="bill-side">
                   {st.label && <span className={`pill ${st.cls}`}>{st.label}</span>}
@@ -462,6 +471,9 @@ function RulesCard({ d }: { d: VaultData }) {
           <span className="num">{d.policy.daily_cap === "0" ? cap("0") : `${usd(d.policy.spent_today, d)} of ${amt(d.policy.daily_cap, d)} used`}</span>
         </div>
         <div><span>Approval needed above</span><span className="num">{d.policy.per_payment_cap === "0" ? "Every payment" : amt(d.policy.per_payment_cap, d)}</span></div>
+        {d.policy.min_balance !== undefined && (
+          <div><span>Cash buffer</span><span className="num">{d.policy.min_balance === "0" ? <span className="brass">Not set</span> : amt(d.policy.min_balance, d)}</span></div>
+        )}
         <div><span>Allowed payees</span><span>{d.policy.allowlist.length ? `${d.policy.allowlist.length} addresses` : "None"}</span></div>
         <div><span>Blocked addresses</span><span>{d.policy.blocklist.length ? `${d.policy.blocklist.length} addresses` : "None"}</span></div>
         <div><span>New payees</span><span>Always need approval</span></div>

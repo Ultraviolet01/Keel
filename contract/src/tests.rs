@@ -392,7 +392,7 @@ fn failed_transfer_is_refunded_to_daily_cap() {
         Default::default(),
         vec![PromiseResult::Failed],
     );
-    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), Some(1), None);
+    let ok = v.on_payment_done(None, acc("northwind.testnet"), U128(100 * USDC), Some(1), None, None);
     assert!(!ok);
     assert_eq!(v.get_policy().spent_today, U128(0));
     assert!(get_logs().iter().any(|l| l.contains("payment_failed")));
@@ -417,7 +417,7 @@ fn approved_proposal_marked_executed_on_success() {
         Default::default(),
         vec![PromiseResult::Successful(vec![])],
     );
-    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), None, None));
+    assert!(v.on_payment_done(Some(1), acc("payroll.kora.testnet"), U128(8_000 * USDC), None, None, None));
     assert_eq!(v.get_proposal(1).unwrap().status, ProposalStatus::Executed);
 }
 
@@ -457,7 +457,7 @@ fn failed_owner_withdrawal_does_not_touch_agent_cap() {
         Default::default(),
         vec![PromiseResult::Failed],
     );
-    v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None, None);
+    v.on_payment_done(None, acc("kora.testnet"), U128(500 * USDC), None, None, None);
     assert_eq!(v.get_policy().spent_today, U128(60 * USDC));
 }
 
@@ -718,7 +718,7 @@ fn a_failed_transfer_frees_the_bill_to_be_paid_again() {
     as_agent(DAY);
     let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
     callback_result(false);
-    v.on_payment_done(None, acc("northwind.testnet"), U128(80 * USDC), Some(1), bill("nw-nov"));
+    v.on_payment_done(None, acc("northwind.testnet"), U128(80 * USDC), Some(1), bill("nw-nov"), None);
     assert_eq!(v.bill_paid_at("nw-nov".into()), None);
     as_agent(DAY);
     let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, bill("nw-nov"));
@@ -995,6 +995,7 @@ fn listed(id: &str, payee: &str, usdc: u128) -> Bill {
         monthly: false,
         yearly: false,
         category: None,
+        critical: false,
         chain: None,
         label: "Northwind hosting".into(),
         memo: None,
@@ -1175,4 +1176,116 @@ fn only_cards_and_own_wallets_get_topped_up() {
     let mut v = vault();
     as_owner(DAY);
     v.add_payee(payee("northwind.testnet", "vendor", Some(100)));
+}
+
+// ------------------------------------------------------------ cash buffer
+
+fn as_callback(result: PromiseResult) {
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(acc(VAULT))
+            .predecessor_account_id(acc(VAULT))
+            .block_timestamp(DAY)
+            .build(),
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![result],
+    );
+}
+
+fn balance(usdc: u128) -> PromiseResult {
+    PromiseResult::Successful(near_sdk::serde_json::to_vec(&U128(usdc * USDC)).unwrap())
+}
+
+fn buffered(min: u128) -> KeelVault {
+    let mut v = vault();
+    as_owner(DAY);
+    v.update_policy(PolicyUpdate { min_balance: Some(U128(min * USDC)), ..Default::default() }, "keep a buffer".into());
+    v
+}
+
+#[test]
+fn owner_sets_a_cash_buffer() {
+    let v = buffered(900);
+    assert_eq!(v.get_policy().min_balance, U128(900 * USDC));
+    assert!(get_logs().iter().any(|l| l.contains("\"min_balance\":\"900000000\"")));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn agent_cannot_lower_the_buffer() {
+    let mut v = buffered(900);
+    set_ctx(VAULT, DAY, 1);
+    v.update_policy(PolicyUpdate { min_balance: Some(U128(0)), ..Default::default() }, "no buffer".into());
+}
+
+#[test]
+fn payment_that_breaks_the_buffer_is_refused_and_undone() {
+    let mut v = buffered(900);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, Some("nw-nov".into()));
+    assert_eq!(v.get_policy().spent_today, U128(80 * USDC));
+    // The vault holds 950: paying 80 would leave 870, under the 900 buffer.
+    as_callback(balance(950));
+    assert!(matches!(v.on_balance_checked(acc("northwind.testnet"), U128(80 * USDC), None, 1, Some("nw-nov".into())), PromiseOrValue::Value(false)));
+    assert_eq!(v.get_policy().spent_today, U128(0), "the daily spend is given back");
+    assert_eq!(v.bill_paid_at("nw-nov".into()), None, "the bill can be paid later");
+    assert!(get_logs().iter().any(|l| l.contains("payment_refused") && l.contains("cash buffer")));
+}
+
+#[test]
+fn payment_that_keeps_the_buffer_goes_ahead() {
+    let mut v = buffered(900);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(80 * USDC), None, None);
+    as_callback(balance(1_000));
+    assert!(matches!(v.on_balance_checked(acc("northwind.testnet"), U128(80 * USDC), None, 1, None), PromiseOrValue::Promise(_)));
+    // Once the transfer is done, the reservation is released: a second 20 fits.
+    as_callback(PromiseResult::Successful(vec![]));
+    assert!(v.on_payment_done(None, acc("northwind.testnet"), U128(80 * USDC), Some(1), None, Some(true)));
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(20 * USDC), None, None);
+    as_callback(balance(920));
+    assert!(matches!(v.on_balance_checked(acc("northwind.testnet"), U128(20 * USDC), None, 1, None), PromiseOrValue::Promise(_)));
+}
+
+#[test]
+fn parallel_payments_cannot_slip_under_the_buffer_together() {
+    // Each 60 fits on its own (1000 - 60 >= 900), but not both at once.
+    let mut v = buffered(900);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(60 * USDC), None, None);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("payroll.kora.testnet"), U128(60 * USDC), None, None);
+    as_callback(balance(1_000));
+    assert!(matches!(v.on_balance_checked(acc("northwind.testnet"), U128(60 * USDC), None, 1, None), PromiseOrValue::Value(false)));
+    as_callback(balance(1_000));
+    assert!(matches!(v.on_balance_checked(acc("payroll.kora.testnet"), U128(60 * USDC), None, 1, None), PromiseOrValue::Promise(_)), "once the first is undone, the second fits");
+}
+
+#[test]
+fn unreadable_balance_means_no_payment() {
+    let mut v = buffered(900);
+    as_agent(DAY);
+    let _ = v.execute_payment(acc("northwind.testnet"), U128(10 * USDC), None, None);
+    as_callback(PromiseResult::Failed);
+    assert!(matches!(v.on_balance_checked(acc("northwind.testnet"), U128(10 * USDC), None, 1, None), PromiseOrValue::Value(false)));
+    assert!(get_logs().iter().any(|l| l.contains("could not read the vault's balance")));
+}
+
+#[test]
+fn owner_payments_ignore_the_buffer() {
+    // The buffer binds Keel's agent; the owner can always withdraw.
+    let mut v = buffered(900);
+    as_owner(DAY);
+    let _ = v.withdraw(acc("kora.testnet"), U128(500 * USDC), None);
+}
+
+#[test]
+fn bills_can_be_critical() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(Bill { critical: true, ..listed("payroll", "payroll.kora.testnet", 50) });
+    assert!(v.get_bills()[0].critical);
 }

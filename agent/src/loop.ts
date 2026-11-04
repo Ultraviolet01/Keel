@@ -225,7 +225,10 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Decide and act on bills due soon
   const dueBy = new Date(`${o.today}T00:00:00Z`);
   dueBy.setUTCDate(dueBy.getUTCDate() + o.lookaheadDays);
-  const due = open.filter((b) => new Date(`${b.due}T00:00:00Z`) <= dueBy).sort((a, b) => a.due.localeCompare(b.due));
+  // Critical bills first, then by due date, so cash goes to what matters most.
+  const due = open
+    .filter((b) => new Date(`${b.due}T00:00:00Z`) <= dueBy)
+    .sort((a, b) => Number(Boolean(b.critical)) - Number(Boolean(a.critical)) || a.due.localeCompare(b.due));
   let available = balance;
   // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
   const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);
@@ -261,12 +264,17 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     const raw = await chain.checkPayment(vaultId, bill.payee, bill.amount);
     // The vault reports amounts in raw units; show them as tokens.
     const vault = { ...raw, reason: raw.reason.replace(/\b\d{4,}\b/g, (n) => money(BigInt(n))) };
-    const action = decide({ bill, policy, balance: available, counterparty, spike, vaultBand: vault.band, vaultReason: vault.reason });
+    const action = decide({ bill, policy, balance: available, counterparty, spike, vaultBand: vault.band, vaultReason: vault.reason, today: o.today });
     const label = `${bill.memo ?? bill.id}: ${money(bill.amount)} to ${bill.payee}, due ${bill.due}`;
     say("check", `${label}. Counterparty ${counterparty.verdict} (${counterparty.reasons.join("; ")}). Vault says ${vault.band.replace("_", " ")}`);
 
     if (action.kind === "wait") {
       say("decide", `wait: ${action.reason}`);
+      continue;
+    }
+    if (action.kind === "defer") {
+      // Not marked handled: Keel looks again on the next run.
+      say("decide", `defer, nothing signed: ${action.reason}`);
       continue;
     }
     if (action.kind === "refuse") {

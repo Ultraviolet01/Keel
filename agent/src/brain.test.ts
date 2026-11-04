@@ -188,3 +188,26 @@ test("card top-ups: only below target, for the difference, once per day by id", 
   assert.deepEqual(topUps([card], { "card-keel.testnet": 300_000_000n }, "2026-11-03"), [], "at target: nothing");
   assert.ok(topUps([{ ...card, account_id: "x".repeat(64) }], {}, "2026-11-03")[0].id.length <= 64, "bill_ref stays within the vault's 64 characters");
 });
+
+test("cash buffer: pays when it holds, defers a non-critical bill before it is due, escalates when due or critical", () => {
+  const buffered = { ...policy, min_balance: String(950n * U) };
+  const at = (over: Partial<DecideInput>) => decide(base({ policy: buffered, today: "2026-11-03", ...over }));
+  // 1000 - 80 = 920 < 950: the domain renewal waits.
+  assert.deepEqual(at({}).kind, "defer");
+  assert.match(at({}).reason, /cash buffer/);
+  // On its due day it comes to the owner instead of waiting forever.
+  assert.equal(at({ today: "2026-11-05" }).kind, "propose");
+  // A critical bill is never deferred.
+  assert.equal(at({ bill: { ...base().bill, critical: true } }).kind, "propose");
+  // With room above the buffer, Keel pays as usual.
+  assert.equal(at({ balance: 1100n * U }).kind, "pay");
+  // No buffer set: unchanged behaviour.
+  assert.equal(decide(base({ today: "2026-11-03" })).kind, "pay");
+  // Blocklisted payees are still refused first.
+  assert.equal(at({ counterparty: { verdict: "block", reasons: ["blocklisted"] } }).kind, "refuse");
+});
+
+test("critical flag survives from the vault's bill", () => {
+  const out = vaultBills([{ id: "payroll", payee: "payroll.testnet", amount: "1", due: "2026-11-30", monthly: true, critical: true, label: "Payroll" }], "2026-11-03");
+  assert.ok(out.every((b) => b.critical));
+});

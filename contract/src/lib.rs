@@ -35,7 +35,7 @@ use near_sdk::serde_json::{json, Value};
 use near_sdk::store::{IterableMap, IterableSet, LookupMap};
 use near_sdk::{
     assert_one_yocto, env, ext_contract, near, require, AccountId, Allowance, BorshStorageKey,
-    Gas, NearToken, PanicOnDefault, Promise, PromiseResult, PublicKey,
+    Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult, PublicKey,
 };
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
@@ -46,6 +46,9 @@ const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_0
 const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_CALLBACK: Gas = Gas::from_tgas(10);
+/// Cash buffer: reading the vault's balance, then paying from the callback.
+const GAS_BALANCE_OF: Gas = Gas::from_tgas(5);
+const GAS_BALANCE_CHECKED: Gas = Gas::from_tgas(45);
 const MAX_TEXT: usize = 280;
 const MAX_BILL_REF: usize = 64;
 /// At most this many proposals wait for the owner at once, so a stolen agent
@@ -81,6 +84,7 @@ pub use evm::{EvmRoute, EvmSigned, EvmTransfer};
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
+    fn ft_balance_of(&self, account_id: AccountId) -> U128;
 }
 
 #[derive(BorshStorageKey)]
@@ -169,6 +173,10 @@ pub struct Bill {
     /// One of software, hosting, contractors, payroll, rent, taxes, card, other.
     #[serde(default)]
     pub category: Option<String>,
+    /// Paid even when cash is tight; non-critical bills wait while paying
+    /// them would break the cash buffer.
+    #[serde(default)]
+    pub critical: bool,
     /// For bills paid on another chain: "base", "eth", "arb" or "op".
     #[serde(default)]
     pub chain: Option<String>,
@@ -201,6 +209,9 @@ pub struct Payee {
 pub struct PolicyUpdate {
     pub per_payment_cap: Option<U128>,
     pub daily_cap: Option<U128>,
+    /// Cash buffer: the agent may not pay if the vault would hold less than this.
+    #[serde(default)]
+    pub min_balance: Option<U128>,
     #[serde(default)]
     pub allow: Vec<AccountId>,
     #[serde(default)]
@@ -219,6 +230,8 @@ pub struct PolicyView {
     pub per_payment_cap: U128,
     pub daily_cap: U128,
     pub spent_today: U128,
+    /// Cash buffer the agent's payments must leave in the vault.
+    pub min_balance: U128,
     pub paused: bool,
     pub allowlist: Vec<AccountId>,
     pub blocklist: Vec<AccountId>,
@@ -253,6 +266,11 @@ pub struct KeelVault {
     bills: IterableMap<String, Bill>,
     /// Names and kinds of approved payees.
     payees: IterableMap<AccountId, Payee>,
+    /// Cash buffer: the agent may not pay if the vault would hold less than this.
+    min_balance: u128,
+    /// Agent payments started under the buffer and not finished yet. Counted
+    /// against the balance so parallel payments cannot slip under the buffer.
+    outflow: u128,
 }
 
 #[near]
@@ -292,6 +310,8 @@ impl KeelVault {
             pending_count: 0,
             bills: IterableMap::new(StorageKey::Bills),
             payees: IterableMap::new(StorageKey::Payees),
+            min_balance: 0,
+            outflow: 0,
         }
     }
 
@@ -323,7 +343,20 @@ impl KeelVault {
             json!({ "receiver_id": receiver_id, "amount": amount, "by": "agent", "rule": check.reason, "bill_ref": bill_ref }),
         );
         self.assert_storage_reserve();
-        self.pay(receiver_id, amount, memo, None, Some(day), bill_ref)
+        if self.min_balance == 0 {
+            return self.pay(receiver_id, amount, memo, None, Some(day), bill_ref, None);
+        }
+        // With a cash buffer, ask the token contract for the vault's balance
+        // first and pay from the callback only if the buffer still holds.
+        self.outflow += amount.0;
+        ext_ft::ext(self.token_id.clone())
+            .with_static_gas(GAS_BALANCE_OF)
+            .ft_balance_of(env::current_account_id())
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_BALANCE_CHECKED)
+                    .on_balance_checked(receiver_id, amount, memo, day, bill_ref),
+            )
     }
 
     /// Files a proposal for the owner. Used for new payees, amounts over the
@@ -452,7 +485,7 @@ impl KeelVault {
                 require!(Some(U128(units)) == evm_amount, "Keel Vault refused: the route's token changed since the proposal");
                 self.sign_evm(proposal_id, &e, units)
             }
-            None => self.pay(receiver_id, amount, memo, Some(proposal_id), None, bill_ref),
+            None => self.pay(receiver_id, amount, memo, Some(proposal_id), None, bill_ref, None),
         }
     }
 
@@ -534,13 +567,16 @@ impl KeelVault {
     pub fn update_policy(&mut self, update: PolicyUpdate, reason: String) {
         self.assert_owner();
         check_text(&reason, "reason");
-        let old = json!({ "per_payment_cap": U128(self.per_payment_cap), "daily_cap": U128(self.daily_cap) });
+        let old = json!({ "per_payment_cap": U128(self.per_payment_cap), "daily_cap": U128(self.daily_cap), "min_balance": U128(self.min_balance) });
 
         if let Some(cap) = update.per_payment_cap {
             self.per_payment_cap = cap.0;
         }
         if let Some(cap) = update.daily_cap {
             self.daily_cap = cap.0;
+        }
+        if let Some(floor) = update.min_balance {
+            self.min_balance = floor.0;
         }
         require!(
             self.per_payment_cap <= self.daily_cap,
@@ -570,7 +606,7 @@ impl KeelVault {
             "policy_updated",
             json!({
                 "old": old,
-                "new": { "per_payment_cap": U128(self.per_payment_cap), "daily_cap": U128(self.daily_cap) },
+                "new": { "per_payment_cap": U128(self.per_payment_cap), "daily_cap": U128(self.daily_cap), "min_balance": U128(self.min_balance) },
                 "allow": update.allow, "disallow": update.disallow,
                 "block": update.block, "unblock": update.unblock,
                 "reason": reason, "approved_by": self.owner_id,
@@ -638,7 +674,7 @@ impl KeelVault {
             "withdrawal_started",
             json!({ "receiver_id": receiver_id, "amount": amount, "by": self.owner_id }),
         );
-        self.pay(receiver_id, amount, memo, None, None, None)
+        self.pay(receiver_id, amount, memo, None, None, None, None)
     }
 
     /// Lists a bill for Keel to pay. Keel still pays it only inside the
@@ -729,6 +765,45 @@ impl KeelVault {
 
     // -------------------------------------------------------------- callback
 
+    /// Cash buffer check: pays only if the vault still holds the buffer after
+    /// this payment and every other agent payment in flight. Otherwise undoes
+    /// the reservation, the daily spend and the bill mark, and pays nothing.
+    #[private]
+    pub fn on_balance_checked(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        agent_day: u64,
+        bill_ref: Option<String>,
+    ) -> PromiseOrValue<bool> {
+        #[allow(deprecated)]
+        let balance = match env::promise_result(0) {
+            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes).ok().map(|b| b.0),
+            _ => None,
+        };
+        let holds = balance.map_or(false, |b| b.saturating_sub(self.outflow) >= self.min_balance);
+        if holds {
+            return PromiseOrValue::Promise(self.pay(receiver_id, amount, memo, None, Some(agent_day), bill_ref, Some(true)));
+        }
+        self.outflow = self.outflow.saturating_sub(amount.0);
+        if agent_day == self.spent_day {
+            self.spent_today = self.spent_today.saturating_sub(amount.0);
+        }
+        if let Some(r) = &bill_ref {
+            self.paid_bills.remove(r);
+        }
+        emit(
+            "payment_refused",
+            json!({
+                "receiver_id": receiver_id, "amount": amount, "bill_ref": bill_ref,
+                "reason": if balance.is_some() { "would take the vault below its cash buffer" } else { "could not read the vault's balance" },
+                "min_balance": U128(self.min_balance),
+            }),
+        );
+        PromiseOrValue::Value(false)
+    }
+
     #[private]
     pub fn on_payment_done(
         &mut self,
@@ -737,9 +812,13 @@ impl KeelVault {
         amount: U128,
         agent_day: Option<u64>,
         bill_ref: Option<String>,
+        reserved: Option<bool>,
     ) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
+        if reserved == Some(true) {
+            self.outflow = self.outflow.saturating_sub(amount.0);
+        }
         if !ok {
             // Nothing was paid, so the bill can be paid again.
             if let Some(r) = &bill_ref {
@@ -819,6 +898,7 @@ impl KeelVault {
             per_payment_cap: U128(self.per_payment_cap),
             daily_cap: U128(self.daily_cap),
             spent_today: U128(self.spent_on(today())),
+            min_balance: U128(self.min_balance),
             paused: self.paused,
             allowlist: self.allowlist.iter().cloned().collect(),
             blocklist: self.blocklist.iter().cloned().collect(),
@@ -993,6 +1073,7 @@ impl KeelVault {
         proposal_id: Option<u64>,
         agent_day: Option<u64>,
         bill_ref: Option<String>,
+        reserved: Option<bool>,
     ) -> Promise {
         ext_ft::ext(self.token_id.clone())
             .with_attached_deposit(STORAGE_DEPOSIT)
@@ -1007,7 +1088,7 @@ impl KeelVault {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
-                    .on_payment_done(proposal_id, receiver_id, amount, agent_day, bill_ref),
+                    .on_payment_done(proposal_id, receiver_id, amount, agent_day, bill_ref, reserved),
             )
     }
 }

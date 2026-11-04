@@ -81,6 +81,8 @@ export interface Policy {
   per_payment_cap: string;
   daily_cap: string;
   spent_today: string;
+  /** Cash buffer Keel's payments must leave in the vault; missing on vaults created before it existed. */
+  min_balance?: string;
   paused: boolean;
   allowlist: string[];
   blocklist: string[];
