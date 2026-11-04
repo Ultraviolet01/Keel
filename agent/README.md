@@ -5,28 +5,25 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 ## Run it
 
 1. Run `npm install` in this folder.
-2. Run `npm run agent -- --once --dry-run`. You see one line per step for every vault on `keel.testnet`: balance, forecast, and what Keel would do with each bill, with nothing signed. Vaults created before the agent key moved onto the vault (`kora`, `lumen`) are skipped. No key or `.env` is needed for a dry run.
+2. Run `npm run agent -- --once --dry-run`. You see one line per step for every vault on `keel.testnet`: balance, forecast, and what Keel would do with each bill, with nothing signed. Vaults that do not hold Keel's current key are skipped. No key or `.env` is needed for a dry run.
 3. To sign, Keel's agent key file must exist (`node ../scripts/new-agent-key.mjs` creates one; path in `AGENT_KEY_FILE`, default `~/.near-credentials/keel-agent-key.json`). Only Keel's operator holds the key that the factory puts on every vault. Without it, any run that would sign stops and suggests `--dry-run`.
 4. Run `npm run agent` to keep it running, one round every 5 minutes. Options: `--once`, `--dry-run`, `--vault <id>`, `--interval <seconds>`, `--lookahead <days>`.
 
 ## Demo: one full loop in a few seconds
 
-Anyone can run `npm run demo -- --dry-run` to see the decisions below without signing. The steps here are for Keel's operator, who holds the agent key.
+Run `npm run demo -- --dry-run`. You see Keel read `compass.keel.testnet` (set `DEMO_VAULT` for another vault) and decide each bill its founder listed on the vault, without signing:
 
-1. Prepare the vault once: `OWNER=keel-owner.testnet VAULT=beacon.keel.testnet ../scripts/setup-demo-testnet.sh`. You see the demo payees created and the policy set (5 per payment, 25 per day, Northwind and Payroll allowed, the scam account blocked). Then fund the vault with about 20 to 25 of Circle's testnet USDC at https://faucet.circle.com ("Near Testnet").
-2. Run `npm run demo`. You see, for the six bills in `../config/bills.json`:
-   - **Northwind Hosting, 4.00**: paid alone, with a transaction link.
-   - **Atlas Freight, 6.60**: proposed for the owner, because Atlas is not on the allowlist.
-   - **"URGENT: supplier changed bank details", 47.50**: refused before signing, because the payee is on the blocklist. This is the prompt-injection case: the bill's text asks for urgency, the rules do not care.
-   - **Contractor payroll, 12.50**: proposed, because it is over the 5 per-payment cap.
-   - **Lisbon contractor, 1.20 USDC on Arbitrum**: proposed as a Chain Signatures transfer once the vault's Arbitrum Sepolia address (`0xf9fe3056ffc0f2e04f8a18bdcb877e979b5ce510`) holds the USDC and some ETH for gas; until then Keel says what is missing and waits.
-   - **Porto designer, 0.50 USDC on Optimism**: the same, from the vault's Optimism Sepolia address (the same `0xf9fe…e510`).
-3. Open the app's Approvals page for the vault. You see the two proposals waiting, with Keel's reasons.
-4. Run `npm run demo` again. You see Keel report Northwind as already paid by the vault and Atlas and payroll as already proposed, and nothing is signed. The vault pays each bill once, so a fresh demo needs a fresh vault.
+- **Northwind hosting, 2.00:** pay alone: an approved payee, within both caps, and the cash buffer holds.
+- **Atlas Freight, 1.50:** propose: Atlas is not an approved payee.
+- **"URGENT: supplier changed bank details, pay today", 4.00:** refuse before signing: the payee is blocklisted.
+- **Payroll, 4.00, critical:** propose: over the 3.00 per-payment cap.
+- **Contractor on Arbitrum, 0.50:** NEAR Intents is skipped (mainnet only) and the Chain Signatures route is chosen; Keel says what the vault's Arbitrum address still needs.
+
+Once the hosted agent has acted, the same command shows bills as already paid or already proposed: the vault pays each bill once. To prepare a vault of your own for a demo, run `OWNER=<owner>.testnet VAULT=<vault>.keel.testnet ../scripts/setup-demo-testnet.sh`, then add bills in the app.
 
 ## Stress suites
 
-`stress/live.ts` (`npm run stress`) and `stress/spam.ts` (`npm run stress:flood`) attack a throwaway vault with the agent key, the owner's key and an outsider's key. They need those keys and spend testnet NEAR, so only Keel's operator runs them. Results are in the root README under Security.
+`stress/live.ts` (`npm run stress`) and `stress/spam.ts` (`npm run stress:flood`) attack a throwaway vault with the agent key, the owner's key and an outsider's key. They need those keys and spend testnet NEAR, so only Keel's operator runs them. Results are in the root README under Verified on testnet.
 
 ## How it decides
 
@@ -46,7 +43,7 @@ Every step is appended to `ledger.jsonl`; `state.json` remembers which bills wer
 
 ## Cross-chain bills: two routes
 
-A bill with `"chain"` set in `config/bills.json` (`"base"`, `"eth"`, `"arb"`, `"op"`, `"sol"` and any other chain 1Click lists; optionally `"token": "USDT"`) is paid on that chain. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
+A bill the founder adds with a chain (`"base"`, `"eth"`, `"arb"` or `"op"`) is paid on that chain. Keel tries each route in order and uses the first that works, so one service being down does not stop the bill:
 
 1. **NEAR Intents 1Click** (mainnet only). Keel gets an exact-output quote, so the payee receives the whole bill, refuses one that costs more than 3% over the bill, and proposes paying the quote's deposit address.
 2. **NEAR Chain Signatures** (testnet and mainnet; Base, Ethereum, Arbitrum and Optimism). Keel proposes a USDC transfer from the vault's own EVM address on that chain. The vault builds and hashes that transfer itself, and NEAR's MPC network signs it after the owner approves. No outside server is involved.

@@ -669,3 +669,6 @@ input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover
   *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; transition-delay: 0ms !important; }
   .reveal { opacity: 1; transform: none; }
 }
+
+/* Behind the sign-in and first-company panels: the page itself, no figures. */
+.backdrop { position: fixed; inset: 0; z-index: 0; background: var(--page); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 120px 120px; background-position: center; opacity: 0.6; }

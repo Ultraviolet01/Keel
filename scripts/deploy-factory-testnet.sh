@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploys the Keel factory, which creates one vault per founder at sign-up.
 #
-#   FACTORY=keel.testnet TOKEN=usdc.keel-owner.testnet scripts/deploy-factory-testnet.sh
+#   FACTORY=keel.testnet TOKEN=3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af scripts/deploy-factory-testnet.sh
 #
 # FACTORY must already exist with its full-access key in ~/.near-credentials
 # (for example `near account create-account sponsor-by-faucet-service ...`).
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 : "${FACTORY:?Set FACTORY, for example FACTORY=keel.testnet}"
-: "${TOKEN:?Set TOKEN to the USDC contract, for example TOKEN=usdc.keel-owner.testnet}"
+: "${TOKEN:?Set TOKEN to the USDC contract, for example TOKEN=3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}"
 NET=testnet
 AGENT_KEY_FILE="${AGENT_KEY_FILE:-$HOME/.near-credentials/keel-agent-key.json}"
 [ -f "$AGENT_KEY_FILE" ] || { echo "No agent key at $AGENT_KEY_FILE. Run: node scripts/new-agent-key.mjs"; exit 1; }

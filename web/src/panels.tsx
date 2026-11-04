@@ -220,7 +220,7 @@ export function CreatePanel(props: {
 
         <label className="field">
           <span className="label">Company name</span>
-          <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Kora Supply Group" autoFocus />
+          <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Company name" autoFocus />
         </label>
         <label className="field">
           <span className="label">Vault address</span>
@@ -232,7 +232,7 @@ export function CreatePanel(props: {
                 setEdited(true);
                 setName(e.target.value.toLowerCase());
               }}
-              placeholder="kora"
+              placeholder="name"
             />
             <span className="suffix">.{FACTORY_ID}</span>
           </span>
@@ -385,14 +385,14 @@ export function LimitsPanel(props: {
           <label className="field">
             <span className="label">Per payment</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={perPayment} onChange={(e) => setPerPayment(e.target.value)} placeholder="100" />
+              <input className="num" inputMode="decimal" value={perPayment} onChange={(e) => setPerPayment(e.target.value)} placeholder="0.00" />
               <span className="suffix">{token.symbol}</span>
             </span>
           </label>
           <label className="field">
             <span className="label">Per day</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={perDay} onChange={(e) => setPerDay(e.target.value)} placeholder="500" />
+              <input className="num" inputMode="decimal" value={perDay} onChange={(e) => setPerDay(e.target.value)} placeholder="0.00" />
               <span className="suffix">{token.symbol}</span>
             </span>
           </label>
@@ -401,7 +401,7 @@ export function LimitsPanel(props: {
           <label className="field">
             <span className="label">Cash buffer</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={buffer} onChange={(e) => setBuffer(e.target.value)} placeholder="500" />
+              <input className="num" inputMode="decimal" value={buffer} onChange={(e) => setBuffer(e.target.value)} placeholder="0.00" />
               <span className="suffix">{token.symbol}</span>
             </span>
             <span className="hint">Keel never pays if the vault would hold less than this. Bills not marked critical wait until they are due, then come to you.</span>
@@ -409,7 +409,7 @@ export function LimitsPanel(props: {
         )}
         <label className="field">
           <span className="label">Payees Keel may pay alone</span>
-          <textarea className="mono-input" rows={3} value={payees} onChange={(e) => setPayees(e.target.value)} placeholder={"northwind.near\npayroll.kora.near"} />
+          <textarea className="mono-input" rows={3} value={payees} onChange={(e) => setPayees(e.target.value)} placeholder={"One NEAR account per line"} />
           <span className="hint">One NEAR account per line</span>
         </label>
         <label className="field">
@@ -418,7 +418,7 @@ export function LimitsPanel(props: {
         </label>
         <label className="field">
           <span className="label">Reason for the ledger</span>
-          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Initial limits" />
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why you are changing them" />
         </label>
 
         {(problem || error) && <p className="error">{problem ?? error}</p>}
@@ -528,19 +528,19 @@ export function PayPanel(props: { vaultId: string; token: TokenMetadata; balance
         <p className="lead">Paid from the vault straight away with your signature. Your limits bind Keel's agent, not you.</p>
         <label className="field">
           <span className="label">Pay to</span>
-          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="northwind.testnet" autoFocus />
+          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder="account.testnet" autoFocus />
         </label>
         <label className="field">
           <span className="label">Amount</span>
           <span className="input-group">
-            <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="80" />
+            <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
             <span className="suffix">{props.token.symbol}</span>
           </span>
           <span className="hint">Vault holds {formatToken(props.balance, props.token.decimals)} {props.token.symbol}</span>
         </label>
         <label className="field">
           <span className="label">Memo</span>
-          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" />
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice number or note" />
         </label>
         {(error || (to && amount && problem)) && <p className="error">{error ?? problem}</p>}
         <button className="btn primary lg block" onClick={pay} disabled={busy || Boolean(problem)}>
@@ -711,7 +711,7 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
         )}
         <label className="field">
           <span className="label">What is it</span>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Domain renewal" maxLength={80} />
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="What the bill is for" maxLength={80} />
         </label>
         <div className="two">
           <label className="field">
@@ -756,14 +756,14 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
               ))}
             </select>
           )}
-          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder={chain ? "0x…" : "or type a NEAR account, like northwind.testnet"} />
+          <input className="mono-input" value={to} onChange={(e) => setTo(e.target.value)} placeholder={chain ? "0x…" : "or type a NEAR account"} />
           {outcome && <span className={`hint ${outcome.cls}`}>{outcome.text}</span>}
         </label>
         <div className="two">
           <label className="field">
             <span className="label">Amount</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15" />
+              <input className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
               <span className="suffix">{props.token.symbol}</span>
             </span>
           </label>
@@ -774,7 +774,7 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
         </div>
         <label className="field">
           <span className="label">Note (optional)</span>
-          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice 1042" maxLength={140} />
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Invoice number or note" maxLength={140} />
         </label>
         {props.policy.min_balance !== undefined && (
           <label className="check">
@@ -868,7 +868,7 @@ export function PayeePanel(props: {
         </p>
         <label className="field">
           <span className="label">Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Company card" maxLength={80} autoFocus />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" maxLength={80} autoFocus />
         </label>
         <label className="field">
           <span className="label">Kind</span>
@@ -885,7 +885,7 @@ export function PayeePanel(props: {
         </label>
         <label className="field">
           <span className="label">NEAR account</span>
-          <input className="mono-input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="card.yourcompany.testnet" />
+          <input className="mono-input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="account.testnet" />
         </label>
         {isYield && lendingReady && (
           <label className="check">
@@ -907,7 +907,7 @@ export function PayeePanel(props: {
           <label className="field">
             <span className="label">Most Keel may move at once</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={maxMove} onChange={(e) => setMaxMove(e.target.value)} placeholder="200" />
+              <input className="num" inputMode="decimal" value={maxMove} onChange={(e) => setMaxMove(e.target.value)} placeholder="0.00" />
               <span className="suffix">{props.token.symbol}</span>
             </span>
             <span className="hint">The vault refuses any larger move. Bringing money back is up to you, from that account.</span>
@@ -917,7 +917,7 @@ export function PayeePanel(props: {
           <label className="field">
             <span className="label">Keep this much in it (optional)</span>
             <span className="input-group">
-              <input className="num" inputMode="decimal" value={keepAt} onChange={(e) => setKeepAt(e.target.value)} placeholder="300" />
+              <input className="num" inputMode="decimal" value={keepAt} onChange={(e) => setKeepAt(e.target.value)} placeholder="0.00" />
               <span className="suffix">{props.token.symbol}</span>
             </span>
             <span className="hint">Keel tops it back up to this when it holds less, at most once a day and within your caps.</span>

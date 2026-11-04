@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
-import { SampleApp } from "./Sample";
 import { BillPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
 import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
@@ -122,17 +121,17 @@ export default function App() {
   if (readOnly && accountId && (!isAccountId(accountId) || (vaults !== null && vaults.length === 0))) {
     return (
       <>
-        <SampleApp />
+        <div className="backdrop" aria-hidden="true" />
         <ViewNotice accountId={accountId} invalid={!isAccountId(accountId)} />
       </>
     );
   }
 
-  // 1. Not connected: the app, blurred, behind the Connect wallet panel.
+  // 1. Not connected: the Connect wallet panel on a plain backdrop.
   if (!accountId) {
     return (
       <>
-        <SampleApp />
+        <div className="backdrop" aria-hidden="true" />
         <ConnectPanel onConnect={connect} error={error} />
       </>
     );
@@ -142,7 +141,7 @@ export default function App() {
   if (vaults !== null && vaults.length === 0 && config) {
     return (
       <>
-        <SampleApp />
+        <div className="backdrop" aria-hidden="true" />
         <CreatePanel
           accountId={accountId}
           config={config}

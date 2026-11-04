@@ -162,10 +162,12 @@ await check("testnet: demo dry run decides every bill", async () => {
 });
 
 await check("testnet: cross-chain bill reaches Chain Signatures", async () => {
-  const out = await needOk("npm", ["run", "-s", "agent", "--", "--once", "--dry-run", "--vault", "vega.keel.testnet"], join(ROOT, "agent"), "agent --dry-run");
-  if (!/via NEAR Chain Signatures|already paid on base/.test(out)) throw new Error("no Chain Signatures decision in the output");
-  if (!/NEAR Intents runs on mainnet only|Would propose paying from the vault's own/.test(out)) throw new Error("route choice not shown");
-  return "1Click skipped on testnet, Chain Signatures chosen";
+  const out = await needOk("npm", ["run", "-s", "agent", "--", "--once", "--dry-run", "--vault", "compass.keel.testnet"], join(ROOT, "agent"), "agent --dry-run");
+  // The Arbitrum bill: NEAR Intents is skipped on testnet, and the vault's own address is the route,
+  // either proposed, already proposed or paid, or waiting for that address to be funded.
+  if (!/NEAR Intents runs on mainnet only|already proposed|already paid on arb/.test(out)) throw new Error("no cross-chain decision in the output");
+  if (!/Chain ?Signatures|already proposed|already paid on arb/.test(out)) throw new Error("the Chain Signatures route was not reached");
+  return "1Click skipped on testnet, Chain Signatures route reached";
 });
 
 // The payments recorded in the README, checked on each chain: success, from the vault's own address.

@@ -66,7 +66,7 @@ function Ship() {
           Your line
         </text>
         <text x="852" y="475" fill="#c9d6d9" fontFamily="Hanken Grotesk, sans-serif" fontSize="12">
-          100 USDC per payment
+          the limit you set
         </text>
       </g>
       </g>
@@ -127,11 +127,11 @@ function Scene() {
     <div className="scene" role="img" aria-label="A container ship marked with its load line. Light loads stay under the line; a heavy one sinks past it and waits for the owner.">
       <div className="scene-caption">
         <div className="cap light">
-          <b className="serif">Paying Northwind Hosting, 80 USDC</b>
+          <b className="serif">A payment inside your limit</b>
           <span>Under the line, so Keel pays it alone</span>
         </div>
         <div className="cap heavy">
-          <b className="serif">Funding payroll, 8,000 USDC</b>
+          <b className="serif">A payment over your limit</b>
           <span>Over the line, so it waits for your signature</span>
         </div>
       </div>

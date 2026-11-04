@@ -28,7 +28,6 @@ import { balances, broadcast, chainInfo, client, knownChain, prepareTransfer, re
 
 const STATE_FILE = resolve(import.meta.dirname, "../state.json");
 const LEDGER_FILE = resolve(import.meta.dirname, "../ledger.jsonl");
-const BILLS_FILE = resolve(import.meta.dirname, "../../config/bills.json");
 
 export interface State {
   handled: Record<
@@ -49,52 +48,6 @@ export function loadState(): State {
 
 export function saveState(s: State) {
   writeFileSync(STATE_FILE, JSON.stringify(s, (_k, v) => (typeof v === "bigint" ? `${v}n` : v), 2));
-}
-
-interface RawBill {
-  id: string;
-  payee: string;
-  amount: string; // in whole tokens, for example "132.00"
-  due: string; // YYYY-MM-DD, or "+N" for N days from today
-  memo?: string;
-  chain?: string;
-  token?: string;
-}
-
-/**
- * Reads the vault's bills. A bill with a bad amount, date, id or payee is
- * skipped and reported through `bad`, so one typo never stops the others.
- */
-export function loadBills(vaultId: string, decimals: number, today: string, bad: (msg: string) => void = () => {}): Bill[] {
-  if (!existsSync(BILLS_FILE)) return [];
-  let all: Record<string, RawBill[]>;
-  try {
-    all = JSON.parse(readFileSync(BILLS_FILE, "utf8"));
-  } catch (e) {
-    bad(`config/bills.json is not valid JSON (${String(e).slice(0, 80)}); no bills read`);
-    return [];
-  }
-  const out: Bill[] = [];
-  const seen = new Set<string>();
-  for (const b of Array.isArray(all[vaultId]) ? all[vaultId] : []) {
-    try {
-      if (typeof b?.id !== "string" || !/^[\w.:-]{1,64}$/.test(b.id)) throw new Error("id must be 1 to 64 letters, digits or - _ . :");
-      if (seen.has(b.id)) throw new Error("duplicate id");
-      if (typeof b.payee !== "string" || !b.payee) throw new Error("payee is missing");
-      if (typeof b.due !== "string") throw new Error("due is missing");
-      if (b.token !== undefined && (typeof b.token !== "string" || !/^[A-Za-z0-9.]{1,12}$/.test(b.token))) throw new Error("token must be a symbol like USDT");
-      if (b.token !== undefined && !b.chain) throw new Error("token needs a chain");
-      const amount = toUnits(String(b.amount), decimals);
-      if (amount <= 0n) throw new Error("amount must be above zero");
-      const due = /^\+\d{1,4}$/.test(b.due) ? addDays(today, Number(b.due.slice(1))) : b.due;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(`${due}T00:00:00Z`))) throw new Error(`due "${b.due}" is not YYYY-MM-DD or +N`);
-      seen.add(b.id);
-      out.push({ ...b, amount, due });
-    } catch (e) {
-      bad(`skipped bill ${JSON.stringify(b?.id ?? "?")}: ${e instanceof Error ? e.message : e}`);
-    }
-  }
-  return out;
 }
 
 /** "1,234.50" to smallest units. Rejects signs, exponents and anything else. */
@@ -138,7 +91,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const [cash, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
   let balance = cash;
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
-  // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
+  // Bills the owner listed on the vault: the only source of work for Keel.
   // Top-ups for the owner's card and own wallets that run below their target.
   const allPayees = (await chain.payees(vaultId)).filter((p) => !policy.blocklist.includes(p.account_id));
   // The yield investment at a lending market (Burrow) the owner approved.
@@ -148,8 +101,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const held: Record<string, bigint> = {};
   for (const p of payees) held[p.account_id] = await chain.balance(policy.token_id, p.account_id).catch(() => 0n);
   const listed = [...vaultBills(await chain.bills(vaultId), o.today), ...topUps(payees, held, o.today)];
-  const ids = new Set(listed.map((b) => b.id));
-  const bills = [...listed, ...loadBills(vaultId, meta.decimals, o.today, (msg) => say("observe", msg)).filter((b) => !ids.has(b.id))];
+  const bills = listed;
   const handled = (state.handled[vaultId] ??= {});
   const open = bills.filter((b) => !handled[b.id]);
   say("observe", `balance ${money(balance)}, ${proposals.filter((p) => p.status === "pending").length} proposals waiting, ${open.length} open bills`);

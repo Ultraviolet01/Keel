@@ -303,7 +303,7 @@ function UpcomingBills({ p }: { p: PageProps }) {
         )}
       </div>
       {d.bills === null ? (
-        <div className="empty">This vault was created before bills could be listed on it, so Keel reads its bills from the repository's config/bills.json.</div>
+        <div className="empty">This vault's contract cannot hold bills, so Keel has nothing to pay from it. Create a new company to list bills for Keel.</div>
       ) : dues.length === 0 ? (
         <div className="empty">No bills yet. Add one, like hosting or payroll, and Keel pays it when it is due.</div>
       ) : (
@@ -442,7 +442,7 @@ function Forecast({ d }: { d: VaultData }) {
       </div>
       <p className="muted tiny">
         {d.bills === null
-          ? "This vault's bills live in the repository's config/bills.json; the chart shows its balance only."
+          ? "This vault's contract cannot hold bills; the chart shows its balance only."
           : dues.length === 0
             ? "No unpaid bills in the next 14 days, so the balance stays flat."
             : short

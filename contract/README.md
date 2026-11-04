@@ -46,7 +46,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 
 ## Design notes
 
-- **The agent key lives on the vault account.** Whoever deploys the vault (the factory) adds the agent's public key as a function-call key on the vault account, limited to `execute_payment`, `propose_payment` and `recall_from_yield` (vaults created before Nov 4: the first two). The agent signs as the vault, and `assert_agent` checks both that the call came from the vault account and that the agent key signed it. The owner manages the key through `revoke_agent` and `set_agent_key`, which delete and add keys on the vault's own account.
+- **The agent key lives on the vault account.** Whoever deploys the vault (the factory) adds the agent's public key as a function-call key on the vault account, limited to `execute_payment`, `propose_payment` and `recall_from_yield`. The agent signs as the vault, and `assert_agent` checks both that the call came from the vault account and that the agent key signed it. The owner manages the key through `revoke_agent` and `set_agent_key`, which delete and add keys on the vault's own account.
 - **Owner methods need 1 yoctoNEAR attached.** Function-call keys cannot attach a deposit, so only a full-access key can approve, change the policy or pause.
 - **Refusals are failed transactions.** When the vault refuses, the call panics with `Keel Vault refused: <reason>`. The failed receipt is the on-chain proof of the refusal.
 - **Every payment registers the payee first.** The vault calls `storage_deposit` with `registration_only: true` and 0.00125 NEAR, which the token refunds if the payee is already registered. Then it calls `ft_transfer` with 1 yoctoNEAR.
