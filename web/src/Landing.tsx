@@ -3,7 +3,7 @@
 // load line when a payment needs the owner's signature.
 
 import { useEffect, useState } from "react";
-import { APP, REPO, SiteNav } from "./guide";
+import { APP, REPO, SiteNav, useReveal } from "./guide";
 
 const CONTAINER_COLORS = ["#0f5d5a", "#5b6870", "#c4922e", "#0f5d5a", "#d9e2e5", "#174a54", "#a9c6d0"];
 
@@ -159,6 +159,7 @@ function Scene() {
 }
 
 export default function Landing() {
+  useReveal(".l-how h2, .l-how li, .l-how .l-more, .l-dark > div, .l-cta > *");
   return (
     <div className="landing">
       <SiteNav />

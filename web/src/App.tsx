@@ -239,7 +239,9 @@ export default function App() {
           {vault.error ? (
             <p className="error">This vault could not be read: {vault.error}</p>
           ) : pageProps ? (
-            <PageView {...pageProps} />
+            <div className="page-in" key={`${page}:${selected}`}>
+              <PageView {...pageProps} />
+            </div>
           ) : (
             <p className="muted">Loading {selected ?? "your companies"}</p>
           )}

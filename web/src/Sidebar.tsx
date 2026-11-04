@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { companyName } from "./near";
 import { Check, ChevronsUpDown, Grid, Inbox, List, Pause, Play, Plus, Sliders, Users, Wallet } from "./icons";
 import type { KeelState } from "./vault";
@@ -39,6 +39,23 @@ export function Sidebar(props: {
   /** The selected vault's owner, as the vault itself records it. */
   owner?: string | null;
 }) {
+  // The highlight behind the active tab slides to the tab you pick (and
+  // follows it along the tab row on phones) instead of jumping.
+  const navRef = useRef<HTMLElement>(null);
+  const [ind, setInd] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const nav = navRef.current;
+      const el = nav?.querySelector<HTMLButtonElement>("button.active");
+      if (!nav || !el) return setInd(null);
+      setInd({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });
+      if (nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: el.offsetLeft - nav.clientWidth / 2 + el.offsetWidth / 2, behavior: "smooth" });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [props.page, props.selected, props.pendingCount]);
+
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -135,7 +152,8 @@ export function Sidebar(props: {
         )}
       </div>
 
-      <nav className="nav">
+      <nav className="nav" ref={navRef}>
+        {ind && <span className="nav-ind" aria-hidden="true" style={{ transform: `translate(${ind.x}px, ${ind.y}px)`, width: ind.w, height: ind.h }} />}
         {NAV.map(({ page, label, Icon }) => (
           <button
             key={page}

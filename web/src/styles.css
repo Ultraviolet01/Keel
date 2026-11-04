@@ -22,6 +22,7 @@
   --sans: "Hanken Grotesk", system-ui, sans-serif;
   --mono: "Geist Mono", ui-monospace, monospace;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --spring: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -112,10 +113,14 @@ a.btn { text-decoration: none; }
 .opt.add .mark { background: transparent; border: 1px dashed #b9c7c7; }
 .divider { height: 1px; background: var(--line); margin: 6px 4px; }
 .account-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px 4px; }
-.nav { margin-top: 24px; display: flex; flex-direction: column; gap: 2px; }
-.nav button { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink-2); font-weight: 500; text-align: left; cursor: pointer; transition: background-color 150ms var(--ease); }
-.nav button:hover:not(:disabled) { background: var(--surface); }
-.nav button.active { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.nav { position: relative; margin-top: 24px; display: flex; flex-direction: column; gap: 2px; }
+.nav-ind { position: absolute; left: 0; top: 0; z-index: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 1px 2px rgba(15, 47, 58, 0.06); pointer-events: none; transition: transform 320ms var(--spring), width 320ms var(--spring), height 320ms var(--spring); }
+.nav button { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink-2); font-weight: 500; text-align: left; cursor: pointer; transition: color 200ms var(--ease), background-color 200ms var(--ease); }
+.nav button svg { transition: transform 220ms var(--spring), color 200ms var(--ease); }
+.nav button:hover:not(:disabled):not(.active) { background: rgba(255, 255, 255, 0.55); color: var(--ink); }
+.nav button:hover:not(:disabled) svg { transform: translateX(2px); }
+.nav button.active { color: var(--ink); }
+.nav button.active svg { color: var(--teal); }
 .nav button:disabled { opacity: 0.5; cursor: default; }
 .nav .count { margin-left: auto; }
 .status-box { margin-top: auto; padding: 14px 16px 16px; border-radius: 12px; background: var(--ink); color: #fff; }
@@ -541,3 +546,126 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
 .l-more.light { color: #cfe3e0; }
 .docs-next { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
 .docs-next .btn { margin-top: 0; }
+
+/* ------------------------------------------------------------------ motion
+   One system for the whole site: buttons lift and press, pages and panels
+   ease in, lists stagger, sections reveal on scroll. All of it switches off
+   for people who ask their system for reduced motion. */
+html { scroll-behavior: smooth; }
+
+.btn { transition: background-color 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease), box-shadow 220ms var(--ease), transform 180ms var(--spring); will-change: transform; }
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15, 47, 58, 0.08); }
+.btn.primary:hover:not(:disabled) { box-shadow: 0 6px 18px rgba(11, 92, 85, 0.28); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(0.97); box-shadow: none; transition-duration: 80ms; }
+.btn:focus-visible, .link-btn:focus-visible, .nav button:focus-visible, .company-card:focus-visible, .opt:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(11, 92, 85, 0.25); }
+.btn svg { transition: transform 220ms var(--spring); }
+.btn:hover:not(:disabled) svg { transform: scale(1.08); }
+.link-btn { position: relative; transition: color 180ms var(--ease), opacity 180ms var(--ease); }
+.link-btn::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: left; transition: transform 240ms var(--spring); }
+.link-btn:hover:not(:disabled)::after { transform: scaleX(1); }
+.link-btn:disabled { opacity: 0.5; cursor: default; }
+
+.company-card { transition: border-color 180ms var(--ease), box-shadow 220ms var(--ease), transform 180ms var(--spring); }
+.company-card:hover { box-shadow: 0 4px 14px rgba(15, 47, 58, 0.08); }
+.company-card:active { transform: scale(0.99); }
+.opt { transition: background-color 160ms var(--ease), transform 160ms var(--spring); }
+.opt:active { transform: scale(0.99); }
+
+.card { transition: border-color 200ms var(--ease), box-shadow 240ms var(--ease), transform 240ms var(--spring); }
+.wallet, .add-wallet { cursor: default; }
+.wallet:hover, .needs:hover { box-shadow: 0 6px 20px rgba(15, 47, 58, 0.07); }
+.pill, .tag, .count { transition: background-color 240ms var(--ease), color 240ms var(--ease); }
+.count { animation: keel-pop 360ms var(--spring); }
+@keyframes keel-pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+input, textarea, select { transition: border-color 160ms var(--ease), box-shadow 200ms var(--ease), background-color 160ms var(--ease); }
+input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover:not(:focus) { border-color: #b9c7c7; }
+.check input { transition: transform 160ms var(--spring); }
+.check input:active { transform: scale(0.9); }
+
+/* Page switch: the new page fades and rises; its blocks follow in turn. */
+.page-in { animation: keel-page 340ms var(--spring) both; }
+.page-in > * { animation: keel-rise 420ms var(--spring) both; }
+.page-in > *:nth-child(1) { animation-delay: 0ms; }
+.page-in > *:nth-child(2) { animation-delay: 50ms; }
+.page-in > *:nth-child(3) { animation-delay: 100ms; }
+.page-in > *:nth-child(4) { animation-delay: 150ms; }
+.page-in > *:nth-child(5) { animation-delay: 200ms; }
+.page-in > *:nth-child(n + 6) { animation-delay: 240ms; }
+@keyframes keel-page { from { opacity: 0; } to { opacity: 1; } }
+@keyframes keel-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* Lists: rows slide in one after another. */
+.decisions li, .bills li, .queue li, .plain li, .checklist .ck { animation: keel-row 380ms var(--spring) both; }
+.decisions li:nth-child(2), .bills li:nth-child(2), .queue li:nth-child(2), .plain li:nth-child(2), .checklist .ck:nth-child(2) { animation-delay: 40ms; }
+.decisions li:nth-child(3), .bills li:nth-child(3), .queue li:nth-child(3), .plain li:nth-child(3), .checklist .ck:nth-child(3) { animation-delay: 80ms; }
+.decisions li:nth-child(4), .bills li:nth-child(4), .queue li:nth-child(4), .plain li:nth-child(4), .checklist .ck:nth-child(4) { animation-delay: 120ms; }
+.decisions li:nth-child(5), .bills li:nth-child(5), .queue li:nth-child(5), .plain li:nth-child(5), .checklist .ck:nth-child(5) { animation-delay: 160ms; }
+.decisions li:nth-child(n + 6), .bills li:nth-child(n + 6), .queue li:nth-child(n + 6), .plain li:nth-child(n + 6), .checklist .ck:nth-child(n + 6) { animation-delay: 200ms; }
+@keyframes keel-row { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.bills li, .decisions li { transition: background-color 160ms var(--ease); }
+.bills li:hover, .decisions li:hover { background: rgba(11, 92, 85, 0.03); }
+
+/* Panels: the backdrop fades, the panel rises into place. */
+.scrim { animation: keel-fade 200ms var(--ease) both; }
+.scrim > .panel, .scrim > .card { animation: keel-panel 340ms var(--spring) both; }
+@keyframes keel-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes keel-panel { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+.app { transition: filter 260ms var(--ease); }
+.error { animation: keel-shake 320ms var(--ease); }
+@keyframes keel-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.switcher { animation: keel-drop 220ms var(--spring) both; transform-origin: top; }
+@keyframes keel-drop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* Landing and guide pages: sections reveal as they scroll into view. */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 600ms var(--spring), transform 700ms var(--spring); }
+.reveal.in { opacity: 1; transform: none; }
+.l-how li.reveal:nth-child(2) { transition-delay: 90ms; }
+.l-how li.reveal:nth-child(3) { transition-delay: 180ms; }
+.l-how li { transition: transform 260ms var(--spring); }
+.l-how li.in:hover { transform: translateY(-3px); }
+.l-nav { transition: box-shadow 240ms var(--ease); }
+.l-nav nav a:not(.btn) { position: relative; transition: color 180ms var(--ease); }
+.l-nav nav a:not(.btn)::after { content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 2px; border-radius: 1px; background: var(--teal); transform: scaleX(0); transition: transform 260ms var(--spring); }
+.l-nav nav a:not(.btn):hover { color: var(--ink); }
+.l-nav nav a:not(.btn):hover::after, .l-nav nav a[aria-current="page"]::after { transform: scaleX(1); }
+.l-more { transition: transform 220ms var(--spring); display: inline-block; }
+.l-more:hover { transform: translateX(3px); }
+.keys li { transition: background-color 180ms var(--ease); }
+.docs-toc a { position: relative; padding-left: 12px; transition: color 180ms var(--ease); }
+.docs-toc a::before { content: ""; position: absolute; left: 0; top: 50%; width: 2px; height: 0; border-radius: 1px; background: var(--teal); transform: translateY(-50%); transition: height 260ms var(--spring); }
+.docs-toc a.on { color: var(--ink); font-weight: 500; }
+.docs-toc a.on::before { height: 14px; }
+.docs-body tr { transition: background-color 160ms var(--ease); }
+.docs-body tbody tr:hover { background: rgba(11, 92, 85, 0.03); }
+
+/* Phones and small tablets: the sidebar becomes a compact header with a
+   scrolling tab row; the same highlight slides along it. */
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { padding: 12px 16px 0; gap: 0; min-width: 0; }
+  .switch, .company-card { max-width: 100%; min-width: 0; }
+  .sidebar > .wordmark { display: none; }
+  .nav { min-width: 0; flex-direction: row; gap: 4px; margin: 12px -16px 0; padding: 0 16px 10px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav button { flex: 0 0 auto; height: 34px; padding: 0 12px; }
+  .nav button:hover:not(:disabled) svg { transform: none; }
+  .status-box { margin: 0 0 12px; padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; }
+  .status-box p { margin: 0; grid-column: 1; }
+  .status-box .btn { grid-column: 2; grid-row: 1 / span 2; width: auto; padding: 0 12px; }
+  .head h1 { font-size: 30px; }
+  .tools { flex-wrap: wrap; }
+  .btn.lg { height: 46px; }
+  .panel { padding: 24px 20px; }
+  .scrim { align-items: flex-end; padding: 8px; }
+  .scrim > .panel { max-height: calc(100vh - 16px); border-radius: 16px; }
+}
+@media (hover: none) {
+  .btn:hover:not(:disabled) { transform: none; box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; transition-delay: 0ms !important; }
+  .reveal { opacity: 1; transform: none; }
+}

@@ -1,7 +1,50 @@
 // The site's guide pages (/how-it-works, /security, /docs) share this frame:
 // the landing nav, a contents list and one readable column.
 
+import { useEffect, useState } from "react";
+
 export const APP = "/app";
+
+/** Fades elements matching `selector` in as they scroll into view (once). */
+export function useReveal(selector: string) {
+  useEffect(() => {
+    const els = [...document.querySelectorAll<HTMLElement>(selector)];
+    if (!("IntersectionObserver" in window)) return;
+    els.forEach((el) => el.classList.add("reveal"));
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("in");
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.08 },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [selector]);
+}
+
+/** The id of the section heading nearest the top of the screen. */
+function useScrollSpy(ids: string[]) {
+  const [active, setActive] = useState(ids[0]);
+  useEffect(() => {
+    const onScroll = () => {
+      let cur = ids[0];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top < 140) cur = id;
+      }
+      setActive(cur);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [ids.join(",")]);
+  return active;
+}
 export const REPO = "https://github.com/Ultraviolet01/Keel";
 
 const NAV = [
@@ -32,6 +75,8 @@ export function SiteNav({ current }: { current?: string }) {
 }
 
 export function GuidePage(props: { path: string; title: string; lead: string; sections: readonly (readonly [string, string])[]; children: React.ReactNode }) {
+  useReveal(".docs-body > *");
+  const active = useScrollSpy(props.sections.map(([id]) => id));
   return (
     <div className="landing docs">
       <SiteNav current={props.path} />
@@ -39,7 +84,7 @@ export function GuidePage(props: { path: string; title: string; lead: string; se
         <aside className="docs-toc">
           <span className="muted small">On this page</span>
           {props.sections.map(([id, title]) => (
-            <a key={id} href={`#${id}`}>
+            <a key={id} href={`#${id}`} className={active === id ? "on" : undefined}>
               {title}
             </a>
           ))}
