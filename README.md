@@ -12,7 +12,7 @@ Keel is an AI treasury agent that keeps a small company's stablecoin wallets fun
 - **What the owner does:** sets limits, a cash buffer, payees and bills in the app; an invoice can be uploaded and Claude fills in the bill for the owner to check.
 - **What it cannot do:** spend past a cap or below the cash buffer, pay a blocklisted address, add its own payees or bills, change its own rules, withdraw its yield investment anywhere but the vault, or move NEAR. The vault refuses those calls, whatever the agent decides.
 
-Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
+Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
 **Just want to look?** Open https://keel-treasury.vercel.app (the landing page), then https://keel-treasury.vercel.app/app?view=keel-owner.testnet to see a founder's companies read-only with live testnet data. To act as a founder, open `/app` and connect a NEAR testnet wallet. The site is the `web/` app on Vercel; it holds no keys and every signature happens in the visitor's own wallet.
 
