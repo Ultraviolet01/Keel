@@ -20,7 +20,7 @@ Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Re
 
 | Part | What was used |
 | --- | --- |
-| NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**. Vaults created now, including the demo vault `beacon.keel.testnet`, hold and pay **Circle's testnet USDC on NEAR** (`3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`). Earlier vaults (`anchor`, `orbit`, `nova` and others) used **Keel Test USDC** (`usdc.keel-owner.testnet`, a token minted for Keel), and keep it |
+| NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**. Vaults created now, including the demo vault `beacon.keel.testnet`, hold and pay **Circle's testnet USDC on NEAR** (`3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`). |
 | Cross-chain payments through NEAR Chain Signatures | Real transactions on **Base, Ethereum, Arbitrum and Optimism Sepolia**, paying **Circle's test USDC** with testnet ETH for gas, signed by NEAR's testnet MPC network (`v1.signer-prod.testnet`). Links under [Live on testnet](#live-on-testnet) |
 | Cross-chain payments through NEAR Intents (1Click) | **Dry quotes only**, from the live 1Click service on mainnet: real prices and routes, nothing sent. NEAR Intents has no testnet, and no mainnet payment has been made |
 | Yield investment at Burrow | Real deposits and withdrawals at **Burrow's testnet lending market** (`contract.1638481328.burrow.testnet`), earning its live supply rate (about 10% a year on Nov 4). Burrow's testnet lends its own test USDC (`usdc.fakes.testnet`, shown as USDC.e), so the vault that invests there, `harvest.keel.testnet`, holds that token instead of Circle's |
