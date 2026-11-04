@@ -4,7 +4,7 @@ Rust smart contract (near-sdk 5.30) that holds the company's USDC and enforces t
 
 ## Run the tests
 
-1. Run `cargo test` in this folder. You see 76 tests pass.
+1. Run `cargo test` in this folder. You see 114 tests pass.
 2. Each rule in the root README has a test, for example `refuses_payment_over_cap`, `refuses_blocklisted_payee`, `agent_cannot_change_policy`, `pause_blocks_everything_until_resume`, `agent_cannot_pay_the_same_bill_twice`, `at_most_50_proposals_wait_at_once` and `signing_hash_matches_an_independent_encoder`.
 
 ## Build the wasm
@@ -23,7 +23,10 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason`, `valid_until_ms?`, `evm?`, `bill_ref?`. At most 50 wait at once |
 | `approve` | Owner, 1 yoctoNEAR | `proposal_id`. Refused after `valid_until_ms`; for an `evm` proposal it asks the MPC contract to sign (attach 300 Tgas) |
 | `reject` | Owner, 1 yoctoNEAR | `proposal_id` |
-| `update_policy` | Owner, 1 yoctoNEAR | `update: { per_payment_cap?, daily_cap?, allow?, disallow?, block?, unblock? }`, `reason` |
+| `update_policy` | Owner, 1 yoctoNEAR | `update: { per_payment_cap?, daily_cap?, min_balance?, allow?, disallow?, block?, unblock? }`, `reason`. `min_balance` is the cash buffer: with it set, `execute_payment` reads the vault's balance first and pays only if the buffer holds after this and every other agent payment in flight |
+| `add_bill` / `cancel_bill` | Owner, 1 yoctoNEAR | `bill: { id, payee, amount, due, monthly?, yearly?, category?, critical?, chain?, label, memo? }` / `id`. At most 50 |
+| `add_payee` / `remove_payee` | Owner, 1 yoctoNEAR | `payee: { account_id, name, kind, keep_at?, max_move?, lending? }` / `account_id`. Adding also allowlists; `kind` is vendor, employee, card, offramp, own, yield or other; `keep_at` only for card or own; `max_move` required for yield; `lending` only for yield |
+| `recall_from_yield` | Agent, or owner with 1 yoctoNEAR | `market`, `max_amount?` (in the market's units; omit for all). Withdraws from an approved lending market back into the vault; works while paused |
 | `pause` / `resume` | Owner, 1 yoctoNEAR | none |
 | `revoke_agent` | Owner, 1 yoctoNEAR | none. Deletes the agent key from the vault account |
 | `set_agent_key` | Owner, 1 yoctoNEAR | `agent_key`. Replaces the agent key (or adds one after a revoke) |
@@ -36,13 +39,14 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | `get_proposal` / `get_proposals` | Anyone (view) | `proposal_id` / `from_index?`, `limit?` |
 | `bill_paid_at` | Anyone (view) | `bill_ref` → time in ms, or `null` |
 | `pending_count` | Anyone (view) | none |
+| `get_bills` / `get_payees` | Anyone (view) | none |
 | `get_evm_route` | Anyone (view) | none → `routes`, MPC contract, path and predecessor for deriving the vault's EVM address |
 
 `evm` is `{ chain_id, token, to, nonce, max_fee_per_gas, max_priority_fee_per_gas, gas_limit }`. For an `evm` proposal, `receiver_id` is the payee's lowercase 0x address, so the blocklist applies to it.
 
 ## Design notes
 
-- **The agent key lives on the vault account.** Whoever deploys the vault (the factory) adds the agent's public key as a function-call key on the vault account, limited to `execute_payment` and `propose_payment`. The agent signs as the vault, and `assert_agent` checks both that the call came from the vault account and that the agent key signed it. The owner manages the key through `revoke_agent` and `set_agent_key`, which delete and add keys on the vault's own account.
+- **The agent key lives on the vault account.** Whoever deploys the vault (the factory) adds the agent's public key as a function-call key on the vault account, limited to `execute_payment`, `propose_payment` and `recall_from_yield` (vaults created before Nov 4: the first two). The agent signs as the vault, and `assert_agent` checks both that the call came from the vault account and that the agent key signed it. The owner manages the key through `revoke_agent` and `set_agent_key`, which delete and add keys on the vault's own account.
 - **Owner methods need 1 yoctoNEAR attached.** Function-call keys cannot attach a deposit, so only a full-access key can approve, change the policy or pause.
 - **Refusals are failed transactions.** When the vault refuses, the call panics with `Keel Vault refused: <reason>`. The failed receipt is the on-chain proof of the refusal.
 - **Every payment registers the payee first.** The vault calls `storage_deposit` with `registration_only: true` and 0.00125 NEAR, which the token refunds if the payee is already registered. Then it calls `ft_transfer` with 1 yoctoNEAR.

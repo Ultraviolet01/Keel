@@ -1,6 +1,6 @@
 # Keel agent
 
-The service that runs Keel's loop for every founder's vault: observe, forecast, check, decide, act, learn. It signs as each vault with Keel's agent key, which the factory put on every vault and which can only call `execute_payment` and `propose_payment`. The vault re-checks every limit on chain.
+The service that runs Keel's loop for every founder's vault: observe, forecast, check, decide, act, learn. It signs as each vault with Keel's agent key, which the factory put on every vault and which can only call `execute_payment`, `propose_payment` and, on vaults created since Nov 4, `recall_from_yield` (savings back into the vault only). The vault re-checks every limit on chain. The hosted copy runs every 15 minutes on GitHub Actions; see the main README.
 
 ## Run it
 
@@ -30,7 +30,7 @@ Anyone can run `npm run demo -- --dry-run` to see the decisions below without si
 
 ## How it decides
 
-All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` and `src/fuzz.test.ts` (`npm test`, 22 tests, about 37,000 generated cases):
+All decisions are plain code in `src/brain.ts`, tested in `src/brain.test.ts` and `src/fuzz.test.ts` (`npm test`, 30 tests, about 37,000 generated cases):
 
 | Step | Rule |
 | --- | --- |
