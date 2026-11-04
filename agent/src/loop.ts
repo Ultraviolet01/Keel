@@ -141,7 +141,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
   // Top-ups for the owner's card and own wallets that run below their target.
   const allPayees = (await chain.payees(vaultId)).filter((p) => !policy.blocklist.includes(p.account_id));
-  // Savings at a lending market (Burrow) the owner approved.
+  // The yield investment at a lending market (Burrow) the owner approved.
   const market = allPayees.find((p) => p.kind === "yield" && p.lending);
   const position = market ? await chain.lendingPosition(market.account_id, vaultId, policy.token_id).catch(() => null) : null;
   const payees = allPayees.filter((p) => p.keep_at);
@@ -239,24 +239,24 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Idle cash last: only what is left above the buffer and the next 14 days of bills.
   const horizon = addDays(o.today, 14);
   const upcoming = open.filter((b) => !isCrossChain(b) && b.due <= horizon && !policy.blocklist.includes(b.payee)).reduce((t, b) => t + b.amount, 0n);
-  // Bring savings home first if the bills due soon would break the buffer.
+  // Withdraw from the yield investment first if the bills due soon would break the buffer.
   const buffer = BigInt(policy.min_balance ?? "0");
   let recalled = false;
   if (market && position) {
-    if (position.units > 0n) say("observe", `earning: ${money(position.units)} in ${market.name} at ${(position.apr * 100).toFixed(1)}% APR`);
+    if (position.units > 0n) say("observe", `yield investment: ${money(position.units)} in ${market.name} at ${(position.apr * 100).toFixed(1)}% APR`);
     const dueSoon = due.filter((b) => !isCrossChain(b) && !policy.blocklist.includes(b.payee)).reduce((t, b) => t + b.amount, 0n);
     const need = recallNeed(balance, buffer, dueSoon, position.units);
     if (need > 0n) {
       recalled = true;
       if (o.dryRun) {
-        say("decide", `bring ${money(need)} home from ${market.name} (dry run, nothing signed): bills due soon would break the cash buffer`);
+        say("decide", `withdraw ${money(need)} of the yield investment from ${market.name} (dry run, nothing signed): bills due soon would break the cash buffer`);
       } else {
         try {
           const r = await chain.callAsAgent(vaultId, "recall_from_yield", { market: market.account_id, max_amount: (need * 10n ** BigInt(position.extra)).toString() }, 150);
           balance = await chain.balance(policy.token_id, vaultId);
-          say("act", `brought ${money(need)} home from ${market.name}: bills due soon would break the cash buffer. The vault now holds ${money(balance)}`, r.hash);
+          say("act", `withdrew ${money(need)} of the yield investment from ${market.name}: bills due soon would break the cash buffer. The vault now holds ${money(balance)}`, r.hash);
         } catch (e) {
-          say("act", `could not bring savings home from ${market.name}: ${String(e).slice(0, 160)}`);
+          say("act", `could not withdraw the yield investment from ${market.name}: ${String(e).slice(0, 160)}`);
         }
       }
     }

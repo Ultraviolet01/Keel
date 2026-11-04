@@ -7,10 +7,10 @@ Keel is an AI treasury agent that keeps a small company's stablecoin wallets fun
   - pays bills alone when the owner's limits allow it, and proposes everything else for the owner to approve, with a plain-English reason;
   - holds back bills that are not critical when paying them would break the owner's cash buffer, and pays critical ones first;
   - keeps the company card wallet and the owner's other wallets topped up to the balances the owner set;
-  - moves idle cash above the buffer into the vault's own account at Burrow, NEAR's lending protocol, and brings it home when bills need it;
+  - invests idle cash above the buffer for yield in the vault's own account at Burrow, NEAR's lending protocol, and withdraws it back to the vault when bills need it;
   - pays bills on Base, Ethereum, Arbitrum and Optimism from the vault's own address through NEAR Chain Signatures, after the owner approves. NEAR Intents quotes the same moves (and 38 more chains) on mainnet.
 - **What the owner does:** sets limits, a cash buffer, payees and bills in the app; an invoice can be uploaded and Claude fills in the bill for the owner to check.
-- **What it cannot do:** spend past a cap or below the cash buffer, pay a blocklisted address, add its own payees or bills, change its own rules, withdraw savings anywhere but the vault, or move NEAR. The vault refuses those calls, whatever the agent decides.
+- **What it cannot do:** spend past a cap or below the cash buffer, pay a blocklisted address, add its own payees or bills, change its own rules, withdraw its yield investment anywhere but the vault, or move NEAR. The vault refuses those calls, whatever the agent decides.
 
 Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
@@ -23,7 +23,7 @@ Built for NEAR HACKATHON (Nov 1–14, 2026). Tracks: Autonomous Business (`busin
 | NEAR vault, factory, agent and approvals | Real transactions on **NEAR testnet**. Vaults created now, including the demo vault `beacon.keel.testnet`, hold and pay **Circle's testnet USDC on NEAR** (`3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`). Earlier vaults (`anchor`, `orbit`, `nova` and others) used **Keel Test USDC** (`usdc.keel-owner.testnet`, a token minted for Keel), and keep it |
 | Cross-chain payments through NEAR Chain Signatures | Real transactions on **Base, Ethereum, Arbitrum and Optimism Sepolia**, paying **Circle's test USDC** with testnet ETH for gas, signed by NEAR's testnet MPC network (`v1.signer-prod.testnet`). Links under [Live on testnet](#live-on-testnet) |
 | Cross-chain payments through NEAR Intents (1Click) | **Dry quotes only**, from the live 1Click service on mainnet: real prices and routes, nothing sent. NEAR Intents has no testnet, and no mainnet payment has been made |
-| Savings at Burrow | Real deposits and withdrawals at **Burrow's testnet lending market** (`contract.1638481328.burrow.testnet`), earning its live supply rate (about 10% a year on Nov 4). Burrow's testnet lends its own test USDC (`usdc.fakes.testnet`, shown as USDC.e), so the vault that saves there, `harvest.keel.testnet`, holds that token instead of Circle's |
+| Yield investment at Burrow | Real deposits and withdrawals at **Burrow's testnet lending market** (`contract.1638481328.burrow.testnet`), earning its live supply rate (about 10% a year on Nov 4). Burrow's testnet lends its own test USDC (`usdc.fakes.testnet`, shown as USDC.e), so the vault that invests there, `harvest.keel.testnet`, holds that token instead of Circle's |
 | Invoice reading | Real calls to Claude from the hosted app (`/api/read-invoice` on Vercel), with Keel's own Anthropic key |
 | Hosted agent | Real runs on GitHub Actions every 15 minutes, started by an external timer, signing on testnet with Keel's agent key |
 
@@ -39,7 +39,7 @@ None of these are needed for `npm run verify` or the dry runs; they are for crea
 | USDC on Base, Ethereum, Arbitrum or Optimism Sepolia | https://faucet.circle.com (pick the exact network, for example "Base Sepolia", not "Ethereum Sepolia") |
 | Testnet ETH for gas on those chains | https://portal.cdp.coinbase.com/products/faucet (Base Sepolia), https://www.alchemy.com/faucets (Ethereum, Arbitrum, Optimism and Base Sepolia), https://console.optimism.io/faucet (Optimism Sepolia) |
 | USDC on NEAR testnet, for your own vault | https://faucet.circle.com, network "Near Testnet", sent to your vault's account (for example `acme.keel.testnet`) |
-| USDC.e for a vault that saves at Burrow | Anyone can mint Burrow's test token: `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
+| USDC.e for a vault that invests at Burrow | Anyone can mint Burrow's test token: `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
 | Keel Test USDC (older vaults only) | Minted only by `keel-owner.testnet`; vaults created now do not use it |
 
 Send to the vault's EVM address on the **same network** you picked in the faucet: the address is the same on every chain, but the funds are not. The address is on the app's Wallets page.
@@ -76,7 +76,7 @@ Keel's agent signs with a key only Keel's operator holds, so from a fresh clone 
 ```mermaid
 flowchart LR
   S["1. Setup<br/>owner deploys vault"] --> O["2. Observe<br/>ft_balance_of, bills"]
-  O --> F["3. Forecast<br/>14 days, buffer"] --> D["4. Decide<br/>pay, defer, top up, save, recall"] --> C["5. Check<br/>check_payment view"]
+  O --> F["3. Forecast<br/>14 days, buffer"] --> D["4. Decide<br/>pay, defer, top up, invest, withdraw"] --> C["5. Check<br/>check_payment view"]
   C -- within limits --> A["6. Act<br/>vault, Burrow, Chain Signatures"]
   C -- outside limits --> E["9. Escalate<br/>propose, owner approves"]
   E -- approved --> A
@@ -89,7 +89,7 @@ A move within limits goes straight from Check to Act; anything over the threshol
 
 ## Keel Vault contract
 
-The vault holds the USDC and the rules, and decides every payment's band itself. It deploys with no policy; the owner chooses every limit. The agent's key can call only three methods: two to pay or propose, and one that brings savings back from the vault's lending market into the vault.
+The vault holds the USDC and the rules, and decides every payment's band itself. It deploys with no policy; the owner chooses every limit. The agent's key can call only three methods: two to pay or propose, and one that withdraws the vault's yield investment from its lending market back into the vault.
 
 | Method | Who can call it | What it does |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ Owner methods require exactly 1 yoctoNEAR attached. Function-call keys cannot at
 The agent never holds a key that can move money freely. Limits live in the contract, so a compromised or prompt-injected agent still cannot overspend.
 
 - **Cash buffer, enforced by the vault:** the owner sets `min_balance` with `update_policy`. With a buffer set, `execute_payment` first asks the token contract for the vault's balance and pays from the callback only if the vault still holds the buffer after this payment and every other agent payment in flight; otherwise it undoes the daily spend and the bill mark and emits `payment_refused`. The owner's own `withdraw` and approvals ignore the buffer. On testnet, forcing a 2 USDC payment through `ballast.keel.testnet` with the agent key (4 USDC held, 3 USDC buffer) was refused on chain ([transaction](https://testnet.nearblocks.io/txns/5cCb98Z2dAe15u9WVMo8gL82YLwJNzzyU4a7bKkpdDCx)); 1 USDC, leaving exactly 3, went through ([transaction](https://testnet.nearblocks.io/txns/3EuBM5Yo2SBLTqeuxFSgLZ81yAF6Qt6svfEieAsbeoKQ)).
-- **Savings only come home:** `recall_from_yield` withdraws only from a lending market the owner approved, and Burrow pays withdrawals only to the account that deposited, the vault itself. A Burrow deposit is refused above the destination's `max_move`, and without a cash buffer. On testnet the agent key brought 5 USDC.e home from Burrow ([transaction](https://testnet.nearblocks.io/txns/izdqBBaYAGE325ZmgsXdMw26VeoBPM7k5WhnroBYHrd)).
+- **Yield investments only come back to the vault:** `recall_from_yield` withdraws only from a lending market the owner approved, and Burrow pays withdrawals only to the account that deposited, the vault itself. A Burrow deposit is refused above the destination's `max_move`, and without a cash buffer. On testnet the agent key withdrew 5 USDC.e home from Burrow ([transaction](https://testnet.nearblocks.io/txns/izdqBBaYAGE325ZmgsXdMw26VeoBPM7k5WhnroBYHrd)).
 - **Only the owner lists bills:** `add_bill` and `cancel_bill` need the owner's full-access key (1 yoctoNEAR attached), so a phished invoice or a compromised agent cannot add work for Keel. A listed bill gets no special treatment: it goes through the same bands as any payment (test `a_listed_bill_still_goes_through_the_bands`).
 - **Agent key on the vault, added at sign-up:** the factory adds Keel's agent key to each new vault account in the same transaction that creates it. It is a NEAR function-call access key limited to that vault's `execute_payment`, `propose_payment` and `recall_from_yield` (vaults created before Nov 4 have only the first two), with a 0.25 NEAR gas allowance. `recall_from_yield` can only withdraw from an approved lending market back into the vault. It cannot transfer NEAR, add keys, call `update_policy` or touch any other vault. The vault also checks that the agent key signed the call.
 - **No other keys:** the vault account has no full-access key, so nobody, Keel included, can sign as the vault to move money around its rules.
@@ -208,7 +208,7 @@ Deployed on Nov 2, 2026 with `scripts/deploy-factory-testnet.sh`. Anyone can rea
 | `orbit.keel.testnet` | The earlier demo vault, used for the memory-loss test below |
 | `vega.keel.testnet` | A vault created with the Chain Signatures code, owned by `vega-founder.testnet`. Its Base Sepolia address is `0x69aa0eb2153c0fed2cd3b44f418f50a02a3cffed` |
 | `keystone`, `meridian`, `ballast`, `tideline` `.keel.testnet` | Vaults made while adding owner-listed bills, named payees and card top-ups, the cash buffer and critical bills, and yield destinations; see [Treasury decisions](#treasury-decisions) |
-| `harvest.keel.testnet` | The vault that saves at Burrow: holds USDC.e, a 10 USDC.e cash buffer, and Burrow approved as its lending market |
+| `harvest.keel.testnet` | The vault with a yield investment at Burrow: holds USDC.e, a 10 USDC.e cash buffer, and Burrow approved as its lending market |
 | `contract.1638481328.burrow.testnet` | Burrow's lending market on testnet (not Keel's) |
 | `usdc.keel-owner.testnet` | Keel Test USDC, used by vaults created before Nov 3 |
 | `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` | Circle's USDC on NEAR testnet, used by vaults created now (`set_token` on the factory) |
@@ -308,13 +308,13 @@ The owner's private key is never put in `.env`. Owner actions sign through the N
 | Decision | What Keel does | Control | State |
 | --- | --- | --- | --- |
 | Defer | Holds a non-critical bill that would take the vault below its cash buffer until it is due, then proposes it | `min_balance`, enforced by the vault; `critical` bills first | Built |
-| Deploy idle | Moves cash above the buffer and the next 14 days of bills into the vault's own account at Burrow, NEAR's lending protocol, once a day; brings it home with `recall_from_yield` when bills due soon would break the buffer | Payee kind `yield` with `max_move` and `lending`; the vault refuses larger moves, any move without a buffer, and any withdrawal to anywhere but itself | Built and live on testnet with Burrow (`harvest.keel.testnet`, about 10% APR) |
+| Deploy idle (yield investment) | Invests cash above the buffer and the next 14 days of bills for yield in the vault's own account at Burrow, NEAR's lending protocol, once a day; withdraws it back to the vault with `recall_from_yield` when bills due soon would break the buffer | Payee kind `yield` with `max_move` and `lending`; the vault refuses larger moves, any move without a buffer, and any withdrawal to anywhere but itself | Built and live on testnet with Burrow (`harvest.keel.testnet`, about 10% APR) |
 | Escalate | Proposes anything outside the limits | Owner approval | Built |
 | Transfer | Tops up the owner's card and own wallets on NEAR | Approved payees and caps | Built on NEAR; NEAR to the vault's own EVM addresses needs a bridge: quoted through NEAR Intents on mainnet, funded by hand on testnet |
 | Convert | Quotes swaps through NEAR Intents | None yet | Not built: the vault holds USDC only |
 
-1. **Burrow, live on testnet.** `harvest.keel.testnet` holds Burrow's test USDC (`usdc.fakes.testnet`, USDC.e), the token Burrow's testnet market lends; vaults created by the factory hold Circle's test USDC, which Burrow testnet does not list. With Keel's agent key: 20 USDC.e deposited into the vault's own Burrow account at about 10.4% APR ([transaction](https://testnet.nearblocks.io/txns/2gji1tfJeQLBXNKpkjbcGbEcy6QKqmzCotDyHcZgVXs8)); 5 brought home ([transaction](https://testnet.nearblocks.io/txns/izdqBBaYAGE325ZmgsXdMw26VeoBPM7k5WhnroBYHrd)). Then the agent, with two 20 USDC.e bills due and 35 in cash against a 10 buffer, brought the remaining 15 home ([transaction](https://testnet.nearblocks.io/txns/EiLgEcR8LW54UCAsQRd6veL)) and paid both bills, ending at exactly the buffer.
-2. To see it, run `npm run agent -- --once --dry-run --vault harvest.keel.testnet` in `agent/`; you see `earning: … in Burrow lending at 10.4% APR`. In the app, `?view=` the owner of `harvest` shows the **Savings in Burrow lending** card.
+1. **Burrow, live on testnet.** `harvest.keel.testnet` holds Burrow's test USDC (`usdc.fakes.testnet`, USDC.e), the token Burrow's testnet market lends; vaults created by the factory hold Circle's test USDC, which Burrow testnet does not list. With Keel's agent key: 20 USDC.e deposited into the vault's own Burrow account at about 10.4% APR ([transaction](https://testnet.nearblocks.io/txns/2gji1tfJeQLBXNKpkjbcGbEcy6QKqmzCotDyHcZgVXs8)); 5 withdrawn back to the vault ([transaction](https://testnet.nearblocks.io/txns/izdqBBaYAGE325ZmgsXdMw26VeoBPM7k5WhnroBYHrd)). Then the agent, with two 20 USDC.e bills due and 35 in cash against a 10 buffer, withdrew the remaining 15 of the yield investment ([transaction](https://testnet.nearblocks.io/txns/EiLgEcR8LW54UCAsQRd6veL)) and paid both bills, ending at exactly the buffer.
+2. To see it, run `npm run agent -- --once --dry-run --vault harvest.keel.testnet` in `agent/`; you see `yield investment: … in Burrow lending at 10.4% APR`. In the app, `?view=` the owner of `harvest` shows the **Yield investment** card.
 3. Run `npm run agent -- --once --dry-run --vault tideline.keel.testnet` in `agent/`. You see `idle cash: 1.00 USDC above the buffer and the next 14 days of bills` and the move to the yield destination planned. Forcing a 2 USDC move there with the agent key is refused on chain (`over the most Keel may move to this yield destination at once`).
 
 ## Paying ordinary vendors
@@ -344,7 +344,7 @@ GitHub's own schedule (`7,22,37,52 * * * *`) proved unreliable for this reposito
 
 1. To see runs: open the repository's **Actions** tab, then **agent**. Each run's log lists every vault and what Keel did, with transaction links.
 2. To run it now: **Actions**, **agent**, **Run workflow**. Tick **Decide but sign nothing** for a dry run.
-3. To host your own copy: in **Settings**, **Secrets and variables**, **Actions**, add `KEEL_AGENT_PRIVATE_KEY` (the `private_key` from your agent key file). `ANTHROPIC_API_KEY` or `NEARAI_API_KEY` are optional. The key is a function-call key that only reaches `execute_payment`, `propose_payment` and `recall_from_yield` on each vault, so a leaked secret cannot change limits, approve anything or send savings anywhere but back to the vault.
+3. To host your own copy: in **Settings**, **Secrets and variables**, **Actions**, add `KEEL_AGENT_PRIVATE_KEY` (the `private_key` from your agent key file). `ANTHROPIC_API_KEY` or `NEARAI_API_KEY` are optional. The key is a function-call key that only reaches `execute_payment`, `propose_payment` and `recall_from_yield` on each vault, so a leaked secret cannot change limits, approve anything or send a yield investment anywhere but back to the vault.
 4. To start it every 15 minutes from outside GitHub: a timer that sends `POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/agent.yml/dispatches` with headers `Authorization: Bearer <token>` and `Accept: application/vnd.github+json` and body `{"ref":"main"}`. GitHub answers `204`.
 5. To stop it: **Actions**, **agent**, **…**, **Disable workflow**, and turn off the external timer.
 
@@ -358,9 +358,9 @@ GitHub's own schedule (`7,22,37,52 * * * *`) proved unreliable for this reposito
 - **Counterparty check:** on-chain signals and the vault blocklist only; no external risk scoring.
 - **EVM address funding:** the vault's EVM address needs USDC and a little ETH for gas on each chain it pays from. Keel says how much is missing; it does not move USDC from NEAR to that address itself (that needs a bridge: NEAR Intents on mainnet, none on testnet). Testnet funds come from each chain's Sepolia faucets.
 - **Signed means sendable:** once the MPC network signs an approved transfer, anyone can broadcast it, not only Keel. Keel broadcasts it on its next run. EVM transfers land in nonce order, so if the owner approves them out of order, the later one waits.
-- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything but use Keel Test USDC; `beacon` is the first on Circle's USDC, and reads its bills from `config/bills.json`. `keystone` is the first with bills listed on chain; `meridian` adds named payees, card top-ups and yearly bills; `ballast` adds the cash buffer and critical bills; `tideline` adds yield destinations for idle cash; `harvest` saves idle cash at Burrow. Vaults created now get all of it (`vault_code_hash` `CtzDuiAmgqmfozUUbxYCfSTHQWjmhekmd1Qhj4jK8Kmb`).
+- **Older vaults:** each vault keeps the code it was created with. `nova`, `kora`, `lumen` and `vega` predate the once-per-bill rule; `orbit` and `stress` predate the flood limits; `harbor` and `stress2` predate the multi-chain routes (Base only). `anchor` and `multi` have everything but use Keel Test USDC; `beacon` is the first on Circle's USDC, and reads its bills from `config/bills.json`. `keystone` is the first with bills listed on chain; `meridian` adds named payees, card top-ups and yearly bills; `ballast` adds the cash buffer and critical bills; `tideline` adds yield destinations for idle cash; `harvest` invests idle cash at Burrow for yield. Vaults created now get all of it (`vault_code_hash` `CtzDuiAmgqmfozUUbxYCfSTHQWjmhekmd1Qhj4jK8Kmb`).
 - **Agent key allowance:** the factory gives the agent key 0.25 NEAR for gas; busy demo vaults used about 0.005 NEAR of it in their first days. NEAR also checks each transaction against the allowance at a worst-case gas price, so Keel asks for at most 200 Tgas (a Burrow deposit), not 300. The owner renews the allowance with `set_agent_key`.
-- **Savings and the dashboard:** the Overview's total treasury counts the vault's cash only; savings at Burrow show in their own card. Burrow's testnet lends USDC.e, not Circle's test USDC, so only a vault holding USDC.e can save there on testnet. Keel does not claim Burrow's farming rewards.
+- **Yield investment and the dashboard:** the Overview's total treasury counts the vault's cash only; the yield investment at Burrow shows in its own card. Burrow's testnet lends USDC.e, not Circle's test USDC, so only a vault holding USDC.e can invest there on testnet. Keel does not claim Burrow's farming rewards.
 - **Invoice reading:** needs `ANTHROPIC_API_KEY` in the Vercel project; its limit of 10 invoices per visitor per hour is kept per running server, so it is best effort.
 - **Single owner:** one full-access key approves everything; multisig approval is not built.
 

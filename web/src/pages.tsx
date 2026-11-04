@@ -360,17 +360,17 @@ function SavingsCard({ p }: { p: PageProps }) {
   };
   return (
     <section className="card card-pad add-wallet">
-      <b>Savings in {s.name}</b>
+      <b>Yield investment · {s.name}</b>
       <span className="num">
         {amt(s.units, d)}
         {s.apr > 0 ? ` · earning about ${(s.apr * 100).toFixed(1)}% a year` : ""}
       </span>
       <span className="muted small">
-        Keel moves cash above your buffer and the next 14 days of bills here, and brings it home when bills need it. It can only come back to this vault.
+        Keel invests cash above your buffer and the next 14 days of bills here for yield, and withdraws it when bills need it. It can only come back to this vault.
       </span>
       {p.canAct && s.units !== "0" && (
         <button className="btn sm" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={home}>
-          {busy ? "Approve in your wallet" : "Bring it all home"}
+          {busy ? "Approve in your wallet" : "Withdraw it all to the vault"}
         </button>
       )}
       {error && <p className="error">{error}</p>}

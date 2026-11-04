@@ -177,7 +177,7 @@ export function HowItWorks() {
           </tr>
           <tr>
             <td>Deploy idle</td>
-            <td>Moves cash above your buffer and the next 14 days of bills into your vault's own account at Burrow, NEAR's lending protocol, and brings it home when bills need it</td>
+            <td>Moves cash above your buffer and the next 14 days of bills into your vault's own account at Burrow, NEAR's lending protocol, as a yield investment, and withdraws it back to the vault when bills need it</td>
             <td>Approved destination and a per-move limit; withdrawals only back to the vault. All enforced by the vault</td>
           </tr>
           <tr>
@@ -197,7 +197,7 @@ export function HowItWorks() {
           </tr>
         </tbody>
       </table>
-      <p className="muted small">On testnet, Burrow lends its own test USDC (USDC.e), so the demo vault that saves at Burrow holds USDC.e instead of Circle's test USDC.</p>
+      <p className="muted small">On testnet, Burrow lends its own test USDC (USDC.e), so the demo vault that invests at Burrow holds USDC.e instead of Circle's test USDC.</p>
 
       <h2 id="chains">Paying on other chains</h2>
       <p>
@@ -259,7 +259,7 @@ export function Security() {
       <h2 id="key">Keel's key</h2>
       <p>
         Keel signs with a NEAR function-call key that the factory adds to your vault when it is created. That key can call three methods on your vault
-        and nothing else: two to pay or propose, and one to bring savings home:
+        and nothing else: two to pay or propose, and one to withdraw the yield investment back to the vault:
       </p>
       <table>
         <thead>

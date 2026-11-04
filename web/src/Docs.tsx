@@ -114,7 +114,7 @@ export default function Docs() {
         </li>
         <li>
           <b>Yield destination</b>: where idle cash earns. Tick <b>lending market</b> to use Burrow, NEAR's lending protocol: the money sits in your
-          vault's own Burrow account, earning interest, and Keel brings it home when bills need it. Set the most Keel may move at once. Keel moves
+          vault's own Burrow account as a yield investment, earning interest, and Keel withdraws it back to the vault when bills need it. Set the most Keel may move at once. Keel moves
           only cash above your buffer and the next 14 days of bills, once a day, and only with a cash buffer set.
         </li>
       </ul>

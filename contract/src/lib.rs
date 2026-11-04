@@ -790,7 +790,7 @@ impl KeelVault {
         emit("payee_removed", json!({ "account_id": account_id, "by": self.owner_id }));
     }
 
-    /// Brings savings home: withdraws from one of the vault's lending markets
+    /// Withdraws the vault's yield investment from one of its lending markets
     /// back into the vault, and nowhere else. `max_amount` is in the market's
     /// own units (Burrow: token decimals plus its extra_decimals); omit it to
     /// withdraw everything. Keel's agent calls it when bills or the cash

@@ -219,7 +219,7 @@ export default function Landing() {
             past the line
           </h2>
           <p>
-            Not "won't". Can't. Keel signs with a NEAR function-call key that can only reach three methods on your vault: pay, propose, and bring savings home. The vault
+            Not "won't". Can't. Keel signs with a NEAR function-call key that can only reach three methods on your vault: pay, propose, and withdraw its yield investment back to the vault. The vault
             checks every payment against your line before any money moves.
           </p>
           <a className="l-more light" href="/security">
