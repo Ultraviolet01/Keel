@@ -40,7 +40,7 @@ None of these are needed for `npm run verify` or the dry runs; they are for crea
 | Testnet ETH for gas on those chains | https://portal.cdp.coinbase.com/products/faucet (Base Sepolia), https://www.alchemy.com/faucets (Ethereum, Arbitrum, Optimism and Base Sepolia), https://console.optimism.io/faucet (Optimism Sepolia) |
 | USDC on NEAR testnet, for your own vault | https://faucet.circle.com, network "Near Testnet", sent to your vault's account (for example `acme.keel.testnet`) |
 | USDC.e for a vault that invests at Burrow | Anyone can mint Burrow's test token: `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
-| Keel Test USDC (older vaults only) | Minted only by `keel-owner.testnet`; vaults created now do not use it |
+|
 
 Send to the vault's EVM address on the **same network** you picked in the faucet: the address is the same on every chain, but the funds are not. The address is on the app's Wallets page.
 
