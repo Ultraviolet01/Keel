@@ -113,8 +113,9 @@ export default function Docs() {
           <b>Your own wallet</b>: another wallet the company owns; it can also have a balance to keep.
         </li>
         <li>
-          <b>Yield destination</b>: an account the company owns that earns yield. Set the most Keel may move at once. Keel moves only cash above your
-          buffer and the next 14 days of bills, once a day, and only with a cash buffer set.
+          <b>Yield destination</b>: where idle cash earns. Tick <b>lending market</b> to use Burrow, NEAR's lending protocol: the money sits in your
+          vault's own Burrow account, earning interest, and Keel brings it home when bills need it. Set the most Keel may move at once. Keel moves
+          only cash above your buffer and the next 14 days of bills, once a day, and only with a cash buffer set.
         </li>
       </ul>
       <p>Removing a payee takes it off the allowlist. From then on, payments to it need your approval.</p>

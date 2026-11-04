@@ -5,7 +5,8 @@
 //! to 20 vaults, one per company. In one transaction the factory creates
 //! `<name>.<factory>` with the Keel Vault code, sets the founder as owner, and
 //! adds Keel's agent key to the vault account as a function-call key that can
-//! only call that vault's `execute_payment` and `propose_payment`. So the agent
+//! only call that vault's `execute_payment`, `propose_payment` and `recall_from_yield`
+//! (which only brings savings back into the vault). So the agent
 //! is connected the moment the vault exists, with no backend step. A callback
 //! then registers the vault on the token so it can receive USDC. The vault
 //! starts with no policy: the founder sets every limit.
@@ -31,7 +32,7 @@ use near_sdk::{
 /// for the gas its agent key spends.
 const VAULT_STATE_ALLOWANCE: NearToken = NearToken::from_millinear(500);
 /// The agent key's permissions on each vault.
-const AGENT_METHODS: &str = "execute_payment,propose_payment";
+const AGENT_METHODS: &str = "execute_payment,propose_payment,recall_from_yield";
 const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
 /// NEP-145 registration of the new vault on the token (0.00125 NEAR).
 const TOKEN_REGISTRATION: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);

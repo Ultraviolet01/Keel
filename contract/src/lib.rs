@@ -49,6 +49,15 @@ const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 /// Cash buffer: reading the vault's balance, then paying from the callback.
 const GAS_BALANCE_OF: Gas = Gas::from_tgas(5);
 const GAS_BALANCE_CHECKED: Gas = Gas::from_tgas(45);
+/// Lending markets (Burrow): register once, deposit with ft_transfer_call,
+/// withdraw with the market's execute. The balance callback needs room for
+/// the whole deposit chain.
+const GAS_BALANCE_CHECKED_LENDING: Gas = Gas::from_tgas(130);
+const GAS_LENDING_REGISTER: Gas = Gas::from_tgas(10);
+const GAS_FT_TRANSFER_CALL: Gas = Gas::from_tgas(80);
+const GAS_RECALL: Gas = Gas::from_tgas(120);
+/// Burrow's storage_balance_bounds minimum (0.1 NEAR), paid once per market.
+const LENDING_STORAGE: NearToken = NearToken::from_millinear(100);
 const MAX_TEXT: usize = 280;
 const MAX_BILL_REF: usize = 64;
 /// At most this many proposals wait for the owner at once, so a stolen agent
@@ -69,7 +78,7 @@ const MAX_PAYEES: u32 = 100;
 /// and withdraw.
 const STORAGE_RESERVE: NearToken = NearToken::from_millinear(200);
 /// Methods the agent's key may call, and how much NEAR it may spend on gas.
-const AGENT_METHODS: &str = "execute_payment,propose_payment";
+const AGENT_METHODS: &str = "execute_payment,propose_payment,recall_from_yield";
 const AGENT_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(250);
 /// Chain Signatures: gas for the MPC `sign` call and for storing the result.
 const GAS_MPC_SIGN: Gas = Gas::from_tgas(150);
@@ -86,6 +95,16 @@ trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
     fn ft_balance_of(&self, account_id: AccountId) -> U128;
+    fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String) -> U128;
+}
+
+/// A lending market such as Burrow: deposits arrive by ft_transfer_call with
+/// an empty message and are credited to the sender; Withdraw sends them back.
+#[ext_contract(ext_lending)]
+#[allow(dead_code)]
+trait LendingMarket {
+    fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
+    fn execute(&mut self, actions: Vec<Value>);
 }
 
 #[derive(BorshStorageKey)]
@@ -206,6 +225,11 @@ pub struct Payee {
     /// Keel moves only cash above the buffer, so a buffer must be set.
     #[serde(default)]
     pub max_move: Option<U128>,
+    /// For a yield destination that is a lending market (Burrow): the vault
+    /// deposits into its own account there, earning interest, and can
+    /// withdraw it back with recall_from_yield. Nobody else can.
+    #[serde(default)]
+    pub lending: bool,
 }
 
 /// Owner's changes to the policy. Every field is optional.
@@ -276,6 +300,8 @@ pub struct KeelVault {
     /// Agent payments started under the buffer and not finished yet. Counted
     /// against the balance so parallel payments cannot slip under the buffer.
     outflow: u128,
+    /// Lending markets the vault has registered with (storage paid once).
+    lending_registered: Vec<AccountId>,
 }
 
 #[near]
@@ -317,6 +343,7 @@ impl KeelVault {
             payees: IterableMap::new(StorageKey::Payees),
             min_balance: 0,
             outflow: 0,
+            lending_registered: Vec::new(),
         }
     }
 
@@ -360,12 +387,13 @@ impl KeelVault {
         // With a cash buffer, ask the token contract for the vault's balance
         // first and pay from the callback only if the buffer still holds.
         self.outflow += amount.0;
+        let gas = if self.is_lending(&receiver_id) { GAS_BALANCE_CHECKED_LENDING } else { GAS_BALANCE_CHECKED };
         ext_ft::ext(self.token_id.clone())
             .with_static_gas(GAS_BALANCE_OF)
             .ft_balance_of(env::current_account_id())
             .then(
                 Self::ext(env::current_account_id())
-                    .with_static_gas(GAS_BALANCE_CHECKED)
+                    .with_static_gas(gas)
                     .on_balance_checked(receiver_id, amount, memo, day, bill_ref),
             )
     }
@@ -737,6 +765,7 @@ impl KeelVault {
             require!(payee.max_move.map_or(false, |m| m.0 > 0), "a yield destination needs max_move, the most Keel may move there at once");
         } else {
             require!(payee.max_move.is_none(), "only a yield destination has max_move");
+            require!(!payee.lending, "only a yield destination can be a lending market");
         }
         if let Some(k) = payee.keep_at {
             require!(payee.kind == "card" || payee.kind == "own", "only a card or your own wallet can be kept topped up");
@@ -759,6 +788,29 @@ impl KeelVault {
         let allowed = self.allowlist.remove(&account_id);
         require!(named || allowed, "that account is not a payee");
         emit("payee_removed", json!({ "account_id": account_id, "by": self.owner_id }));
+    }
+
+    /// Brings savings home: withdraws from one of the vault's lending markets
+    /// back into the vault, and nowhere else. `max_amount` is in the market's
+    /// own units (Burrow: token decimals plus its extra_decimals); omit it to
+    /// withdraw everything. Keel's agent calls it when bills or the cash
+    /// buffer need the cash; the owner can too (1 yoctoNEAR attached). Works
+    /// while paused.
+    #[payable]
+    pub fn recall_from_yield(&mut self, market: AccountId, max_amount: Option<U128>) -> Promise {
+        if env::predecessor_account_id() == self.owner_id {
+            assert_one_yocto();
+        } else {
+            self.assert_agent();
+        }
+        require!(self.is_lending(&market), "Keel Vault refused: not one of the vault's lending markets");
+        emit("yield_recall_started", json!({ "market": market, "max_amount": max_amount, "by": env::predecessor_account_id() }));
+        let withdraw = json!({ "Withdraw": { "token_id": self.token_id, "max_amount": max_amount } });
+        ext_lending::ext(market.clone())
+            .with_attached_deposit(ONE_YOCTO)
+            .with_static_gas(GAS_RECALL)
+            .execute(vec![withdraw])
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_recall_done(market, max_amount))
     }
 
     /// Stops Keel watching a bill. Payments already made stay in the ledger.
@@ -832,31 +884,44 @@ impl KeelVault {
     ) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
-        if reserved == Some(true) {
-            self.outflow = self.outflow.saturating_sub(amount.0);
+        self.settle(ok, proposal_id, receiver_id, amount, agent_day, bill_ref, reserved)
+    }
+
+    /// After a deposit into a lending market: ft_transfer_call returns how
+    /// much the market kept; anything it did not keep came back to the vault.
+    #[private]
+    pub fn on_deposit_done(
+        &mut self,
+        proposal_id: Option<u64>,
+        market: AccountId,
+        amount: U128,
+        agent_day: Option<u64>,
+        bill_ref: Option<String>,
+        reserved: Option<bool>,
+    ) -> bool {
+        #[allow(deprecated)]
+        let used = match env::promise_result(0) {
+            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes).map(|u| u.0).unwrap_or(0),
+            _ => 0,
+        };
+        if used > 0 && !self.lending_registered.contains(&market) {
+            self.lending_registered.push(market.clone());
         }
-        if !ok {
-            // Nothing was paid, so the bill can be paid again.
-            if let Some(r) = &bill_ref {
-                self.paid_bills.remove(r);
-            }
+        if used > 0 && used < amount.0 && proposal_id.is_none() && agent_day == Some(self.spent_day) {
+            // Only part was kept: the rest came back and should not count today.
+            self.spent_today = self.spent_today.saturating_sub(amount.0 - used);
         }
-        if let Some(id) = proposal_id {
-            if let Some(proposal) = self.proposals.get_mut(&id) {
-                proposal.status = if ok {
-                    ProposalStatus::Executed
-                } else {
-                    ProposalStatus::Failed
-                };
-            }
-        } else if !ok && agent_day == Some(self.spent_day) {
-            // The transfer did not happen, so it should not count against today's cap.
-            self.spent_today = self.spent_today.saturating_sub(amount.0);
+        if used > 0 {
+            emit("yield_deposited", json!({ "market": market, "amount": U128(used), "proposal_id": proposal_id }));
         }
-        emit(
-            if ok { "payment_executed" } else { "payment_failed" },
-            json!({ "receiver_id": receiver_id, "amount": amount, "proposal_id": proposal_id }),
-        );
+        self.settle(used > 0, proposal_id, market, amount, agent_day, bill_ref, reserved)
+    }
+
+    #[private]
+    pub fn on_recall_done(&mut self, market: AccountId, max_amount: Option<U128>) -> bool {
+        #[allow(deprecated)]
+        let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
+        emit(if ok { "yield_recalled" } else { "yield_recall_failed" }, json!({ "market": market, "max_amount": max_amount }));
         ok
     }
 
@@ -957,12 +1022,54 @@ impl KeelVault {
 }
 
 impl KeelVault {
+    fn settle(
+        &mut self,
+        ok: bool,
+        proposal_id: Option<u64>,
+        receiver_id: AccountId,
+        amount: U128,
+        agent_day: Option<u64>,
+        bill_ref: Option<String>,
+        reserved: Option<bool>,
+    ) -> bool {
+        if reserved == Some(true) {
+            self.outflow = self.outflow.saturating_sub(amount.0);
+        }
+        if !ok {
+            // Nothing was paid, so the bill can be paid again.
+            if let Some(r) = &bill_ref {
+                self.paid_bills.remove(r);
+            }
+        }
+        if let Some(id) = proposal_id {
+            if let Some(proposal) = self.proposals.get_mut(&id) {
+                proposal.status = if ok {
+                    ProposalStatus::Executed
+                } else {
+                    ProposalStatus::Failed
+                };
+            }
+        } else if !ok && agent_day == Some(self.spent_day) {
+            // The transfer did not happen, so it should not count against today's cap.
+            self.spent_today = self.spent_today.saturating_sub(amount.0);
+        }
+        emit(
+            if ok { "payment_executed" } else { "payment_failed" },
+            json!({ "receiver_id": receiver_id, "amount": amount, "proposal_id": proposal_id }),
+        );
+        ok
+    }
+
     /// The agent signs with its key on this vault's own account, so the call
     /// comes from the vault itself and is signed by the agent key.
     fn assert_agent(&self) {
         let is_agent = env::predecessor_account_id() == env::current_account_id()
             && self.agent_key.as_ref() == Some(&env::signer_account_pk());
         require!(is_agent, "Keel Vault refused: only the agent can call this");
+    }
+
+    fn is_lending(&self, account: &AccountId) -> bool {
+        self.payees.get(account).map_or(false, |p| p.lending)
     }
 
     fn assert_owner(&self) {
@@ -1091,6 +1198,25 @@ impl KeelVault {
         bill_ref: Option<String>,
         reserved: Option<bool>,
     ) -> Promise {
+        if self.is_lending(&receiver_id) {
+            // A deposit into the vault's own account at the lending market.
+            let transfer = ext_ft::ext(self.token_id.clone())
+                .with_attached_deposit(ONE_YOCTO)
+                .with_static_gas(GAS_FT_TRANSFER_CALL)
+                .ft_transfer_call(receiver_id.clone(), amount, memo, String::new());
+            let done = Self::ext(env::current_account_id())
+                .with_static_gas(GAS_CALLBACK)
+                .on_deposit_done(proposal_id, receiver_id.clone(), amount, agent_day, bill_ref, reserved);
+            if self.lending_registered.contains(&receiver_id) {
+                return transfer.then(done);
+            }
+            return ext_lending::ext(receiver_id.clone())
+                .with_attached_deposit(LENDING_STORAGE)
+                .with_static_gas(GAS_LENDING_REGISTER)
+                .storage_deposit(Some(env::current_account_id()), Some(true))
+                .then(transfer)
+                .then(done);
+        }
         ext_ft::ext(self.token_id.clone())
             .with_attached_deposit(STORAGE_DEPOSIT)
             .with_static_gas(GAS_STORAGE_DEPOSIT)

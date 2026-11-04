@@ -271,7 +271,7 @@ export default function App() {
         <BillPanel vaultId={selected} token={d.token} policy={d.policy} payees={d.payees} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
       )}
       {panel === "payee" && selected && d && (
-        <PayeePanel vaultId={selected} token={d.token} policy={d.policy} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
+        <PayeePanel vaultId={selected} token={d.token} policy={d.policy} agentMethods={d.agentMethods} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
       )}
       {panel === "deposit" && selected && d && (
         <DepositPanel vaultId={selected} token={d.token} tokenId={d.policy.token_id} onClose={() => setPanel(null)} />

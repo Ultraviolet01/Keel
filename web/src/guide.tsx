@@ -177,8 +177,8 @@ export function HowItWorks() {
           </tr>
           <tr>
             <td>Deploy idle</td>
-            <td>Moves cash above your buffer and the next 14 days of bills to a yield destination you approved, once a day</td>
-            <td>Approved destination and a per-move limit, both enforced by the vault</td>
+            <td>Moves cash above your buffer and the next 14 days of bills into your vault's own account at Burrow, NEAR's lending protocol, and brings it home when bills need it</td>
+            <td>Approved destination and a per-move limit; withdrawals only back to the vault. All enforced by the vault</td>
           </tr>
           <tr>
             <td>Escalate</td>
@@ -197,7 +197,7 @@ export function HowItWorks() {
           </tr>
         </tbody>
       </table>
-      <p className="muted small">On testnet the yield destination is a test account standing in for a yield pool; Keel does not integrate a yield protocol yet.</p>
+      <p className="muted small">On testnet, Burrow lends its own test USDC (USDC.e), so the demo vault that saves at Burrow holds USDC.e instead of Circle's test USDC.</p>
 
       <h2 id="chains">Paying on other chains</h2>
       <p>
@@ -258,8 +258,8 @@ export function Security() {
 
       <h2 id="key">Keel's key</h2>
       <p>
-        Keel signs with a NEAR function-call key that the factory adds to your vault when it is created. That key can call two methods on your vault
-        and nothing else:
+        Keel signs with a NEAR function-call key that the factory adds to your vault when it is created. That key can call three methods on your vault
+        and nothing else: two to pay or propose, and one to bring savings home:
       </p>
       <table>
         <thead>
@@ -280,6 +280,12 @@ export function Security() {
               <code>propose_payment</code>
             </td>
             <td>Keel; at most 50 proposals wait at once</td>
+          </tr>
+          <tr>
+            <td>
+              <code>recall_from_yield</code>
+            </td>
+            <td>Keel or you; it can only withdraw from your approved lending market back into the vault</td>
           </tr>
           <tr>
             <td>

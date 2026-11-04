@@ -8,6 +8,7 @@ import {
   vaultBills,
   topUps,
   idleMove,
+  recallNeed,
   approvalsFor,
   checkCounterparty,
   decide,
@@ -134,11 +135,15 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     return;
   }
   const meta = await chain.view<{ symbol: string; decimals: number }>(policy.token_id, "ft_metadata");
-  const [balance, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
+  const [cash, proposals] = await Promise.all([chain.balance(policy.token_id, vaultId), chain.proposals(vaultId)]);
+  let balance = cash;
   const money = (u: bigint) => fmt(u, meta.decimals, meta.symbol);
   // Bills the owner listed on the vault, then any from config/bills.json (older demo vaults).
   // Top-ups for the owner's card and own wallets that run below their target.
   const allPayees = (await chain.payees(vaultId)).filter((p) => !policy.blocklist.includes(p.account_id));
+  // Savings at a lending market (Burrow) the owner approved.
+  const market = allPayees.find((p) => p.kind === "yield" && p.lending);
+  const position = market ? await chain.lendingPosition(market.account_id, vaultId, policy.token_id).catch(() => null) : null;
   const payees = allPayees.filter((p) => p.keep_at);
   const held: Record<string, bigint> = {};
   for (const p of payees) held[p.account_id] = await chain.balance(policy.token_id, p.account_id).catch(() => 0n);
@@ -234,7 +239,29 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Idle cash last: only what is left above the buffer and the next 14 days of bills.
   const horizon = addDays(o.today, 14);
   const upcoming = open.filter((b) => !isCrossChain(b) && b.due <= horizon && !policy.blocklist.includes(b.payee)).reduce((t, b) => t + b.amount, 0n);
-  const idle = idleMove(allPayees, balance, BigInt(policy.min_balance ?? "0"), upcoming, o.today, 10n ** BigInt(meta.decimals));
+  // Bring savings home first if the bills due soon would break the buffer.
+  const buffer = BigInt(policy.min_balance ?? "0");
+  let recalled = false;
+  if (market && position) {
+    if (position.units > 0n) say("observe", `earning: ${money(position.units)} in ${market.name} at ${(position.apr * 100).toFixed(1)}% APR`);
+    const dueSoon = due.filter((b) => !isCrossChain(b) && !policy.blocklist.includes(b.payee)).reduce((t, b) => t + b.amount, 0n);
+    const need = recallNeed(balance, buffer, dueSoon, position.units);
+    if (need > 0n) {
+      recalled = true;
+      if (o.dryRun) {
+        say("decide", `bring ${money(need)} home from ${market.name} (dry run, nothing signed): bills due soon would break the cash buffer`);
+      } else {
+        try {
+          const r = await chain.callAsAgent(vaultId, "recall_from_yield", { market: market.account_id, max_amount: (need * 10n ** BigInt(position.extra)).toString() }, 150);
+          balance = await chain.balance(policy.token_id, vaultId);
+          say("act", `brought ${money(need)} home from ${market.name}: bills due soon would break the cash buffer. The vault now holds ${money(balance)}`, r.hash);
+        } catch (e) {
+          say("act", `could not bring savings home from ${market.name}: ${String(e).slice(0, 160)}`);
+        }
+      }
+    }
+  }
+  const idle = recalled ? null : idleMove(allPayees, balance, buffer, upcoming, o.today, 10n ** BigInt(meta.decimals));
   if (idle) {
     say("forecast", `idle cash: ${money(idle.amount)} above the buffer and the next 14 days of bills, for ${idle.payee}`);
     due.push(idle);
@@ -298,7 +325,8 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     }
     try {
       if (action.kind === "pay") {
-        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) });
+        const lendingDeposit = market?.account_id === bill.payee;
+        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) }, lendingDeposit ? 200 : 100);
         // The transaction can succeed while the vault declines inside it: a
         // cash-buffer refusal or a failed token transfer both end in false.
         // Nothing was paid, the bill stays open, and Keel looks again next run.

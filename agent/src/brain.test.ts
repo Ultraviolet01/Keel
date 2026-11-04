@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addDays, vaultBills, topUps, idleMove, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
+import { addDays, vaultBills, topUps, idleMove, recallNeed, checkCounterparty, decide, draftRule, firstShortfall, forecast, isCrossChain, isSpike, type DecideInput, type Policy } from "./brain";
 
 const U = 1_000_000n; // 1 USDC
 
@@ -223,4 +223,12 @@ test("idle cash: only surplus above the buffer and upcoming bills, capped per mo
   assert.equal(idleMove([dest], 1000n * U, 0n, 0n, "2026-11-04", U), null, "no buffer: nothing moves");
   assert.equal(idleMove([card], 1000n * U, 300n * U, 0n, "2026-11-04", U), null, "no yield destination: nothing moves");
   assert.equal(idleMove([dest], 300n * U + U / 2n, 300n * U, 0n, "2026-11-04", U), null, "dust under one token stays put");
+});
+
+test("savings recall: only what bills due soon and the buffer need, never more than is in the market", () => {
+  // 30 held, 10 buffer, 35 due soon: needs 15 more.
+  assert.equal(recallNeed(30n * U, 10n * U, 35n * U, 100n * U), 15n * U);
+  assert.equal(recallNeed(30n * U, 10n * U, 35n * U, 5n * U), 5n * U, "capped by what is in the market");
+  assert.equal(recallNeed(50n * U, 10n * U, 35n * U, 100n * U), 0n, "cash on hand covers it");
+  assert.equal(recallNeed(0n, 10n * U, 35n * U, 0n), 0n, "nothing in the market");
 });

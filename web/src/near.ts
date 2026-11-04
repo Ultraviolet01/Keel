@@ -35,6 +35,21 @@ export async function view<T>(contractId: string, methodName: string, args: obje
   return JSON.parse(new TextDecoder().decode(new Uint8Array(result.result))) as T;
 }
 
+/** The methods a function-call key may call on an account, or [] if the key is missing. */
+export async function keyMethods(accountId: string, publicKey: string): Promise<string[]> {
+  try {
+    const r = await rpc<{ permission?: { FunctionCall?: { method_names: string[] } } }>("query", {
+      request_type: "view_access_key",
+      finality: "optimistic",
+      account_id: accountId,
+      public_key: publicKey,
+    });
+    return r.permission?.FunctionCall?.method_names ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** True if a NEAR account with this id exists. */
 export async function accountExists(accountId: string): Promise<boolean> {
   try {

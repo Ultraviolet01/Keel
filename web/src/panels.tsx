@@ -15,7 +15,7 @@ import {
   type TokenMetadata,
 } from "./near";
 import { Copy, LoadLine, Shield, Wallet, X } from "./icons";
-import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, billId, isEvmAddress, type VaultPayee } from "./bills";
+import { BILL_CHAINS, BURROW, CATEGORIES, PAYEE_KINDS, billId, isEvmAddress, type VaultPayee } from "./bills";
 
 /** Sends one function call from the signed-in wallet; resolves to the outcome. */
 export type Send = (
@@ -790,12 +790,21 @@ export function BillPanel(props: { vaultId: string; token: TokenMetadata; policy
   );
 }
 
-export function PayeePanel(props: { vaultId: string; token: TokenMetadata; policy: Policy; send: Send; onClose: () => void; onSaved: () => Promise<void> }) {
+export function PayeePanel(props: {
+  vaultId: string;
+  token: TokenMetadata;
+  policy: Policy;
+  agentMethods?: string[];
+  send: Send;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
   const [name, setName] = useState("");
   const [account, setAccount] = useState("");
   const [kind, setKind] = useState("vendor");
   const [keepAt, setKeepAt] = useState("");
   const [maxMove, setMaxMove] = useState("");
+  const [lending, setLending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = account.trim().toLowerCase();
@@ -805,6 +814,8 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
   const maxRaw = maxMove ? parseToken(maxMove, props.token.decimals) : null;
   // Older vaults have no yield kind or cash buffer; the option only appears where the vault enforces it.
   const yieldReady = props.policy.min_balance !== undefined;
+  // Lending markets need the vault code with recall_from_yield; the agent key lists it there.
+  const lendingReady = (props.agentMethods ?? []).includes("recall_from_yield");
   const problem = !name.trim()
     ? "Name the payee, for example Company card"
     : !ACCOUNT.test(id)
@@ -824,7 +835,14 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
     setBusy(true);
     setError(null);
     try {
-      const payee = { account_id: id, name: name.trim(), kind, keep_at: tops && keepRaw ? keepRaw : null, ...(yieldReady ? { max_move: isYield ? maxRaw : null } : {}) };
+      const payee = {
+        account_id: id,
+        name: name.trim(),
+        kind,
+        keep_at: tops && keepRaw ? keepRaw : null,
+        ...(yieldReady ? { max_move: isYield ? maxRaw : null } : {}),
+        ...(lendingReady ? { lending: isYield && lending } : {}),
+      };
       await props.send(props.vaultId, "add_payee", { payee }, { deposit: "1", gas: "30000000000000" });
       await props.onSaved();
       props.onClose();
@@ -869,6 +887,22 @@ export function PayeePanel(props: { vaultId: string; token: TokenMetadata; polic
           <span className="label">NEAR account</span>
           <input className="mono-input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="card.yourcompany.testnet" />
         </label>
+        {isYield && lendingReady && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={lending}
+              onChange={(e) => {
+                setLending(e.target.checked);
+                if (e.target.checked) {
+                  setAccount(FACTORY_ID.endsWith(".near") ? BURROW.mainnet : BURROW.testnet);
+                  if (!name) setName("Burrow lending");
+                }
+              }}
+            />{" "}
+            It's a lending market (Burrow): deposits earn interest in the vault's own account there
+          </label>
+        )}
         {isYield && (
           <label className="field">
             <span className="label">Most Keel may move at once</span>

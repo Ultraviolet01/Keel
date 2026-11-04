@@ -1127,7 +1127,7 @@ fn bill_category_must_be_known() {
 }
 
 fn payee(id: &str, kind: &str, keep_at: Option<u128>) -> Payee {
-    Payee { account_id: acc(id), name: "Company card".into(), kind: kind.into(), keep_at: keep_at.map(|k| U128(k * USDC)), max_move: None }
+    Payee { account_id: acc(id), name: "Company card".into(), kind: kind.into(), keep_at: keep_at.map(|k| U128(k * USDC)), max_move: None, lending: false }
 }
 
 #[test]
@@ -1293,7 +1293,7 @@ fn bills_can_be_critical() {
 // ------------------------------------------------------------ idle cash
 
 fn yield_payee(max: u128) -> Payee {
-    Payee { account_id: acc("savings.kora.testnet"), name: "Treasury savings".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)) }
+    Payee { account_id: acc("savings.kora.testnet"), name: "Treasury savings".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)), lending: false }
 }
 
 #[test]
@@ -1349,4 +1349,114 @@ fn idle_move_within_the_limit_goes_through_the_buffer_check() {
     // Holding 120 with a 100 buffer, moving 50 would leave 70: refused.
     as_callback(balance(120));
     assert!(matches!(v.on_balance_checked(acc("savings.kora.testnet"), U128(50 * USDC), None, 1, Some("idle:savings:2026-11-04".into())), PromiseOrValue::Value(false)));
+}
+
+// ------------------------------------------------------------ lending market (Burrow)
+
+const MARKET: &str = "contract.burrow.testnet";
+
+fn market_payee(max: u128) -> Payee {
+    Payee { account_id: acc(MARKET), name: "Burrow".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)), lending: true }
+}
+
+fn with_market() -> KeelVault {
+    let mut v = buffered(100);
+    as_owner(DAY);
+    v.add_payee(market_payee(50));
+    v
+}
+
+fn used(usdc: u128) -> PromiseResult {
+    PromiseResult::Successful(near_sdk::serde_json::to_vec(&U128(usdc * USDC)).unwrap())
+}
+
+#[test]
+#[should_panic(expected = "only a yield destination can be a lending market")]
+fn only_yield_destinations_are_lending_markets() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(Payee { kind: "vendor".into(), max_move: None, ..market_payee(1) });
+}
+
+#[test]
+fn deposit_into_the_market_is_credited_to_the_vault() {
+    let mut v = with_market();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc(MARKET), U128(50 * USDC), None, Some("idle:burrow:2026-11-04".into()));
+    as_callback(balance(300));
+    assert!(matches!(v.on_balance_checked(acc(MARKET), U128(50 * USDC), None, 1, Some("idle:burrow:2026-11-04".into())), PromiseOrValue::Promise(_)));
+    // The market kept all 50.
+    as_callback(used(50));
+    assert!(v.on_deposit_done(None, acc(MARKET), U128(50 * USDC), Some(1), Some("idle:burrow:2026-11-04".into()), Some(true)));
+    assert!(get_logs().iter().any(|l| l.contains("yield_deposited")));
+    assert!(v.bill_paid_at("idle:burrow:2026-11-04".into()).is_some());
+    assert_eq!(v.get_policy().spent_today, U128(50 * USDC));
+}
+
+#[test]
+fn deposit_the_market_refused_is_undone() {
+    let mut v = with_market();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc(MARKET), U128(50 * USDC), None, Some("idle:burrow:2026-11-04".into()));
+    as_callback(used(0));
+    assert!(!v.on_deposit_done(None, acc(MARKET), U128(50 * USDC), Some(1), Some("idle:burrow:2026-11-04".into()), Some(true)));
+    assert_eq!(v.bill_paid_at("idle:burrow:2026-11-04".into()), None, "it can be tried again");
+    assert_eq!(v.get_policy().spent_today, U128(0));
+    assert!(get_logs().iter().any(|l| l.contains("payment_failed")));
+}
+
+#[test]
+fn partial_deposit_counts_only_what_the_market_kept() {
+    let mut v = with_market();
+    as_agent(DAY);
+    let _ = v.execute_payment(acc(MARKET), U128(50 * USDC), None, None);
+    as_callback(used(20));
+    assert!(v.on_deposit_done(None, acc(MARKET), U128(50 * USDC), Some(1), None, Some(true)));
+    assert_eq!(v.get_policy().spent_today, U128(20 * USDC));
+}
+
+#[test]
+fn agent_can_bring_savings_home() {
+    let mut v = with_market();
+    as_agent(DAY);
+    let _ = v.recall_from_yield(acc(MARKET), Some(U128(30 * USDC * 1_000_000_000_000)));
+    assert!(get_logs().iter().any(|l| l.contains("yield_recall_started")));
+    as_callback(PromiseResult::Successful(vec![]));
+    assert!(v.on_recall_done(acc(MARKET), None));
+    assert!(get_logs().iter().any(|l| l.contains("yield_recalled")));
+}
+
+#[test]
+fn owner_can_bring_savings_home_even_while_paused() {
+    let mut v = with_market();
+    as_owner(DAY);
+    v.pause();
+    as_owner(DAY);
+    let _ = v.recall_from_yield(acc(MARKET), None);
+}
+
+#[test]
+#[should_panic(expected = "only the agent can call this")]
+fn stranger_cannot_recall() {
+    let mut v = with_market();
+    set_ctx("mallory.testnet", DAY, 0);
+    let _ = v.recall_from_yield(acc(MARKET), None);
+}
+
+#[test]
+#[should_panic(expected = "not one of the vault's lending markets")]
+fn recall_only_from_an_approved_market() {
+    let mut v = with_market();
+    as_agent(DAY);
+    let _ = v.recall_from_yield(acc("evil-market.testnet"), None);
+}
+
+#[test]
+#[should_panic(expected = "not one of the vault's lending markets")]
+fn a_plain_yield_destination_is_not_a_market() {
+    let mut v = buffered(100);
+    as_owner(DAY);
+    v.add_payee(yield_payee(50));
+    as_agent(DAY);
+    let _ = v.recall_from_yield(acc("savings.kora.testnet"), None);
 }

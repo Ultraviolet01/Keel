@@ -66,6 +66,18 @@ export interface VaultPayee {
   kind: string;
   keep_at?: string | null; // smallest units; Keel tops a card or own wallet up to this
   max_move?: string | null; // smallest units; the most Keel moves to a yield destination at once
+  lending?: boolean; // a lending market (Burrow): deposits earn in the vault's own account there
+}
+
+/**
+ * How much to bring home from the lending market before paying: enough that
+ * the bills due soon can be paid and the cash buffer still holds, never more
+ * than the vault has there. 0n when cash on hand already covers it.
+ */
+export function recallNeed(balance: bigint, buffer: bigint, dueSoon: bigint, inMarket: bigint): bigint {
+  const need = buffer + dueSoon - balance;
+  if (need <= 0n || inMarket <= 0n) return 0n;
+  return need < inMarket ? need : inMarket;
 }
 
 /**

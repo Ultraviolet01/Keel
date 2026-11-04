@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
+import { keyMethods, spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
 import { billDues, type VaultBill, type VaultPayee } from "./bills";
 
 export interface VaultData {
@@ -14,6 +14,26 @@ export interface VaultData {
   paid: Record<string, number>;
   /** Payees the owner named; null for vaults created before payees had names. */
   payees: VaultPayee[] | null;
+  /** Savings at an approved lending market (Burrow), if there is one. */
+  savings: { market: string; name: string; units: string; apr: number } | null;
+  /** What Keel's key may call on this vault (newer vaults add recall_from_yield). */
+  agentMethods: string[];
+}
+
+/** The vault's supply at its lending market, in the vault token's units. */
+async function loadSavings(vaultId: string, tokenId: string, payees: VaultPayee[] | null): Promise<VaultData["savings"]> {
+  const market = payees?.find((p) => p.kind === "yield" && p.lending);
+  if (!market) return null;
+  try {
+    const [acct, asset] = await Promise.all([
+      view<{ supplied: { token_id: string; balance: string }[] } | null>(market.account_id, "get_account", { account_id: vaultId }),
+      view<{ config: { extra_decimals: number }; supply_apr: string }>(market.account_id, "get_asset", { token_id: tokenId }),
+    ]);
+    const inner = BigInt(acct?.supplied.find((s) => s.token_id === tokenId)?.balance ?? "0");
+    return { market: market.account_id, name: market.name, units: (inner / 10n ** BigInt(asset.config.extra_decimals)).toString(), apr: Number(asset.supply_apr) };
+  } catch {
+    return { market: market.account_id, name: market.name, units: "0", apr: 0 };
+  }
 }
 
 async function loadBills(vaultId: string): Promise<{ bills: VaultBill[] | null; paid: Record<string, number> }> {
@@ -47,7 +67,11 @@ export function useVault(vaultId: string | null) {
         loadBills(vaultId),
         view<VaultPayee[]>(vaultId, "get_payees").catch(() => null),
       ]);
-      setData({ policy, token, balance, gas, proposals, ...listed, payees });
+      const [savings, agentMethods] = await Promise.all([
+        loadSavings(vaultId, policy.token_id, payees),
+        policy.agent_key ? keyMethods(vaultId, policy.agent_key) : Promise.resolve([]),
+      ]);
+      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods });
       setError(null);
     } catch (e) {
       setError(String(e));

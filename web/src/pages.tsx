@@ -224,6 +224,7 @@ export function Overview(p: PageProps) {
 
       <div className="wallet-row">
         <VaultCard p={p} />
+        {d.savings ? <SavingsCard p={p} /> : (
         <section className="card card-pad add-wallet">
           <b>Wallets on other chains</b>
           <span className="muted small">The vault's own address on Base, Ethereum, Arbitrum and Optimism, signed through NEAR Chain Signatures.</span>
@@ -231,6 +232,7 @@ export function Overview(p: PageProps) {
             See addresses
           </button>
         </section>
+        )}
       </div>
 
       <div className="ov-bottom">
@@ -332,6 +334,44 @@ function UpcomingBills({ p }: { p: PageProps }) {
             );
           })}
         </ul>
+      )}
+      {error && <p className="error">{error}</p>}
+    </section>
+  );
+}
+
+function SavingsCard({ p }: { p: PageProps }) {
+  const d = p.data;
+  const s = d.savings!;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const home = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      // Everything comes back to the vault; nowhere else is possible.
+      await p.send(p.vaultId, "recall_from_yield", { market: s.market, max_amount: null }, { deposit: "1", gas: "150000000000000" });
+      await p.reload();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e).slice(0, 160));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card card-pad add-wallet">
+      <b>Savings in {s.name}</b>
+      <span className="num">
+        {amt(s.units, d)}
+        {s.apr > 0 ? ` · earning about ${(s.apr * 100).toFixed(1)}% a year` : ""}
+      </span>
+      <span className="muted small">
+        Keel moves cash above your buffer and the next 14 days of bills here, and brings it home when bills need it. It can only come back to this vault.
+      </span>
+      {p.canAct && s.units !== "0" && (
+        <button className="btn sm" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={home}>
+          {busy ? "Approve in your wallet" : "Bring it all home"}
+        </button>
       )}
       {error && <p className="error">{error}</p>}
     </section>
@@ -835,6 +875,7 @@ export function Payees(p: PageProps) {
                   {r.payee ? ` · ${PAYEE_KINDS[r.payee.kind]?.label ?? r.payee.kind}` : ""}
                   {r.payee?.keep_at ? ` · kept at ${amt(r.payee.keep_at, d)}` : ""}
                   {r.payee?.max_move ? ` · idle cash, up to ${amt(r.payee.max_move, d)} per move` : ""}
+                  {r.payee?.lending ? " · lending market" : ""}
                 </span>
                 <span className="bill-side">
                   {p.canAct && !r.blocked && (

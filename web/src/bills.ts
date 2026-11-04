@@ -43,7 +43,12 @@ export interface VaultPayee {
   keep_at?: string | null;
   /** For a yield destination: the most Keel moves there at once. */
   max_move?: string | null;
+  /** A lending market (Burrow): deposits earn in the vault's own account there. */
+  lending?: boolean;
 }
+
+/** Burrow's lending contract on each network. */
+export const BURROW = { testnet: "contract.1638481328.burrow.testnet", mainnet: "contract.main.burrow.near" };
 
 export const PAYEE_KINDS: Record<string, { label: string; note: string }> = {
   vendor: { label: "Vendor", note: "A supplier with a NEAR account" },

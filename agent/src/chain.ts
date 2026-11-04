@@ -176,13 +176,32 @@ export class Chain {
   }
 
   /** Signs a call as the vault with the agent key. Returns the transaction hash and the decoded return value. */
-  async callAsAgent(vaultId: string, methodName: "execute_payment" | "propose_payment", args: object) {
+  /**
+   * The vault's supply at a lending market (Burrow), in the vault token's
+   * units, and the market's supply APR. Burrow counts with extra decimals.
+   */
+  async lendingPosition(market: string, vaultId: string, tokenId: string): Promise<{ units: bigint; extra: number; apr: number }> {
+    const [acct, asset] = await Promise.all([
+      this.view<{ supplied: { token_id: string; balance: string }[] } | null>(market, "get_account", { account_id: vaultId }),
+      this.view<{ config: { extra_decimals: number }; supply_apr: string }>(market, "get_asset", { token_id: tokenId }),
+    ]);
+    const extra = asset.config.extra_decimals;
+    const inner = BigInt(acct?.supplied.find((s) => s.token_id === tokenId)?.balance ?? "0");
+    return { units: inner / 10n ** BigInt(extra), extra, apr: Number(asset.supply_apr) };
+  }
+
+  /**
+   * Signs as the vault with the agent key. Gas is kept low enough to pass the
+   * key's allowance check (0.25 NEAR at the pessimistic price): 100 Tgas for
+   * ordinary calls, 200 for a lending-market deposit, 150 for a recall.
+   */
+  async callAsAgent(vaultId: string, methodName: "execute_payment" | "propose_payment" | "recall_from_yield", args: object, tgas = 100) {
     const account = new Account(vaultId, this.provider, this.key().private_key as `ed25519:${string}`);
     const res = await account.callFunctionRaw({
       contractId: vaultId,
       methodName,
       args,
-      gas: 100_000_000_000_000n,
+      gas: BigInt(tgas) * 1_000_000_000_000n,
       deposit: 0n,
       waitUntil: "EXECUTED_OPTIMISTIC",
     });
