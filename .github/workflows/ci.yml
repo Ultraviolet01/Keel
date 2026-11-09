@@ -1,0 +1,49 @@
+# Checks every push and pull request: typechecks, tests and the app build.
+# Needs no keys and touches no chain (the testnet checks live in `npm run verify`).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: agent } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: agent/package-lock.json }
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npm test
+      - run: npx vite build
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: "contract\nfactory" }
+      - run: cargo fmt --check
+        working-directory: contract
+      - run: cargo test
+        working-directory: contract
+      - run: cargo test
+        working-directory: factory

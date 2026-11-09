@@ -3010,3 +3010,80 @@ fn a_failed_signature_gives_back_its_share_of_the_cap() {
         "and the bill can be paid again"
     );
 }
+
+// ------------------------------------- top-ups only fill a wallet to its target
+
+fn topped_vault() -> KeelVault {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_payee(payee("card.kora.testnet", "card", Some(50)));
+    as_agent(DAY);
+    let _ = v.execute_payment(
+        acc("card.kora.testnet"),
+        U128(30 * USDC),
+        None,
+        Some("top:card.kora.testnet:1970-01-02".into()),
+        None,
+    );
+    v
+}
+
+#[test]
+fn a_top_up_that_fits_under_the_target_is_paid() {
+    let mut v = topped_vault();
+    as_callback(balance(20)); // 20 held + 30 = 50, the target
+    assert!(matches!(
+        v.on_topup_checked(
+            acc("card.kora.testnet"),
+            U128(30 * USDC),
+            None,
+            DAY,
+            "top:card.kora.testnet:1970-01-02".into()
+        ),
+        PromiseOrValue::Promise(_)
+    ));
+}
+
+#[test]
+fn a_top_up_to_a_full_wallet_is_refused_and_undone() {
+    let mut v = topped_vault();
+    assert_eq!(v.get_policy().spent_today, U128(30 * USDC));
+    as_callback(balance(45)); // already near the target: 45 + 30 is over 50
+    assert!(matches!(
+        v.on_topup_checked(
+            acc("card.kora.testnet"),
+            U128(30 * USDC),
+            None,
+            DAY,
+            "top:card.kora.testnet:1970-01-02".into()
+        ),
+        PromiseOrValue::Value(false)
+    ));
+    assert_eq!(
+        v.get_policy().spent_today,
+        U128(0),
+        "the spend is given back"
+    );
+    assert!(
+        v.bill_paid_at("top:card.kora.testnet:1970-01-02".into())
+            .is_none(),
+        "and the day's top-up can be tried again"
+    );
+    assert!(get_logs().iter().any(|l| l.contains("over its target")));
+}
+
+#[test]
+fn a_top_up_with_an_unreadable_wallet_balance_is_refused() {
+    let mut v = topped_vault();
+    as_callback(PromiseResult::Failed);
+    assert!(matches!(
+        v.on_topup_checked(
+            acc("card.kora.testnet"),
+            U128(30 * USDC),
+            None,
+            DAY,
+            "top:card.kora.testnet:1970-01-02".into()
+        ),
+        PromiseOrValue::Value(false)
+    ));
+}

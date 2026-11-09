@@ -148,74 +148,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
       : undefined,
   );
 
-  // Reconcile cross-chain moves first, so signed transfers go out before new
-  // ones take a nonce. Follow each move until it is final, and
-  // re-quote any offer that expired before the owner approved it.
-  // Signed EVM transfers Keel did not propose (owner withdrawals) are sent too.
-  for (const p of proposals) {
-    if (p.status === "signed" && p.evm && knownChain(p.evm.chain_id) && !Object.values(handled).some((h) => h.proposalId === p.id)) {
-      handled[`evm-${p.id}`] = { action: "bridge", route: "chain-signatures", proposalId: p.id, at: new Date().toISOString() };
-    }
-  }
-  for (const [id, h] of Object.entries(handled)) {
-    if (h.action !== "bridge" || (h.swap && FINAL.includes(h.swap as never))) continue;
-    const p = proposals.find((x) => x.id === h.proposalId);
-    if (!p) continue;
-    if (p.status === "pending" && p.valid_until_ms && p.valid_until_ms < Date.now()) {
-      delete handled[id];
-      say("reconcile", `${id}: offer #${p.id} expired before approval; Keel will propose a fresh one`);
-      continue;
-    }
-    if (p.status === "pending" && p.evm && p.evm.nonce < (await usedNonces(chain, vaultId, p.evm.chain_id))) {
-      delete handled[id];
-      say("reconcile", `${id}: #${p.id} can no longer land because another transfer used its nonce; reject it, Keel will propose a fresh one`);
-      continue;
-    }
-    try {
-      if (h.route === "chain-signatures") {
-        if (p.status === "failed") {
-          h.swap = "FAILED";
-          say("reconcile", `${id}: NEAR's MPC network did not sign #${p.id}`);
-        } else if (p.status === "signed" && p.evm_signed && p.evm) {
-          const { raw_tx, tx_hash } = p.evm_signed;
-          if (!h.evmTx) {
-            // Already on chain (for example after a restart): just record it.
-            const landed = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
-            if (landed) {
-              if (!o.dryRun) Object.assign(h, { evmTx: tx_hash, chainId: p.evm.chain_id, swap: landed });
-              say("reconcile", `${id}: #${p.id} already ${landed === "SUCCESS" ? "paid" : "reverted"} on ${chainInfo(p.evm.chain_id).name}`);
-              continue;
-            }
-          }
-          if (!h.evmTx && o.dryRun) {
-            say("reconcile", `${id}: #${p.id} is signed; would broadcast it (dry run)`);
-            continue;
-          }
-          if (!h.evmTx) {
-            if ((await broadcast(p.evm.chain_id, raw_tx as `0x${string}`, tx_hash as `0x${string}`)) === "stale") {
-              delete handled[id];
-              say("reconcile", `${id}: #${p.id} was signed with a nonce another transfer already used, so it never arrived. The vault still counts the bill as paid; once you confirm, call release_bill("${p.bill_ref ?? id}") and Keel will propose it again`);
-              continue;
-            }
-            h.evmTx = tx_hash;
-            h.chainId = p.evm.chain_id;
-            say("reconcile", `${id}: broadcast the vault-signed transfer on ${chainInfo(p.evm.chain_id).name}: ${chainInfo(p.evm.chain_id).explorer}/tx/${tx_hash}`);
-          }
-          const r = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
-          if (r) {
-            h.swap = r;
-            say("reconcile", `${id}: ${r === "SUCCESS" ? "paid" : "the transfer reverted"} on ${chainInfo(p.evm.chain_id).name}`);
-          }
-        }
-      } else if (h.depositAddress && p.status === "executed") {
-        h.swap = await swapStatus(h.depositAddress);
-        say("reconcile", `${id}: NEAR Intents status ${h.swap}`);
-      }
-    } catch (e) {
-      const msg = (e as { shortMessage?: string }).shortMessage ?? String(e);
-      say("reconcile", `${id}: could not follow the cross-chain move yet (${msg.slice(0, 140)}); will retry`);
-    }
-  }
+  await reconcile(chain, vaultId, proposals, handled, o, say);
 
   // Decide and act on bills due soon
   const dueBy = new Date(`${o.today}T00:00:00Z`);
@@ -321,7 +254,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     try {
       if (action.kind === "pay") {
         const lendingDeposit = market?.account_id === bill.payee;
-        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) }, lendingDeposit ? 200 : 100);
+        const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, ...ref(bill) }, lendingDeposit ? 200 : bill.id.startsWith("top:") ? 150 : 100);
         // The transaction can succeed while the vault declines inside it: a
         // cash-buffer refusal or a failed token transfer both end in false.
         // Nothing was paid, the bill stays open, and Keel looks again next run.
@@ -382,6 +315,95 @@ function reviewInput(company: string, bill: Bill, payees: { account_id: string; 
     knownPayees: payees.filter((p) => p.account_id !== bill.payee).map((p) => `${p.name} (${p.account_id})`).slice(0, 30),
     memo: bill.memo,
   };
+}
+
+/**
+ * Follows cross-chain moves before new ones are made, so signed transfers go out
+ * before new ones take a nonce: broadcasts what the vault signed, records receipts,
+ * flags transfers that can no longer land, and drops offers that expired before
+ * approval so Keel proposes a fresh one.
+ */
+async function reconcile(chain: Chain, vaultId: string, proposals: Proposal[], handled: State["handled"][string], o: RoundOptions, say: (step: string, text: string, tx?: string, notice?: Notice) => void) {
+  // Reconcile cross-chain moves first, so signed transfers go out before new
+  // ones take a nonce. Follow each move until it is final, and
+  // re-quote any offer that expired before the owner approved it.
+  // Signed EVM transfers Keel did not propose (owner withdrawals) are sent too.
+  for (const p of proposals) {
+    if (p.status === "signed" && p.evm && knownChain(p.evm.chain_id) && !Object.values(handled).some((h) => h.proposalId === p.id)) {
+      handled[`evm-${p.id}`] = { action: "bridge", route: "chain-signatures", proposalId: p.id, at: new Date().toISOString() };
+    }
+  }
+  for (const [id, h] of Object.entries(handled)) {
+    if (h.action !== "bridge" || (h.swap && FINAL.includes(h.swap as never))) continue;
+    const p = proposals.find((x) => x.id === h.proposalId);
+    if (!p) continue;
+    if (p.status === "pending" && p.valid_until_ms && p.valid_until_ms < Date.now()) {
+      delete handled[id];
+      say("reconcile", `${id}: offer #${p.id} expired before approval; Keel will propose a fresh one`);
+      continue;
+    }
+    if (p.status === "pending" && p.evm && p.evm.nonce < (await usedNonces(chain, vaultId, p.evm.chain_id))) {
+      delete handled[id];
+      say("reconcile", `${id}: #${p.id} can no longer land because another transfer used its nonce; reject it, Keel will propose a fresh one`);
+      continue;
+    }
+    try {
+      if (h.route === "chain-signatures") {
+        if (p.status === "failed") {
+          h.swap = "FAILED";
+          say("reconcile", `${id}: NEAR's MPC network did not sign #${p.id}`);
+        } else if (p.status === "signed" && p.evm_signed && p.evm) {
+          const { raw_tx, tx_hash } = p.evm_signed;
+          // A nonce ahead of every transfer still waiting can never land: say so instead of retrying quietly.
+          const next = await usedNonces(chain, vaultId, p.evm.chain_id);
+          const earlier = proposals.some((x) => x.evm && x.evm.chain_id === p.evm!.chain_id && x.evm.nonce >= next && x.evm.nonce < p.evm!.nonce && ["pending", "signing", "signed"].includes(x.status));
+          if (!h.evmTx && p.evm.nonce > next && !earlier) {
+            say("reconcile", `${id}: #${p.id} was signed with nonce ${p.evm.nonce}, but the vault's ${chainInfo(p.evm.chain_id).name} address is at nonce ${next} and nothing in between is waiting, so it cannot land. Once you confirm, call release_bill("${p.bill_ref ?? id}") and Keel will pay it again`, undefined, {
+              kind: "vault_refused",
+              key: `${vaultId}:stuck-nonce:${p.id}`,
+              text: `A transfer the vault signed on ${chainInfo(p.evm.chain_id).name} (#${p.id}) has a nonce that cannot land. Nothing was sent. Release the bill with release_bill("${p.bill_ref ?? id}") so Keel pays it again.`,
+            });
+            continue;
+          }
+          if (!h.evmTx) {
+            // Already on chain (for example after a restart): just record it.
+            const landed = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
+            if (landed) {
+              if (!o.dryRun) Object.assign(h, { evmTx: tx_hash, chainId: p.evm.chain_id, swap: landed });
+              say("reconcile", `${id}: #${p.id} already ${landed === "SUCCESS" ? "paid" : "reverted"} on ${chainInfo(p.evm.chain_id).name}`);
+              continue;
+            }
+          }
+          if (!h.evmTx && o.dryRun) {
+            say("reconcile", `${id}: #${p.id} is signed; would broadcast it (dry run)`);
+            continue;
+          }
+          if (!h.evmTx) {
+            if ((await broadcast(p.evm.chain_id, raw_tx as `0x${string}`, tx_hash as `0x${string}`)) === "stale") {
+              delete handled[id];
+              say("reconcile", `${id}: #${p.id} was signed with a nonce another transfer already used, so it never arrived. The vault still counts the bill as paid; once you confirm, call release_bill("${p.bill_ref ?? id}") and Keel will propose it again`);
+              continue;
+            }
+            h.evmTx = tx_hash;
+            h.chainId = p.evm.chain_id;
+            say("reconcile", `${id}: broadcast the vault-signed transfer on ${chainInfo(p.evm.chain_id).name}: ${chainInfo(p.evm.chain_id).explorer}/tx/${tx_hash}`);
+          }
+          const r = await receipt(p.evm.chain_id, tx_hash as `0x${string}`);
+          if (r) {
+            h.swap = r;
+            say("reconcile", `${id}: ${r === "SUCCESS" ? "paid" : "the transfer reverted"} on ${chainInfo(p.evm.chain_id).name}`);
+          }
+        }
+      } else if (h.depositAddress && p.status === "executed") {
+        h.swap = await swapStatus(h.depositAddress);
+        say("reconcile", `${id}: NEAR Intents status ${h.swap}`);
+      }
+    } catch (e) {
+      const msg = (e as { shortMessage?: string }).shortMessage ?? String(e);
+      say("reconcile", `${id}: could not follow the cross-chain move yet (${msg.slice(0, 140)}); will retry`);
+    }
+  }
+
 }
 
 /**
