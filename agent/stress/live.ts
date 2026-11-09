@@ -262,7 +262,7 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
     ["with no bill_ref", { receiver_id: PAYEE, amount: String(U) }, /needs a bill_ref/],
     ["for a made-up bill", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-invented` }, /no such bill/],
     ["of a bill to another approved payee", { receiver_id: "payroll-keel.testnet", amount: String(U), bill_ref: `${run}-nw` }, /does not match the owner's bill/],
-    ["of a bill with another amount", { receiver_id: PAYEE, amount: String(2n * U), bill_ref: `${run}-nw` }, /does not match the owner's bill/],
+    ["of a bill with another amount", { receiver_id: PAYEE, amount: String(U / 2n), bill_ref: `${run}-nw` }, /does not match the owner's bill/],
     ["of a monthly bill a year early", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-rent:${nextYear}` }, /period does not fit/],
     ["as a top-up to a vendor", { receiver_id: PAYEE, amount: String(U), bill_ref: `top:${PAYEE}:${today}` }, /top-ups only go to a card or own wallet/],
     ["as idle cash to a non-yield payee", { receiver_id: PAYEE, amount: String(U), bill_ref: `idle:${PAYEE}:${today}` }, /idle cash only goes to a yield destination/],
