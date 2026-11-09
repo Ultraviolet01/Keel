@@ -10,7 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { describeCall, multisigOf } from "./multisig";
+import { describeCall, multisigOf, proposalCall, readArgs, type DaoProposal, type Multisig } from "./multisig";
 import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSamples, billDues } from "./bills";
 
 export interface PageProps {
@@ -1063,13 +1063,60 @@ export function Rules(p: PageProps) {
 
 const TGAS = (n: number) => `${n}000000000000`;
 
-/** Optional multisig ownership: open votes for a DAO-owned vault, or the hand-over form for a single owner. */
+/** Open proposals on a multisig for this vault, with the exact calls and arguments, and vote buttons for members. */
+function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list: DaoProposal[]; busy: string | null; act: (key: string, run: () => Promise<unknown>) => void }) {
+  const need = ms.threshold ? Math.min(Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1, ms.members.length) : null;
+  const member = ms.members.includes(p.accountId);
+  if (list.length === 0) return <p className="muted small">No open proposals for this vault.</p>;
+  return (
+    <>
+      {list.map((x) => {
+        const yes = Object.values(x.votes).filter((v) => v === "Approve").length;
+        const no = Object.values(x.votes).filter((v) => v === "Reject").length;
+        const voted = p.accountId in x.votes;
+        const actions = x.kind.FunctionCall?.actions ?? [];
+        const vote = (action: "VoteApprove" | "VoteReject") =>
+          act(`${x.id}:${action}`, () => p.send(ms.dao, "act_proposal", { id: x.id, action, proposal: x.kind }, { gas: TGAS(300) }));
+        return (
+          <div className="ms-prop" key={x.id}>
+            <span>
+              <b>#{x.id} {[...new Set(actions.map((a) => describeCall(a.method_name)))].join(", ") || "Proposal"}</b>
+              {actions.map((a, k) => (
+                <span key={k} className="mono tiny wrap-any">
+                  {a.method_name}({readArgs(a.args)}){a.deposit !== "1" && a.deposit !== "0" ? `, attaches ${formatNear(a.deposit)} NEAR` : ""}
+                </span>
+              ))}
+              <span className="muted small">
+                Filed by <span className="mono">{x.proposer}</span>. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}. Check the
+                arguments above, not the description.
+              </span>
+            </span>
+            {p.canAct && member && !voted ? (
+              <span className="agent-actions">
+                <button className="btn sm" onClick={() => vote("VoteReject")} disabled={busy !== null}>Reject</button>
+                <button className="btn dark sm" onClick={() => vote("VoteApprove")} disabled={busy !== null}>
+                  {busy === `${x.id}:VoteApprove` ? "Approve in wallet" : "Approve"}
+                </button>
+              </span>
+            ) : (
+              <span className="pill muted">{voted ? `You voted ${x.votes[p.accountId].toLowerCase()}` : "Members vote"}</span>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** Optional multisig ownership: votes for a DAO-owned vault, the open offer, or the hand-over form. */
 function MultisigCard({ p }: { p: PageProps }) {
   const d = p.data;
   const ms = d.multisig;
+  const pending = d.policy.pending_owner ?? null;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [team, setTeam] = useState("");
+  const isOwner = d.policy.owner_id === p.accountId;
 
   const act = async (key: string, run: () => Promise<unknown>) => {
     setBusy(key);
@@ -1078,24 +1125,23 @@ function MultisigCard({ p }: { p: PageProps }) {
       await run();
       await p.reload();
     } catch (e) {
-      setError(/transfer_owner|MethodNotFound|MethodResolveError/.test(String(e)) && key === "hand"
-        ? "This vault was created before hand-over existed. Create a new company to get it."
-        : String(e));
+      setError(String(e));
     } finally {
       setBusy(null);
     }
   };
 
+  const errorLine = error && <p className="error">{error}</p>;
+
   if (ms) {
-    const need = ms.threshold ? Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1 : null;
-    const member = ms.members.includes(p.accountId);
+    const need = ms.threshold ? Math.min(Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1, ms.members.length) : null;
     return (
       <section className="card card-pad gap-top">
         <div className="card-head">
           <div>
             <h2>Multisig owner</h2>
             <p className="sub">
-              <span className="mono">{ms.dao}</span> owns this vault. Changes run once {need ? `${Math.min(need, ms.members.length)} of ${ms.members.length}` : "enough"} members approve them.
+              <span className="mono">{ms.dao}</span> owns this vault. Changes run once {need ? `${need} of ${ms.members.length}` : "enough"} members approve them.
             </p>
           </div>
           <a className="btn" href={ACCOUNT_URL + ms.dao} target="_blank" rel="noreferrer">View multisig</a>
@@ -1103,47 +1149,74 @@ function MultisigCard({ p }: { p: PageProps }) {
         <div className="ms-members">
           {ms.members.map((m) => <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`}>{m}</span>)}
         </div>
-        {d.multisigProposals.length === 0 && <p className="muted small">No open proposals for this vault.</p>}
-        {d.multisigProposals.map((x) => {
-          const yes = Object.values(x.votes).filter((v) => v === "Approve").length;
-          const no = Object.values(x.votes).filter((v) => v === "Reject").length;
-          const voted = p.accountId in x.votes;
-          const what = (x.kind.FunctionCall?.actions ?? []).map((a) => describeCall(a.method_name));
-          const vote = (action: "VoteApprove" | "VoteReject") =>
-            act(`${x.id}:${action}`, () => p.send(ms.dao, "act_proposal", { id: x.id, action, proposal: x.kind }, { gas: TGAS(250) }));
-          return (
-            <div className="ms-prop" key={x.id}>
-              <span>
-                <b>#{x.id} {[...new Set(what)].join(", ") || x.description}</b>
-                <span className="muted small">Filed by <span className="mono">{x.proposer}</span>. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}.</span>
-              </span>
-              {p.canAct && member && !voted ? (
-                <span className="agent-actions">
-                  <button className="btn sm" onClick={() => vote("VoteReject")} disabled={busy !== null}>Reject</button>
-                  <button className="btn dark sm" onClick={() => vote("VoteApprove")} disabled={busy !== null}>
-                    {busy === `${x.id}:VoteApprove` ? "Approve in wallet" : "Approve"}
-                  </button>
-                </span>
-              ) : (
-                <span className="pill muted">{voted ? `You voted ${x.votes[p.accountId].toLowerCase()}` : "Members vote"}</span>
-              )}
-            </div>
-          );
-        })}
-        {error && <p className="error">{error}</p>}
+        {pending && <p className="small brass">This vault is offered to <span className="mono">{pending}</span>; it has not accepted.</p>}
+        <DaoVotes p={p} ms={ms} list={d.multisigProposals} busy={busy} act={act} />
+        {errorLine}
       </section>
     );
   }
 
-  if (!p.canAct || d.policy.owner_id !== p.accountId) return null;
+  // An open offer: the owner can withdraw it; the offered account (or its members) accept.
+  if (pending) {
+    const team = d.offeredTo;
+    const member = !!team && team.members.includes(p.accountId);
+    const fileAccept = () =>
+      act("accept", () =>
+        p.send(team!.dao, "add_proposal", proposalCall(p.vaultId, [{ methodName: "accept_owner", args: {}, gas: TGAS(60), deposit: "1" }], `Keel: accept ownership of ${p.vaultId}`), {
+          deposit: team!.bond,
+          gas: TGAS(50),
+        }).then(() => p.onTeam(team!.dao)),
+      );
+    return (
+      <section className="card card-pad gap-top">
+        <div className="card-head">
+          <div>
+            <h2>Ownership offered</h2>
+            <p className="sub">
+              {isOwner ? "You offered" : <><span className="mono">{d.policy.owner_id}</span> offered</>} this vault to <span className="mono">{pending}</span>. Nothing
+              changes until it accepts. Before accepting, check this vault's payees, bills and limits: the current owner set them, and Keel will
+              follow them.
+            </p>
+          </div>
+          {p.canAct && isOwner && (
+            <button className="btn" onClick={() => act("cancel", () => p.send(p.vaultId, "cancel_owner_transfer", {}, { deposit: "1" }))} disabled={busy !== null}>
+              {busy === "cancel" ? "Approve in wallet" : "Withdraw offer"}
+            </button>
+          )}
+        </div>
+        {p.onSignOut && p.accountId === pending && (
+          <button className="btn dark" onClick={() => act("accept", () => p.send(p.vaultId, "accept_owner", {}, { deposit: "1", gas: TGAS(60) }))} disabled={busy !== null}>
+            {busy === "accept" ? "Approve in wallet" : "Accept ownership"}
+          </button>
+        )}
+        {team && (
+          <>
+            <p className="muted small">
+              <span className="mono">{team.dao}</span> is a multisig: a member files the acceptance, then members vote on it.
+            </p>
+            {p.onSignOut && member && d.offerProposals.length === 0 && (
+              <button className="btn dark" onClick={fileAccept} disabled={busy !== null}>
+                {busy === "accept" ? "Approve in wallet" : `File acceptance on ${team.dao}`}
+              </button>
+            )}
+            <DaoVotes p={{ ...p, canAct: !!p.onSignOut }} ms={team} list={d.offerProposals} busy={busy} act={act} />
+          </>
+        )}
+        {errorLine}
+      </section>
+    );
+  }
 
-  const handOver = () =>
+  if (!p.canAct || !isOwner) return null;
+  const supported = "pending_owner" in d.policy;
+
+  const offer = () =>
     act("hand", async () => {
       const dao = team.trim().toLowerCase();
       const found = await multisigOf(dao);
       if (!found) throw new Error(`${dao} is not a multisig (Sputnik DAO) account on testnet.`);
       if (!found.members.includes(p.accountId)) throw new Error(`You are not a member of ${dao}, so you would lose access to this vault.`);
-      await p.send(p.vaultId, "transfer_owner", { new_owner_id: dao }, { deposit: "1", gas: TGAS(60) });
+      await p.send(p.vaultId, "transfer_owner", { new_owner_id: dao }, { deposit: "1" });
       p.onTeam(dao);
     });
 
@@ -1153,18 +1226,22 @@ function MultisigCard({ p }: { p: PageProps }) {
         <div>
           <h2>Hand ownership to a multisig</h2>
           <p className="sub">
-            Optional. Give this vault to your team's multisig (a Sputnik DAO, like a Trezu treasury). Every change after that, from limits to
-            approvals, becomes a proposal the members vote on. Keel keeps running as before. You cannot undo it alone.
+            Optional. Offer this vault to your team's multisig (a Sputnik DAO, like a Trezu treasury). Once its members accept, every change, from
+            limits to approvals, becomes a proposal they vote on. Keel keeps running as before.
           </p>
         </div>
       </div>
-      <div className="team-form" style={{ padding: 0 }}>
-        <input className="input" placeholder="team.sputnikv2.testnet" value={team} onChange={(e) => setTeam(e.target.value)} />
-        <button className="btn dark" onClick={handOver} disabled={!team.trim() || busy !== null}>
-          {busy === "hand" ? "Approve in wallet" : "Hand over"}
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
+      {supported ? (
+        <div className="team-form" style={{ padding: 0 }}>
+          <input placeholder="team.sputnikv2.testnet" value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Multisig account" />
+          <button className="btn dark" onClick={offer} disabled={!team.trim() || busy !== null}>
+            {busy === "hand" ? "Approve in wallet" : "Offer"}
+          </button>
+        </div>
+      ) : (
+        <p className="muted small">This vault was created before safe hand-over existed. Create a new company to use a multisig.</p>
+      )}
+      {errorLine}
     </section>
   );
 }

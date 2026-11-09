@@ -13,7 +13,7 @@
 - **Invoice text is untrusted.** It never reaches the model that writes reasons; the app shows it quoted and marked unverified. Invoice reading returns a draft whose values are re-checked, and an address from an invoice that is not an approved payee is flagged and always needs approval.
 - **A stolen agent key cannot flood the vault.** At most 50 proposals wait at once, a newer proposal for the same bill replaces the old one, and Keel's calls are refused once the vault's spare NEAR would fall under 0.2. The owner can always approve, pause, withdraw and remove Keel's key.
 - **The founder can fire Keel.** `revoke_agent` deletes the key in one transaction; `set_agent_key` adds one back.
-- **Optional multisig owner.** A vault can be handed to a Sputnik DAO multisig with `transfer_owner`; then no single wallet can change the rules, approve a payment or withdraw, and Keel's key stays limited to the same three methods. The factory and the vault both record the new owner, and the app warns if they disagree.
+- **Optional multisig owner.** A vault can be handed to a Sputnik DAO multisig; then no single wallet can change the rules, approve a payment or withdraw, and Keel's key stays limited to the same three methods. The hand-over takes two steps, an offer by the owner and an acceptance by the multisig's vote, so nobody can push a vault already set up with their own payees and bills onto a team. The factory and the vault both record the new owner, and the app warns if they disagree. Before members vote, the app shows each proposal's exact calls and arguments, not only its description.
 - **Rule changes are public.** Every `update_policy` emits the old value, new value, reason and approver.
 
 **Counterparty check:** before any payment, Keel scores the payee.

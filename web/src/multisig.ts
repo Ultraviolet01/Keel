@@ -50,8 +50,8 @@ export async function openProposalsFor(dao: string, vaultId: string): Promise<Da
   return list.filter((p) => p.status === "InProgress" && p.kind.FunctionCall?.receiver_id === vaultId).reverse();
 }
 
-/** A DAO proposal action may carry at most this much gas; Sputnik runs it when the last vote lands. */
-const MAX_ACTION_GAS = 150_000_000_000_000n;
+/** Gas all of a proposal's actions may use together; Sputnik runs them inside the final vote (sent with 300 Tgas). */
+const MAX_PROPOSAL_GAS = 200_000_000_000_000n;
 
 /**
  * The add_proposal call that asks the DAO to make these vault calls. The DAO
@@ -64,12 +64,12 @@ export function proposalCall(vaultId: string, calls: { methodName: string; args:
       kind: {
         FunctionCall: {
           receiver_id: vaultId,
-          actions: calls.map((c) => ({
-            method_name: c.methodName,
-            args: toBase64(c.args),
-            deposit: c.deposit,
-            gas: (BigInt(c.gas) > MAX_ACTION_GAS ? MAX_ACTION_GAS : BigInt(c.gas)).toString(),
-          })),
+          actions: calls.map((c) => {
+            // The final vote's transaction carries the whole batch, so the actions share one budget.
+            const share = MAX_PROPOSAL_GAS / BigInt(calls.length);
+            const want = BigInt(c.gas);
+            return { method_name: c.methodName, args: toBase64(c.args), deposit: c.deposit, gas: (want > share ? share : want).toString() };
+          }),
         },
       },
     },
@@ -77,6 +77,15 @@ export function proposalCall(vaultId: string, calls: { methodName: string; args:
 }
 
 export const toBase64 =(o: object) => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+
+/** A proposal action's arguments as readable JSON, so members see exactly what they vote for. */
+export function readArgs(b64: string): string {
+  try {
+    return JSON.stringify(JSON.parse(decodeURIComponent(escape(atob(b64)))));
+  } catch {
+    return "(arguments could not be read; do not approve)";
+  }
+}
 
 export function describeCall(method: string): string {
   const names: Record<string, string> = {
@@ -93,7 +102,9 @@ export function describeCall(method: string): string {
     recall_from_yield: "Withdraw the yield investment",
     revoke_agent: "Remove Keel's key",
     set_agent_key: "Set Keel's key",
-    transfer_owner: "Hand the vault to a new owner",
+    transfer_owner: "Offer the vault to a new owner",
+    cancel_owner_transfer: "Withdraw the ownership offer",
+    accept_owner: "Accept ownership of the vault",
   };
   return names[method] ?? method;
 }

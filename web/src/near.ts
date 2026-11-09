@@ -101,6 +101,8 @@ export interface Policy {
   paused: boolean;
   allowlist: string[];
   blocklist: string[];
+  /** An account offered the vault that has not accepted yet; missing on vaults from before two-step hand-over. */
+  pending_owner?: string | null;
 }
 
 export type ProposalStatus = "pending" | "executing" | "executed" | "rejected" | "failed" | "signing" | "signed" | "superseded";

@@ -423,7 +423,7 @@ export function Security() {
         </tbody>
       </table>
       <p>
-        The contract has 118 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite tried 53 attacks against
+        The contract has 129 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite tried 53 attacks against
         a testnet vault. Details and the commands to run them are in the <a href={`${REPO}/blob/main/docs/SECURITY.md`}>repository</a>.
       </p>
 

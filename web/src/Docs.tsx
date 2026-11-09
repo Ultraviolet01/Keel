@@ -204,7 +204,7 @@ export default function Docs() {
       <p>
         Optional. If several people should approve, hand the company to your team's multisig: a Sputnik DAO, such as a Trezu treasury. Create the
         company from one member's wallet as usual, then open <b>Rules</b>, enter the multisig account under <b>Hand ownership to a multisig</b> and
-        click <b>Hand over</b>.
+        click <b>Offer</b>. Nothing changes until the multisig accepts: a member clicks <b>File acceptance</b> and enough members approve it.
       </p>
       <p>
         From then on, every change (limits, payees, bills, approvals, pause) is filed as a proposal on the multisig, with its bond attached. Members

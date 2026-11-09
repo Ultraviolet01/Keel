@@ -17,9 +17,10 @@
 
 1. Create the company from one member's wallet, as above.
 2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`).
-3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Hand over**. You see **Multisig owner** with the members and the votes needed.
-4. Other members open the app, pick **Add a team's companies (multisig)** in the company card and enter the same account. You see the company in the list.
-5. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
+3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Offer**. You see **Ownership offered**; nothing has changed yet.
+4. Click **File acceptance on** the multisig, and have enough members approve it under **Rules**. You see **Multisig owner** with the members and the votes needed.
+5. Other members open the app, pick **Add a team's companies (multisig)** in the company card and enter the same account. You see the company in the list.
+6. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
 
 ## Get testnet tokens
 

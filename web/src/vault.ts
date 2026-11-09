@@ -25,6 +25,10 @@ export interface VaultData {
   multisig: Multisig | null;
   /** That multisig's open proposals for this vault. */
   multisigProposals: DaoProposal[];
+  /** The multisig the vault is offered to, if the offer is still open. */
+  offeredTo: Multisig | null;
+  /** That multisig's open proposals for this vault (its acceptance vote). */
+  offerProposals: DaoProposal[];
 }
 
 /**
@@ -107,8 +111,12 @@ export function useVault(vaultId: string | null) {
         loadHistory(vaultId, policy.token_id),
         multisigOf(policy.owner_id),
       ]);
-      const multisigProposals = multisig ? await openProposalsFor(multisig.dao, vaultId).catch(() => []) : [];
-      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods, history, multisig, multisigProposals });
+      const offeredTo = policy.pending_owner ? await multisigOf(policy.pending_owner) : null;
+      const [multisigProposals, offerProposals] = await Promise.all([
+        multisig ? openProposalsFor(multisig.dao, vaultId).catch(() => []) : [],
+        offeredTo ? openProposalsFor(offeredTo.dao, vaultId).catch(() => []) : [],
+      ]);
+      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods, history, multisig, multisigProposals, offeredTo, offerProposals });
       setError(null);
     } catch (e) {
       setError(String(e));

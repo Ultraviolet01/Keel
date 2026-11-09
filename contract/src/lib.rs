@@ -265,6 +265,8 @@ pub struct PolicyView {
     pub paused: bool,
     pub allowlist: Vec<AccountId>,
     pub blocklist: Vec<AccountId>,
+    /// An account offered the vault that has not accepted yet.
+    pub pending_owner: Option<AccountId>,
 }
 
 #[near(contract_state)]
@@ -303,6 +305,10 @@ pub struct KeelVault {
     outflow: u128,
     /// Lending markets the vault has registered with (storage paid once).
     lending_registered: Vec<AccountId>,
+    /// An owner the current owner offered the vault to; it must accept.
+    pending_owner: Option<AccountId>,
+    /// True while an acceptance is being recorded at the factory.
+    owner_change_in_flight: bool,
 }
 
 #[near]
@@ -345,6 +351,8 @@ impl KeelVault {
             min_balance: 0,
             outflow: 0,
             lending_registered: Vec::new(),
+            pending_owner: None,
+            owner_change_in_flight: false,
         }
     }
 
@@ -750,22 +758,51 @@ impl KeelVault {
         self.bills.insert(bill.id.clone(), bill);
     }
 
-    /// Hands the vault to a new owner, for example the team's multisig
-    /// (a Trezu or Sputnik DAO treasury). The factory records the change first;
-    /// only if it accepts does the vault switch owner. From then on every
-    /// owner action needs the new owner, and Keel keeps working as before.
+    /// Offers the vault to a new owner, for example the team's multisig (a
+    /// Trezu or Sputnik DAO treasury). Nothing changes until that account calls
+    /// `accept_owner`, so nobody can push a vault, with its payees and bills,
+    /// onto someone else. A new offer replaces the old one.
     #[payable]
-    pub fn transfer_owner(&mut self, new_owner_id: AccountId) -> Promise {
+    pub fn transfer_owner(&mut self, new_owner_id: AccountId) {
         self.assert_owner();
+        require!(!self.owner_change_in_flight, "an ownership change is being recorded; try again in a moment");
+        require!(new_owner_id != env::current_account_id(), "a vault cannot own itself");
+        require!(new_owner_id != self.factory_id(), "the factory cannot own a vault");
         require!(new_owner_id != self.owner_id, "that account already owns this vault");
-        let factory: AccountId = env::current_account_id()
-            .as_str()
-            .split_once('.')
-            .map(|(_, rest)| rest.parse::<AccountId>().unwrap())
-            .unwrap_or_else(|| env::panic_str("vault has no factory"));
-        Promise::new(factory)
+        emit("owner_offered", json!({ "owner_id": self.owner_id, "new_owner_id": new_owner_id }));
+        self.pending_owner = Some(new_owner_id);
+    }
+
+    /// Withdraws an ownership offer that was not accepted yet.
+    #[payable]
+    pub fn cancel_owner_transfer(&mut self) {
+        self.assert_owner();
+        require!(!self.owner_change_in_flight, "an ownership change is being recorded; try again in a moment");
+        require!(self.pending_owner.is_some(), "no ownership offer to cancel");
+        emit("owner_offer_cancelled", json!({ "new_owner_id": self.pending_owner }));
+        self.pending_owner = None;
+    }
+
+    /// Called by the offered owner. The factory records the change first; the
+    /// vault switches owner only if it accepted.
+    #[payable]
+    pub fn accept_owner(&mut self) -> Promise {
+        assert_one_yocto();
+        let new_owner_id = env::predecessor_account_id();
+        require!(self.pending_owner.as_ref() == Some(&new_owner_id), "this account was not offered the vault");
+        require!(!self.owner_change_in_flight, "an ownership change is being recorded already");
+        self.owner_change_in_flight = true;
+        Promise::new(self.factory_id())
             .function_call("record_owner_change", json!({ "new_owner_id": new_owner_id }).to_string().into_bytes(), NearToken::from_yoctonear(0), GAS_OWNER_RECORD)
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_owner_recorded(new_owner_id))
+    }
+
+    fn factory_id(&self) -> AccountId {
+        env::current_account_id()
+            .as_str()
+            .split_once('.')
+            .and_then(|(_, rest)| rest.parse::<AccountId>().ok())
+            .unwrap_or_else(|| env::panic_str("vault has no factory"))
     }
 
     /// Approves a payee with a name, for example "Company card". Also puts the
@@ -941,9 +978,11 @@ impl KeelVault {
     pub fn on_owner_recorded(&mut self, new_owner_id: AccountId) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
+        self.owner_change_in_flight = false;
         if ok {
             emit("owner_changed", json!({ "old_owner_id": self.owner_id, "new_owner_id": new_owner_id }));
             self.owner_id = new_owner_id;
+            self.pending_owner = None;
         } else {
             emit("owner_change_refused", json!({ "new_owner_id": new_owner_id }));
         }
@@ -1016,6 +1055,7 @@ impl KeelVault {
             paused: self.paused,
             allowlist: self.allowlist.iter().cloned().collect(),
             blocklist: self.blocklist.iter().cloned().collect(),
+            pending_owner: self.pending_owner.clone(),
         }
     }
 

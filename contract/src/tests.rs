@@ -1463,47 +1463,167 @@ fn a_plain_yield_destination_is_not_a_market() {
 
 // ------------------------------------------------------------ owner transfer
 
+const TEAM: &str = "team.sputnikv2.testnet";
+
+/// The owner offers the vault to TEAM and TEAM accepts; the factory answers `factory_ok`.
+fn hand_over(v: &mut KeelVault, factory_ok: bool) -> bool {
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
+    as_callback(if factory_ok { PromiseResult::Successful(vec![]) } else { PromiseResult::Failed });
+    v.on_owner_recorded(acc(TEAM))
+}
+
 #[test]
-fn owner_hands_the_vault_to_a_multisig_once_the_factory_records_it() {
+fn owner_hands_the_vault_to_a_multisig_once_it_accepts_and_the_factory_records_it() {
     let mut v = vault();
     as_owner(DAY);
-    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
+    v.transfer_owner(acc(TEAM));
+    assert_eq!(v.get_policy().owner_id, acc("kora.testnet"), "an offer changes nothing");
+    assert_eq!(v.get_policy().pending_owner, Some(acc(TEAM)));
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
     assert_eq!(v.get_policy().owner_id, acc("kora.testnet"), "nothing changes before the factory answers");
     as_callback(PromiseResult::Successful(vec![]));
-    assert!(v.on_owner_recorded(acc("team.sputnikv2.testnet")));
-    assert_eq!(v.get_policy().owner_id, acc("team.sputnikv2.testnet"));
-    // The multisig can act now.
-    set_ctx("team.sputnikv2.testnet", DAY, 1);
+    assert!(v.on_owner_recorded(acc(TEAM)));
+    assert_eq!(v.get_policy().owner_id, acc(TEAM));
+    assert_eq!(v.get_policy().pending_owner, None);
+    set_ctx(TEAM, DAY, 1);
     v.pause();
     assert!(v.get_policy().paused);
 }
 
 #[test]
-fn owner_stays_if_the_factory_refuses() {
+fn owner_stays_if_the_factory_refuses_and_the_offer_stands() {
+    let mut v = vault();
+    assert!(!hand_over(&mut v, false));
+    assert_eq!(v.get_policy().owner_id, acc("kora.testnet"));
+    assert_eq!(v.get_policy().pending_owner, Some(acc(TEAM)));
+    // The owner keeps control and can withdraw the offer.
+    as_owner(DAY);
+    v.cancel_owner_transfer();
+    assert_eq!(v.get_policy().pending_owner, None);
+}
+
+#[test]
+#[should_panic(expected = "this account was not offered the vault")]
+fn nobody_can_take_a_vault_that_was_not_offered() {
+    let mut v = vault();
+    set_ctx("mallory.testnet", DAY, 1);
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic(expected = "this account was not offered the vault")]
+fn a_stranger_cannot_accept_someone_elses_offer() {
     let mut v = vault();
     as_owner(DAY);
-    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
-    as_callback(PromiseResult::Failed);
-    assert!(!v.on_owner_recorded(acc("team.sputnikv2.testnet")));
-    assert_eq!(v.get_policy().owner_id, acc("kora.testnet"));
+    v.transfer_owner(acc(TEAM));
+    set_ctx("mallory.testnet", DAY, 1);
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic(expected = "this account was not offered the vault")]
+fn a_cancelled_offer_cannot_be_accepted() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    v.cancel_owner_transfer();
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic(expected = "an ownership change is being recorded")]
+fn the_owner_cannot_cancel_while_an_acceptance_is_in_flight() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
+    as_owner(DAY);
+    v.cancel_owner_transfer();
+}
+
+#[test]
+#[should_panic(expected = "an ownership change is being recorded")]
+fn an_offer_cannot_be_accepted_twice_at_once() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn accepting_needs_a_full_access_signature() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    set_ctx(TEAM, DAY, 0);
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic(expected = "a vault cannot own itself")]
+fn a_vault_cannot_be_given_to_itself() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(VAULT));
+}
+
+#[test]
+#[should_panic(expected = "the factory cannot own a vault")]
+fn a_vault_cannot_be_given_to_the_factory() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc("kora.testnet"));
 }
 
 #[test]
 #[should_panic(expected = "only the owner can call this")]
-fn agent_cannot_transfer_ownership() {
+fn agent_cannot_offer_ownership() {
     let mut v = vault();
     set_ctx(VAULT, DAY, 1);
-    let _ = v.transfer_owner(acc("evil.testnet"));
+    v.transfer_owner(acc("evil.testnet"));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn agent_cannot_cancel_an_offer() {
+    let mut v = vault();
+    as_owner(DAY);
+    v.transfer_owner(acc(TEAM));
+    set_ctx(VAULT, DAY, 1);
+    v.cancel_owner_transfer();
 }
 
 #[test]
 #[should_panic(expected = "only the owner can call this")]
 fn the_old_owner_loses_control_after_the_transfer() {
     let mut v = vault();
-    as_owner(DAY);
-    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
-    as_callback(PromiseResult::Successful(vec![]));
-    v.on_owner_recorded(acc("team.sputnikv2.testnet"));
+    assert!(hand_over(&mut v, true));
     as_owner(DAY);
     v.pause();
+}
+
+#[test]
+#[should_panic(expected = "this account was not offered the vault")]
+fn an_accepted_offer_cannot_be_replayed() {
+    let mut v = vault();
+    assert!(hand_over(&mut v, true));
+    set_ctx(TEAM, DAY, 1);
+    let _ = v.accept_owner();
+}
+
+#[test]
+#[should_panic]
+fn strangers_cannot_call_the_owner_callback() {
+    let mut v = vault();
+    set_ctx("mallory.testnet", DAY, 0);
+    v.on_owner_recorded(acc("mallory.testnet"));
 }

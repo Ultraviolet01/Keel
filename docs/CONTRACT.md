@@ -17,7 +17,8 @@
 | `withdraw` | Owner | Pays out directly; works while paused and ignores the buffer |
 | `revoke_agent` / `set_agent_key` | Owner | Removes Keel's key from the vault, or adds one |
 | `set_evm_route` / `withdraw_evm` | Owner | Sets or turns off a chain's token and fee caps; moves funds out of the vault's EVM address |
-| `transfer_owner` | Owner | Hands the vault to a new owner, such as a Sputnik DAO multisig. The factory records the change first (`record_owner_change`, callable only by a vault it created); the vault switches owner only if the factory accepted |
+| `transfer_owner` / `cancel_owner_transfer` | Owner | Offers the vault to a new owner, such as a Sputnik DAO multisig, or withdraws the offer. Nothing changes until the new owner accepts. Refuses the vault itself and the factory |
+| `accept_owner` | The offered account | Takes the vault. The factory records the change first (`record_owner_change`, callable only by a vault it created); the vault switches owner only if the factory accepted |
 | `release_bill` | Owner | Lets a bill be paid again after the owner confirms it never arrived |
 | `check_payment`, `get_policy`, `get_bills`, `get_payees`, `get_proposals`, `bill_paid_at`, `pending_count`, `get_evm_route` | Anyone (views) | Read the rules, bills, payees, proposals and the vault's EVM address inputs |
 
