@@ -14,6 +14,8 @@ export interface EvmRoute {
   decimals?: number;
   max_fee_per_gas: string;
   max_gas: number;
+  /** Bills up to this amount (vault token units) to an allowlisted 0x payee are signed without the owner. */
+  auto_cap?: string | null;
 }
 
 export interface EvmTransfer {

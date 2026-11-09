@@ -25,8 +25,17 @@ export default {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== "POST") return fail(405, "Use POST.");
     // Only Keel's own pages may call this.
+    // Browsers always send Origin on a cross-origin or POST fetch; plain curl calls without it are
+    // refused, so nobody can run up the deployment's Claude bill from a script.
     const origin = request.headers.get("origin");
-    if (origin && new URL(origin).host !== new URL(request.url).host) return fail(403, "Not allowed from another site.");
+    if (!origin) return fail(403, "Upload invoices from Keel's app.");
+    let host = "";
+    try {
+      host = new URL(origin).host;
+    } catch {
+      return fail(403, "Not allowed from another site.");
+    }
+    if (host !== new URL(request.url).host) return fail(403, "Not allowed from another site.");
     if (!process.env.ANTHROPIC_API_KEY) return fail(503, "Invoice reading is not set up on this deployment (no ANTHROPIC_API_KEY).");
     const ip = (request.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
     if (!allowed(ip)) return fail(429, "Too many invoices this hour. Try again later or fill in the bill by hand.");

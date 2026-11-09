@@ -19,8 +19,8 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | Method | Caller | Arguments |
 | --- | --- | --- |
 | `new` | Deployer, once | `owner_id`, `agent_key`, `token_id`. Starts with no policy: caps 0, empty lists. Sets the EVM routes for the network: Base, Ethereum, Arbitrum and Optimism Sepolia on testnet; Base, Ethereum, Arbitrum and Optimism on mainnet |
-| `execute_payment` | Agent | `receiver_id`, `amount`, `memo?`, `bill_ref?` |
-| `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason`, `valid_until_ms?`, `evm?`, `bill_ref?`. At most 50 wait at once |
+| `execute_payment` | Agent | `receiver_id`, `amount`, `memo?`, `bill_ref` (required: a listed bill, `top:` or `idle:`; see `check_agent_ref`), `evm?` (pay a bill on another chain at once, inside that route's `auto_cap`) |
+| `propose_payment` | Agent | `receiver_id`, `amount`, `memo?`, `reason`, `valid_until_ms?`, `evm?`, `bill_ref` (required, same checks; a NEAR Intents proposal for a cross-chain bill may name the quote's deposit address). At most 50 wait at once |
 | `approve` | Owner, 1 yoctoNEAR | `proposal_id`. Refused after `valid_until_ms`; for an `evm` proposal it asks the MPC contract to sign (attach 300 Tgas) |
 | `reject` | Owner, 1 yoctoNEAR | `proposal_id` |
 | `update_policy` | Owner, 1 yoctoNEAR | `update: { per_payment_cap?, daily_cap?, min_balance?, allow?, disallow?, block?, unblock? }`, `reason`. `min_balance` is the cash buffer: with it set, `execute_payment` reads the vault's balance first and pays only if the buffer holds after this and every other agent payment in flight |
@@ -31,7 +31,7 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 | `revoke_agent` | Owner, 1 yoctoNEAR | none. Deletes the agent key from the vault account |
 | `set_agent_key` | Owner, 1 yoctoNEAR | `agent_key`. Replaces the agent key (or adds one after a revoke) |
 | `withdraw` | Owner, 1 yoctoNEAR | `receiver_id`, `amount`, `memo?`. Works while paused |
-| `set_evm_route` | Owner, 1 yoctoNEAR | `chain_id`, `route: { chain_id, token, decimals, max_fee_per_gas, max_gas }`, or `route: null` to turn that chain off |
+| `set_evm_route` | Owner, 1 yoctoNEAR | `chain_id`, `route: { chain_id, token, decimals, max_fee_per_gas, max_gas, auto_cap? }`, or `route: null` to turn that chain off. `auto_cap` (at most the per-payment cap) lets Keel pay allowlisted 0x payees on that chain up to it without a proposal |
 | `withdraw_evm` | Owner, 1 yoctoNEAR | `evm`, `amount`, `memo?`. Signs a USDC transfer out of the vault's Base address |
 | `release_bill` | Owner, 1 yoctoNEAR | `bill_ref`. Lets a bill be paid again after the owner confirms it never arrived |
 | `check_payment` | Anyone (view) | `receiver_id`, `amount` → `{ band, reason }` |
@@ -50,7 +50,10 @@ Amounts are in the token's smallest unit. USDC has 6 decimals, so 100 USDC is `"
 - **Owner methods need 1 yoctoNEAR attached.** Function-call keys cannot attach a deposit, so only a full-access key can approve, change the policy or pause.
 - **Refusals are failed transactions.** When the vault refuses, the call panics with `Keel Vault refused: <reason>`. The failed receipt is the on-chain proof of the refusal.
 - **Every payment registers the payee first.** The vault calls `storage_deposit` with `registration_only: true` and 0.00125 NEAR, which the token refunds if the payee is already registered. Then it calls `ft_transfer` with 1 yoctoNEAR.
-- **A failed transfer does not use up the daily cap.** The callback gives the amount back to today's total and marks failed proposals as `failed`.
+- **The daily cap is a rolling 24 hours.** The vault keeps each agent payment's time and amount (at most 200 in a day) and sums the last 24 hours, so the cap cannot be spent twice across midnight. `spent_today` in `get_policy` is that sum.
+- **A failed transfer does not use up the daily cap.** The callback gives the amount back and marks failed proposals as `failed`.
+- **Every agent payment names something the owner set.** `check_agent_ref` accepts a listed bill (`<id>`, `<id>:<YYYY-MM>` for monthly bills, `<id>:<YYYY>` for yearly ones, only from the first due date to next month or year) paid to its own payee for its own amount; `top:<account>:<date>` only to a card or own wallet with `keep_at`, up to it; `idle:<account>:<date>` only to a yield destination, up to `max_move`. Dates are today or yesterday (UTC).
+- **No upgrade path.** The vault has no method that deploys code, and the factory deploys a vault's code once, so a vault keeps the code it was created with.
 - **Approved proposals do not count against the daily cap.** The cap limits what the agent spends alone.
 - **Each bill is paid once.** `bill_ref` is recorded when a payment starts; a second payment or proposal for it is refused. A failed transfer or a failed MPC signature frees it again.
 - **Flood limits.** At most 50 proposals wait, a newer proposal for the same bill deletes the waiting one, and the agent's calls are refused once the vault's spare NEAR would drop below 0.2, so the owner can always act.

@@ -14,9 +14,14 @@
 //!   The agent files a proposal and the owner approves or rejects it.
 //! - Blocked: blocklisted payee, vault paused, or the daily cap reached.
 //!
-//! Every bill carries a `bill_ref`. The vault remembers each bill it paid and
-//! refuses to pay the same one again, so a restarted agent that lost its
-//! memory cannot pay twice.
+//! Every agent payment and proposal carries a `bill_ref` naming something the
+//! owner set: a listed bill (`<id>`, `<id>:<YYYY-MM>` for monthly bills,
+//! `<id>:<YYYY>` for yearly ones), a top-up of a card or own wallet with a
+//! target balance (`top:<account>:<date>`), or an idle-cash move to a yield
+//! destination (`idle:<account>:<date>`). The vault checks the payee and amount
+//! against that bill (`check_agent_ref`), remembers each one it paid and
+//! refuses to pay it again, so a stolen agent key cannot invent payments and a
+//! restarted agent that lost its memory cannot pay twice.
 //!
 //! Cross-chain bills can also be paid from the vault's own address on an EVM
 //! chain (Base, Ethereum, Arbitrum, Optimism), through NEAR Chain Signatures: the vault builds the USDC
@@ -34,8 +39,8 @@ use near_sdk::json_types::U128;
 use near_sdk::serde_json::{json, Value};
 use near_sdk::store::{IterableMap, IterableSet, LookupMap};
 use near_sdk::{
-    assert_one_yocto, env, ext_contract, near, require, AccountId, Allowance, BorshStorageKey,
-    Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult, PublicKey,
+    assert_one_yocto, env, ext_contract, near, require, AccountId, Allowance, BorshStorageKey, Gas,
+    NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult, PublicKey,
 };
 
 const NS_PER_DAY: u64 = 86_400_000_000_000;
@@ -60,6 +65,9 @@ const GAS_OWNER_RECORD: Gas = Gas::from_tgas(15);
 /// Rhea lending's storage_balance_bounds minimum (0.1 NEAR), paid once per market.
 const LENDING_STORAGE: NearToken = NearToken::from_millinear(100);
 const MAX_TEXT: usize = 280;
+/// Agent payments counted in the rolling 24-hour cap. More than this many in a
+/// day is refused, which also bounds the vault's storage.
+const MAX_SPENT_ENTRIES: usize = 200;
 const MAX_BILL_REF: usize = 64;
 /// At most this many proposals wait for the owner at once, so a stolen agent
 /// key cannot flood the vault's storage or the owner's Approvals page.
@@ -69,10 +77,21 @@ const MAX_BILLS: u32 = 50;
 /// The EVM chains a bill can name, as the agent and the app call them.
 const BILL_CHAINS: [&str; 4] = ["base", "eth", "arb", "op"];
 /// What a bill is for, so the forecast and reports can group spending.
-const BILL_CATEGORIES: [&str; 8] = ["software", "hosting", "contractors", "payroll", "rent", "taxes", "card", "other"];
+const BILL_CATEGORIES: [&str; 8] = [
+    "software",
+    "hosting",
+    "contractors",
+    "payroll",
+    "rent",
+    "taxes",
+    "card",
+    "other",
+];
 /// What a payee is. A card or own wallet can carry a `keep_at` balance that
 /// Keel tops up; a yield destination carries a `max_move` limit per move.
-const PAYEE_KINDS: [&str; 7] = ["vendor", "employee", "card", "offramp", "own", "yield", "other"];
+const PAYEE_KINDS: [&str; 7] = [
+    "vendor", "employee", "card", "offramp", "own", "yield", "other",
+];
 const MAX_PAYEES: u32 = 100;
 /// The agent's calls are refused once the vault's NEAR beyond its storage
 /// would drop below this, so the owner always has room to approve, pause
@@ -96,7 +115,13 @@ trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
     fn ft_balance_of(&self, account_id: AccountId) -> U128;
-    fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String) -> U128;
+    fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> U128;
 }
 
 /// A lending market such as Rhea lending (formerly Burrow): deposits arrive by ft_transfer_call with
@@ -277,8 +302,9 @@ pub struct KeelVault {
     token_id: AccountId,
     per_payment_cap: u128,
     daily_cap: u128,
-    spent_day: u64,
-    spent_today: u128,
+    /// Agent payments in the last 24 hours: (block time in ns, amount). The
+    /// daily cap is a rolling window, so it cannot be spent twice across midnight.
+    spent: Vec<(u64, u128)>,
     paused: bool,
     allowlist: IterableSet<AccountId>,
     blocklist: IterableSet<AccountId>,
@@ -328,8 +354,7 @@ impl KeelVault {
             token_id,
             per_payment_cap: 0,
             daily_cap: 0,
-            spent_day: today(),
-            spent_today: 0,
+            spent: Vec::new(),
             paused: false,
             allowlist: IterableSet::new(StorageKey::Allowlist),
             blocklist: IterableSet::new(StorageKey::Blocklist),
@@ -358,14 +383,21 @@ impl KeelVault {
 
     // ---------------------------------------------------------------- agent
 
-    /// Pays an allowlisted payee within the caps. Anything else is refused,
+    /// Pays an allowlisted payee within the caps, for a bill the owner set
+    /// (`bill_ref`, checked by `check_agent_ref`). Anything else is refused,
     /// and the refusal is the failed transaction itself.
+    ///
+    /// With `evm`, pays a bill on another chain from the vault's own EVM
+    /// address: allowed only up to that chain's `auto_cap`, to an allowlisted
+    /// 0x payee, and inside the per-payment and daily caps. The vault asks
+    /// NEAR's MPC network to sign at once; the agent broadcasts the result.
     pub fn execute_payment(
         &mut self,
         receiver_id: AccountId,
         amount: U128,
         memo: Option<String>,
         bill_ref: Option<String>,
+        evm: Option<EvmTransfer>,
     ) -> Promise {
         self.assert_agent();
         check_text(memo.as_deref().unwrap_or(""), "memo");
@@ -373,37 +405,90 @@ impl KeelVault {
         if check.band != Band::RunsAlone {
             env::panic_str(&format!("Keel Vault refused: {}", check.reason));
         }
+        let r = bill_ref
+            .clone()
+            .unwrap_or_else(|| env::panic_str("Keel Vault refused: every agent payment needs a bill_ref naming a bill the owner set"));
+        self.check_agent_ref(
+            &r,
+            &receiver_id,
+            amount.0,
+            RefUse::from(evm.as_ref(), false),
+        );
         // Idle cash: moves to a yield destination stay under its per-move limit
         // and always go through the cash buffer check.
         if let Some(max) = self.payees.get(&receiver_id).and_then(|p| p.max_move) {
-            require!(amount.0 <= max.0, "Keel Vault refused: over the most Keel may move to this yield destination at once");
-            require!(self.min_balance > 0, "Keel Vault refused: set a cash buffer before Keel moves idle cash");
+            require!(
+                amount.0 <= max.0,
+                "Keel Vault refused: over the most Keel may move to this yield destination at once"
+            );
+            require!(
+                self.min_balance > 0,
+                "Keel Vault refused: set a cash buffer before Keel moves idle cash"
+            );
         }
-        if let Some(r) = &bill_ref {
-            self.mark_paid(r);
+        if let Some(e) = &evm {
+            let cap = self
+                .evm_routes
+                .get(&e.chain_id)
+                .and_then(|route| route.auto_cap)
+                .map_or(0, |c| c.0);
+            require!(
+                amount.0 <= cap,
+                "Keel Vault refused: over this chain's auto cap; propose it for the owner instead"
+            );
         }
-        let day = today();
-        self.spent_today = self.spent_on(day) + amount.0;
-        self.spent_day = day;
+        let units = evm
+            .as_ref()
+            .map(|e| self.check_evm(e, &receiver_id, amount.0));
+        self.mark_paid(&r);
+        let at = env::block_timestamp();
+        self.record_spend(at, amount.0);
         emit(
             "payment_started",
-            json!({ "receiver_id": receiver_id, "amount": amount, "by": "agent", "rule": check.reason, "bill_ref": bill_ref }),
+            json!({ "receiver_id": receiver_id, "amount": amount, "by": "agent", "rule": check.reason, "bill_ref": bill_ref, "chain_id": evm.as_ref().map(|e| e.chain_id) }),
         );
         self.assert_storage_reserve();
+        if let (Some(e), Some(units)) = (evm, units) {
+            // Recorded like an approved proposal, so the agent finds it, broadcasts
+            // it and keeps its nonce; signing happens now, not after a vote.
+            let id = self.next_proposal_id;
+            self.next_proposal_id += 1;
+            let proposal = Proposal {
+                id,
+                receiver_id,
+                amount,
+                memo,
+                reason: "paid alone: allowlisted 0x payee inside the chain's auto cap and the vault's caps".into(),
+                status: ProposalStatus::Signing,
+                created_at_ms: env::block_timestamp_ms(),
+                valid_until_ms: None,
+                evm: Some(e.clone()),
+                evm_amount: Some(U128(units)),
+                evm_signed: None,
+                bill_ref,
+            };
+            emit("evm_payment_started", json!(proposal));
+            self.proposals.insert(id, proposal);
+            return self.sign_evm(id, &e, units);
+        }
         if self.min_balance == 0 {
-            return self.pay(receiver_id, amount, memo, None, Some(day), bill_ref, None);
+            return self.pay(receiver_id, amount, memo, None, Some(at), bill_ref, None);
         }
         // With a cash buffer, ask the token contract for the vault's balance
         // first and pay from the callback only if the buffer still holds.
         self.outflow += amount.0;
-        let gas = if self.is_lending(&receiver_id) { GAS_BALANCE_CHECKED_LENDING } else { GAS_BALANCE_CHECKED };
+        let gas = if self.is_lending(&receiver_id) {
+            GAS_BALANCE_CHECKED_LENDING
+        } else {
+            GAS_BALANCE_CHECKED
+        };
         ext_ft::ext(self.token_id.clone())
             .with_static_gas(GAS_BALANCE_OF)
             .ft_balance_of(env::current_account_id())
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(gas)
-                    .on_balance_checked(receiver_id, amount, memo, day, bill_ref),
+                    .on_balance_checked(receiver_id, amount, memo, at, bill_ref),
             )
     }
 
@@ -413,6 +498,11 @@ impl KeelVault {
     /// deposit address; the vault refuses to approve it after that time.
     /// `evm` pays the bill from the vault's own EVM address instead; then
     /// `receiver_id` is the payee's lowercase 0x address.
+    ///
+    /// `bill_ref` must name a bill the owner set, and the proposal must match
+    /// it (`check_agent_ref`): same payee and amount for NEAR and EVM bills.
+    /// Only a NEAR Intents proposal for a cross-chain bill may name another
+    /// receiver, the quote's deposit address, which changes with every quote.
     pub fn propose_payment(
         &mut self,
         receiver_id: AccountId,
@@ -425,7 +515,10 @@ impl KeelVault {
     ) -> u64 {
         self.assert_agent();
         require!(!self.paused, "Keel Vault refused: vault is paused");
-        require!(amount.0 > 0, "Keel Vault refused: amount must be above zero");
+        require!(
+            amount.0 > 0,
+            "Keel Vault refused: amount must be above zero"
+        );
         require!(
             !self.blocklist.contains(&receiver_id),
             "Keel Vault refused: payee is on the blocklist"
@@ -433,25 +526,45 @@ impl KeelVault {
         check_text(&reason, "reason");
         check_text(memo.as_deref().unwrap_or(""), "memo");
         if let Some(t) = valid_until_ms {
-            require!(t > env::block_timestamp_ms(), "Keel Vault refused: the offer has already expired");
+            require!(
+                t > env::block_timestamp_ms(),
+                "Keel Vault refused: the offer has already expired"
+            );
         }
-        let evm_amount = evm.as_ref().map(|e| U128(self.check_evm(e, &receiver_id, amount.0)));
-        if let Some(r) = &bill_ref {
-            check_bill_ref(r);
-            require!(!self.paid_bills.contains_key(r), "Keel Vault refused: this bill was already paid");
-        }
+        let evm_amount = evm
+            .as_ref()
+            .map(|e| U128(self.check_evm(e, &receiver_id, amount.0)));
+        let r = bill_ref
+            .as_deref()
+            .unwrap_or_else(|| env::panic_str("Keel Vault refused: every agent proposal needs a bill_ref naming a bill the owner set"));
+        check_bill_ref(r);
+        self.check_agent_ref(r, &receiver_id, amount.0, RefUse::from(evm.as_ref(), true));
+        require!(
+            !self.paid_bills.contains_key(r),
+            "Keel Vault refused: this bill was already paid"
+        );
 
         let id = self.next_proposal_id;
         if let Some(r) = &bill_ref {
             // A newer proposal for the same bill (a fresh quote, a new nonce)
-            // replaces the old one, so only one can ever be approved.
+            // replaces the old one, so only one can ever be approved. Both
+            // passed check_agent_ref for that bill, so a swap cannot change the
+            // payee or amount (except an Intents quote's deposit address).
             // The replaced offer is deleted, so repeating a bill cannot grow
             // storage; the event keeps the record.
             if let Some(old) = self.open_bills.insert(r.clone(), id) {
-                if self.proposals.get(&old).map(|p| p.status == ProposalStatus::Pending) == Some(true) {
+                if self
+                    .proposals
+                    .get(&old)
+                    .map(|p| p.status == ProposalStatus::Pending)
+                    == Some(true)
+                {
                     let p = self.proposals.remove(&old).unwrap();
                     self.pending_count -= 1;
-                    emit("proposal_superseded", json!({ "id": old, "by": id, "bill_ref": r, "receiver_id": p.receiver_id, "amount": p.amount }));
+                    emit(
+                        "proposal_superseded",
+                        json!({ "id": old, "by": id, "bill_ref": r, "receiver_id": p.receiver_id, "amount": p.amount }),
+                    );
                 }
             }
         }
@@ -516,8 +629,11 @@ impl KeelVault {
         } else {
             ProposalStatus::Executing
         };
-        let (receiver_id, amount, memo) =
-            (proposal.receiver_id.clone(), proposal.amount, proposal.memo.clone());
+        let (receiver_id, amount, memo) = (
+            proposal.receiver_id.clone(),
+            proposal.amount,
+            proposal.memo.clone(),
+        );
         emit(
             "proposal_approved",
             json!({ "id": proposal_id, "approved_by": self.owner_id }),
@@ -530,10 +646,21 @@ impl KeelVault {
             Some(e) => {
                 // The owner may have changed the route since the proposal.
                 let units = self.check_evm(&e, &receiver_id, amount.0);
-                require!(Some(U128(units)) == evm_amount, "Keel Vault refused: the route's token changed since the proposal");
+                require!(
+                    Some(U128(units)) == evm_amount,
+                    "Keel Vault refused: the route's token changed since the proposal"
+                );
                 self.sign_evm(proposal_id, &e, units)
             }
-            None => self.pay(receiver_id, amount, memo, Some(proposal_id), None, bill_ref, None),
+            None => self.pay(
+                receiver_id,
+                amount,
+                memo,
+                Some(proposal_id),
+                None,
+                bill_ref,
+                None,
+            ),
         }
     }
 
@@ -544,24 +671,43 @@ impl KeelVault {
         self.assert_owner();
         if let Some(r) = &route {
             require!(r.chain_id == chain_id, "route.chain_id must match chain_id");
-            require!(evm::parse_address(&r.token).is_some(), "token must be a 0x address");
-            require!(r.decimals >= VAULT_DECIMALS && r.decimals <= 30, "token decimals must be 6 to 30");
+            require!(
+                evm::parse_address(&r.token).is_some(),
+                "token must be a 0x address"
+            );
+            require!(
+                r.decimals >= VAULT_DECIMALS && r.decimals <= 30,
+                "token decimals must be 6 to 30"
+            );
+            require!(
+                r.auto_cap.map_or(true, |c| c.0 <= self.per_payment_cap),
+                "auto_cap cannot be above the per-payment cap"
+            );
         }
         let old = match &route {
             Some(r) => self.evm_routes.insert(chain_id, r.clone()),
             None => self.evm_routes.remove(&chain_id),
         };
-        emit("evm_route_set", json!({ "chain_id": chain_id, "old": old, "new": route, "by": self.owner_id }));
+        emit(
+            "evm_route_set",
+            json!({ "chain_id": chain_id, "old": old, "new": route, "by": self.owner_id }),
+        );
     }
 
     /// Owner moves funds out of the vault's EVM address, for example back to
     /// their own wallet. Signed straight away; no proposal needed.
     #[payable]
-    pub fn withdraw_evm(&mut self, evm: EvmTransfer, amount: U128, memo: Option<String>) -> Promise {
+    pub fn withdraw_evm(
+        &mut self,
+        evm: EvmTransfer,
+        amount: U128,
+        memo: Option<String>,
+    ) -> Promise {
         self.assert_owner();
         require!(amount.0 > 0, "amount must be above zero");
         check_text(memo.as_deref().unwrap_or(""), "memo");
-        let to = evm::normalize_address(&evm.to).unwrap_or_else(|| env::panic_str("payee must be a 0x address"));
+        let to = evm::normalize_address(&evm.to)
+            .unwrap_or_else(|| env::panic_str("payee must be a 0x address"));
         let receiver_id: AccountId = to.parse().unwrap();
         let units = self.check_evm(&evm, &receiver_id, amount.0);
         let id = self.next_proposal_id;
@@ -686,7 +832,10 @@ impl KeelVault {
             .agent_key
             .take()
             .unwrap_or_else(|| env::panic_str("there is no agent key to revoke"));
-        emit("agent_revoked", json!({ "old_key": old, "by": self.owner_id }));
+        emit(
+            "agent_revoked",
+            json!({ "old_key": old, "by": self.owner_id }),
+        );
         Promise::new(env::current_account_id()).delete_key(old)
     }
 
@@ -701,7 +850,10 @@ impl KeelVault {
             require!(old != agent_key, "that key is already the agent key");
             batch = batch.delete_key(old);
         }
-        emit("agent_key_set", json!({ "new_key": agent_key, "by": self.owner_id }));
+        emit(
+            "agent_key_set",
+            json!({ "new_key": agent_key, "by": self.owner_id }),
+        );
         self.agent_key = Some(agent_key.clone());
         batch.add_access_key_allowance(
             agent_key,
@@ -714,7 +866,12 @@ impl KeelVault {
     /// Owner pays out directly, for example back to their own wallet. Works
     /// while paused, so the owner can always get their money out.
     #[payable]
-    pub fn withdraw(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) -> Promise {
+    pub fn withdraw(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+    ) -> Promise {
         self.assert_owner();
         require!(amount.0 > 0, "amount must be above zero");
         check_text(memo.as_deref().unwrap_or(""), "memo");
@@ -732,11 +889,24 @@ impl KeelVault {
         self.assert_owner();
         check_bill_ref(&bill.id);
         require!(!bill.id.contains(':'), "bill id cannot contain ':'");
-        require!(!self.bills.contains_key(&bill.id), "a bill with that id is already listed");
-        require!((self.bills.len() as u32) < MAX_BILLS, "50 bills are already listed; cancel one first");
+        require!(
+            bill.id != "top" && bill.id != "idle",
+            "bill ids top and idle are reserved for top-ups and idle cash"
+        );
+        require!(
+            !self.bills.contains_key(&bill.id),
+            "a bill with that id is already listed"
+        );
+        require!(
+            (self.bills.len() as u32) < MAX_BILLS,
+            "50 bills are already listed; cancel one first"
+        );
         require!(bill.amount.0 > 0, "amount must be above zero");
         require!(is_date(&bill.due), "due must be a date like 2026-11-30");
-        require!(!(bill.monthly && bill.yearly), "a bill repeats monthly or yearly, not both");
+        require!(
+            !(bill.monthly && bill.yearly),
+            "a bill repeats monthly or yearly, not both"
+        );
         if let Some(c) = &bill.category {
             require!(BILL_CATEGORIES.contains(&c.as_str()), "category must be software, hosting, contractors, payroll, rent, taxes, card or other");
         }
@@ -745,15 +915,24 @@ impl KeelVault {
         check_text(bill.memo.as_deref().unwrap_or(""), "memo");
         match &bill.chain {
             Some(c) => {
-                require!(BILL_CHAINS.contains(&c.as_str()), "chain must be base, eth, arb or op");
+                require!(
+                    BILL_CHAINS.contains(&c.as_str()),
+                    "chain must be base, eth, arb or op"
+                );
                 require!(
                     evm::normalize_address(&bill.payee).as_deref() == Some(bill.payee.as_str()),
                     "payee must be a lowercase 0x address on that chain"
                 );
             }
-            None => require!(bill.payee.parse::<AccountId>().is_ok(), "payee must be a NEAR account id"),
+            None => require!(
+                bill.payee.parse::<AccountId>().is_ok(),
+                "payee must be a NEAR account id"
+            ),
         }
-        let bill = Bill { added_at_ms: env::block_timestamp_ms(), ..bill };
+        let bill = Bill {
+            added_at_ms: env::block_timestamp_ms(),
+            ..bill
+        };
         emit("bill_added", json!(bill));
         self.bills.insert(bill.id.clone(), bill);
     }
@@ -765,11 +944,26 @@ impl KeelVault {
     #[payable]
     pub fn transfer_owner(&mut self, new_owner_id: AccountId) {
         self.assert_owner();
-        require!(!self.owner_change_in_flight, "an ownership change is being recorded; try again in a moment");
-        require!(new_owner_id != env::current_account_id(), "a vault cannot own itself");
-        require!(new_owner_id != self.factory_id(), "the factory cannot own a vault");
-        require!(new_owner_id != self.owner_id, "that account already owns this vault");
-        emit("owner_offered", json!({ "owner_id": self.owner_id, "new_owner_id": new_owner_id }));
+        require!(
+            !self.owner_change_in_flight,
+            "an ownership change is being recorded; try again in a moment"
+        );
+        require!(
+            new_owner_id != env::current_account_id(),
+            "a vault cannot own itself"
+        );
+        require!(
+            new_owner_id != self.factory_id(),
+            "the factory cannot own a vault"
+        );
+        require!(
+            new_owner_id != self.owner_id,
+            "that account already owns this vault"
+        );
+        emit(
+            "owner_offered",
+            json!({ "owner_id": self.owner_id, "new_owner_id": new_owner_id }),
+        );
         self.pending_owner = Some(new_owner_id);
     }
 
@@ -777,9 +971,15 @@ impl KeelVault {
     #[payable]
     pub fn cancel_owner_transfer(&mut self) {
         self.assert_owner();
-        require!(!self.owner_change_in_flight, "an ownership change is being recorded; try again in a moment");
+        require!(
+            !self.owner_change_in_flight,
+            "an ownership change is being recorded; try again in a moment"
+        );
         require!(self.pending_owner.is_some(), "no ownership offer to cancel");
-        emit("owner_offer_cancelled", json!({ "new_owner_id": self.pending_owner }));
+        emit(
+            "owner_offer_cancelled",
+            json!({ "new_owner_id": self.pending_owner }),
+        );
         self.pending_owner = None;
     }
 
@@ -789,12 +989,29 @@ impl KeelVault {
     pub fn accept_owner(&mut self) -> Promise {
         assert_one_yocto();
         let new_owner_id = env::predecessor_account_id();
-        require!(self.pending_owner.as_ref() == Some(&new_owner_id), "this account was not offered the vault");
-        require!(!self.owner_change_in_flight, "an ownership change is being recorded already");
+        require!(
+            self.pending_owner.as_ref() == Some(&new_owner_id),
+            "this account was not offered the vault"
+        );
+        require!(
+            !self.owner_change_in_flight,
+            "an ownership change is being recorded already"
+        );
         self.owner_change_in_flight = true;
         Promise::new(self.factory_id())
-            .function_call("record_owner_change", json!({ "new_owner_id": new_owner_id }).to_string().into_bytes(), NearToken::from_yoctonear(0), GAS_OWNER_RECORD)
-            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_owner_recorded(new_owner_id))
+            .function_call(
+                "record_owner_change",
+                json!({ "new_owner_id": new_owner_id })
+                    .to_string()
+                    .into_bytes(),
+                NearToken::from_yoctonear(0),
+                GAS_OWNER_RECORD,
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CALLBACK)
+                    .on_owner_recorded(new_owner_id),
+            )
     }
 
     fn factory_id(&self) -> AccountId {
@@ -816,15 +1033,30 @@ impl KeelVault {
         );
         require!(!payee.name.trim().is_empty(), "name is missing");
         check_text(&payee.name, "name");
-        require!(PAYEE_KINDS.contains(&payee.kind.as_str()), "kind must be vendor, employee, card, offramp, own, yield or other");
+        require!(
+            PAYEE_KINDS.contains(&payee.kind.as_str()),
+            "kind must be vendor, employee, card, offramp, own, yield or other"
+        );
         if payee.kind == "yield" {
-            require!(payee.max_move.map_or(false, |m| m.0 > 0), "a yield destination needs max_move, the most Keel may move there at once");
+            require!(
+                payee.max_move.map_or(false, |m| m.0 > 0),
+                "a yield destination needs max_move, the most Keel may move there at once"
+            );
         } else {
-            require!(payee.max_move.is_none(), "only a yield destination has max_move");
-            require!(!payee.lending, "only a yield destination can be a lending market");
+            require!(
+                payee.max_move.is_none(),
+                "only a yield destination has max_move"
+            );
+            require!(
+                !payee.lending,
+                "only a yield destination can be a lending market"
+            );
         }
         if let Some(k) = payee.keep_at {
-            require!(payee.kind == "card" || payee.kind == "own", "only a card or your own wallet can be kept topped up");
+            require!(
+                payee.kind == "card" || payee.kind == "own",
+                "only a card or your own wallet can be kept topped up"
+            );
             require!(k.0 > 0, "keep_at must be above zero");
         }
         require!(
@@ -843,7 +1075,10 @@ impl KeelVault {
         let named = self.payees.remove(&account_id).is_some();
         let allowed = self.allowlist.remove(&account_id);
         require!(named || allowed, "that account is not a payee");
-        emit("payee_removed", json!({ "account_id": account_id, "by": self.owner_id }));
+        emit(
+            "payee_removed",
+            json!({ "account_id": account_id, "by": self.owner_id }),
+        );
     }
 
     /// Withdraws the vault's yield investment from one of its lending markets
@@ -859,14 +1094,25 @@ impl KeelVault {
         } else {
             self.assert_agent();
         }
-        require!(self.is_lending(&market), "Keel Vault refused: not one of the vault's lending markets");
-        emit("yield_recall_started", json!({ "market": market, "max_amount": max_amount, "by": env::predecessor_account_id() }));
-        let withdraw = json!({ "Withdraw": { "token_id": self.token_id, "max_amount": max_amount } });
+        require!(
+            self.is_lending(&market),
+            "Keel Vault refused: not one of the vault's lending markets"
+        );
+        emit(
+            "yield_recall_started",
+            json!({ "market": market, "max_amount": max_amount, "by": env::predecessor_account_id() }),
+        );
+        let withdraw =
+            json!({ "Withdraw": { "token_id": self.token_id, "max_amount": max_amount } });
         ext_lending::ext(market.clone())
             .with_attached_deposit(ONE_YOCTO)
             .with_static_gas(GAS_RECALL)
             .execute(vec![withdraw])
-            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_recall_done(market, max_amount))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CALLBACK)
+                    .on_recall_done(market, max_amount),
+            )
     }
 
     /// Stops Keel watching a bill. Payments already made stay in the ledger.
@@ -883,8 +1129,14 @@ impl KeelVault {
     #[payable]
     pub fn release_bill(&mut self, bill_ref: String) {
         self.assert_owner();
-        require!(self.paid_bills.remove(&bill_ref).is_some(), "that bill is not marked paid");
-        emit("bill_released", json!({ "bill_ref": bill_ref, "by": self.owner_id }));
+        require!(
+            self.paid_bills.remove(&bill_ref).is_some(),
+            "that bill is not marked paid"
+        );
+        emit(
+            "bill_released",
+            json!({ "bill_ref": bill_ref, "by": self.owner_id }),
+        );
     }
 
     // -------------------------------------------------------------- callback
@@ -898,22 +1150,32 @@ impl KeelVault {
         receiver_id: AccountId,
         amount: U128,
         memo: Option<String>,
-        agent_day: u64,
+        agent_at: u64,
         bill_ref: Option<String>,
     ) -> PromiseOrValue<bool> {
         #[allow(deprecated)]
         let balance = match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes).ok().map(|b| b.0),
+            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes)
+                .ok()
+                .map(|b| b.0),
             _ => None,
         };
-        let holds = balance.map_or(false, |b| b.saturating_sub(self.outflow) >= self.min_balance);
+        let holds = balance.map_or(false, |b| {
+            b.saturating_sub(self.outflow) >= self.min_balance
+        });
         if holds {
-            return PromiseOrValue::Promise(self.pay(receiver_id, amount, memo, None, Some(agent_day), bill_ref, Some(true)));
+            return PromiseOrValue::Promise(self.pay(
+                receiver_id,
+                amount,
+                memo,
+                None,
+                Some(agent_at),
+                bill_ref,
+                Some(true),
+            ));
         }
         self.outflow = self.outflow.saturating_sub(amount.0);
-        if agent_day == self.spent_day {
-            self.spent_today = self.spent_today.saturating_sub(amount.0);
-        }
+        self.unspend(agent_at, amount.0);
         if let Some(r) = &bill_ref {
             self.paid_bills.remove(r);
         }
@@ -934,13 +1196,21 @@ impl KeelVault {
         proposal_id: Option<u64>,
         receiver_id: AccountId,
         amount: U128,
-        agent_day: Option<u64>,
+        agent_at: Option<u64>,
         bill_ref: Option<String>,
         reserved: Option<bool>,
     ) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
-        self.settle(ok, proposal_id, receiver_id, amount, agent_day, bill_ref, reserved)
+        self.settle(
+            ok,
+            proposal_id,
+            receiver_id,
+            amount,
+            agent_at,
+            bill_ref,
+            reserved,
+        )
     }
 
     /// After a deposit into a lending market: ft_transfer_call returns how
@@ -951,26 +1221,41 @@ impl KeelVault {
         proposal_id: Option<u64>,
         market: AccountId,
         amount: U128,
-        agent_day: Option<u64>,
+        agent_at: Option<u64>,
         bill_ref: Option<String>,
         reserved: Option<bool>,
     ) -> bool {
         #[allow(deprecated)]
         let used = match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes).map(|u| u.0).unwrap_or(0),
+            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes)
+                .map(|u| u.0)
+                .unwrap_or(0),
             _ => 0,
         };
         if used > 0 && !self.lending_registered.contains(&market) {
             self.lending_registered.push(market.clone());
         }
-        if used > 0 && used < amount.0 && proposal_id.is_none() && agent_day == Some(self.spent_day) {
-            // Only part was kept: the rest came back and should not count today.
-            self.spent_today = self.spent_today.saturating_sub(amount.0 - used);
+        if let (true, true, true, Some(at)) =
+            (used > 0, used < amount.0, proposal_id.is_none(), agent_at)
+        {
+            // Only part was kept: the rest came back and should not count against the cap.
+            self.unspend(at, amount.0 - used);
         }
         if used > 0 {
-            emit("yield_deposited", json!({ "market": market, "amount": U128(used), "proposal_id": proposal_id }));
+            emit(
+                "yield_deposited",
+                json!({ "market": market, "amount": U128(used), "proposal_id": proposal_id }),
+            );
         }
-        self.settle(used > 0, proposal_id, market, amount, agent_day, bill_ref, reserved)
+        self.settle(
+            used > 0,
+            proposal_id,
+            market,
+            amount,
+            agent_at,
+            bill_ref,
+            reserved,
+        )
     }
 
     /// Switches owner only if the factory recorded the change.
@@ -980,11 +1265,17 @@ impl KeelVault {
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
         self.owner_change_in_flight = false;
         if ok {
-            emit("owner_changed", json!({ "old_owner_id": self.owner_id, "new_owner_id": new_owner_id }));
+            emit(
+                "owner_changed",
+                json!({ "old_owner_id": self.owner_id, "new_owner_id": new_owner_id }),
+            );
             self.owner_id = new_owner_id;
             self.pending_owner = None;
         } else {
-            emit("owner_change_refused", json!({ "new_owner_id": new_owner_id }));
+            emit(
+                "owner_change_refused",
+                json!({ "new_owner_id": new_owner_id }),
+            );
         }
         ok
     }
@@ -993,7 +1284,14 @@ impl KeelVault {
     pub fn on_recall_done(&mut self, market: AccountId, max_amount: Option<U128>) -> bool {
         #[allow(deprecated)]
         let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
-        emit(if ok { "yield_recalled" } else { "yield_recall_failed" }, json!({ "market": market, "max_amount": max_amount }));
+        emit(
+            if ok {
+                "yield_recalled"
+            } else {
+                "yield_recall_failed"
+            },
+            json!({ "market": market, "max_amount": max_amount }),
+        );
         ok
     }
 
@@ -1002,7 +1300,9 @@ impl KeelVault {
     pub fn on_evm_signed(&mut self, proposal_id: u64) -> Option<EvmSigned> {
         #[allow(deprecated)]
         let result = match env::promise_result(0) {
-            PromiseResult::Successful(bytes) => near_sdk::serde_json::from_slice::<Value>(&bytes).ok(),
+            PromiseResult::Successful(bytes) => {
+                near_sdk::serde_json::from_slice::<Value>(&bytes).ok()
+            }
             _ => None,
         };
         let proposal = self.proposals.get_mut(&proposal_id)?;
@@ -1014,7 +1314,11 @@ impl KeelVault {
             let y = v["recovery_id"].as_u64()? as u8;
             Some(e.signed(proposal.evm_amount?.0, y, &r, &s))
         });
-        proposal.status = if signed.is_some() { ProposalStatus::Signed } else { ProposalStatus::Failed };
+        proposal.status = if signed.is_some() {
+            ProposalStatus::Signed
+        } else {
+            ProposalStatus::Failed
+        };
         if signed.is_none() {
             if let Some(r) = &proposal.bill_ref {
                 self.paid_bills.remove(r);
@@ -1022,7 +1326,11 @@ impl KeelVault {
         }
         proposal.evm_signed = signed.clone();
         emit(
-            if signed.is_some() { "evm_signed" } else { "evm_sign_failed" },
+            if signed.is_some() {
+                "evm_signed"
+            } else {
+                "evm_sign_failed"
+            },
             json!({ "proposal_id": proposal_id, "tx_hash": signed.as_ref().map(|x| &x.tx_hash) }),
         );
         signed
@@ -1050,7 +1358,7 @@ impl KeelVault {
             token_id: self.token_id.clone(),
             per_payment_cap: U128(self.per_payment_cap),
             daily_cap: U128(self.daily_cap),
-            spent_today: U128(self.spent_on(today())),
+            spent_today: U128(self.spent_window(env::block_timestamp())),
             min_balance: U128(self.min_balance),
             paused: self.paused,
             allowlist: self.allowlist.iter().cloned().collect(),
@@ -1101,7 +1409,7 @@ impl KeelVault {
         proposal_id: Option<u64>,
         receiver_id: AccountId,
         amount: U128,
-        agent_day: Option<u64>,
+        agent_at: Option<u64>,
         bill_ref: Option<String>,
         reserved: Option<bool>,
     ) -> bool {
@@ -1122,12 +1430,16 @@ impl KeelVault {
                     ProposalStatus::Failed
                 };
             }
-        } else if !ok && agent_day == Some(self.spent_day) {
-            // The transfer did not happen, so it should not count against today's cap.
-            self.spent_today = self.spent_today.saturating_sub(amount.0);
+        } else if let (false, Some(at)) = (ok, agent_at) {
+            // The transfer did not happen, so it should not count against the cap.
+            self.unspend(at, amount.0);
         }
         emit(
-            if ok { "payment_executed" } else { "payment_failed" },
+            if ok {
+                "payment_executed"
+            } else {
+                "payment_failed"
+            },
             json!({ "receiver_id": receiver_id, "amount": amount, "proposal_id": proposal_id }),
         );
         ok
@@ -1153,12 +1465,129 @@ impl KeelVault {
         );
     }
 
-    fn spent_on(&self, day: u64) -> u128 {
-        if self.spent_day == day {
-            self.spent_today
-        } else {
-            0
+    /// What the agent paid in the 24 hours before `now` (ns).
+    fn spent_window(&self, now: u64) -> u128 {
+        self.spent
+            .iter()
+            .filter(|(t, _)| t.saturating_add(NS_PER_DAY) > now)
+            .map(|(_, a)| a)
+            .sum()
+    }
+
+    fn record_spend(&mut self, now: u64, amount: u128) {
+        self.spent
+            .retain(|(t, _)| t.saturating_add(NS_PER_DAY) > now);
+        require!(
+            self.spent.len() < MAX_SPENT_ENTRIES,
+            "Keel Vault refused: 200 agent payments in 24 hours already"
+        );
+        self.spent.push((now, amount));
+    }
+
+    /// Gives back an agent payment that did not happen (or happened in part).
+    fn unspend(&mut self, at: u64, amount: u128) {
+        if let Some(i) = self
+            .spent
+            .iter()
+            .position(|(t, a)| *t == at && *a >= amount)
+        {
+            self.spent[i].1 -= amount;
+            if self.spent[i].1 == 0 {
+                self.spent.remove(i);
+            }
         }
+    }
+
+    /// The agent's `bill_ref` must name something the owner set, and the
+    /// payment must match it. A stolen agent key can therefore only pay the
+    /// owner's own bills, to their payees, for their amounts, once each.
+    fn check_agent_ref(&self, r: &str, receiver: &AccountId, amount: u128, use_: RefUse) {
+        check_bill_ref(r);
+        let near_only = || {
+            require!(
+                !matches!(use_, RefUse::Evm(_)),
+                "Keel Vault refused: top-ups and idle cash stay on NEAR"
+            )
+        };
+        if let Some(rest) = r.strip_prefix("top:") {
+            near_only();
+            let payee = self.payees.get(receiver);
+            let keep = payee.and_then(|p| p.keep_at).unwrap_or_else(|| {
+                env::panic_str(
+                    "Keel Vault refused: top-ups only go to a card or own wallet with a target",
+                )
+            });
+            self.check_dated(rest, receiver);
+            require!(
+                amount <= keep.0,
+                "Keel Vault refused: a top-up cannot be more than the wallet's target balance"
+            );
+        } else if let Some(rest) = r.strip_prefix("idle:") {
+            near_only();
+            let max = self
+                .payees
+                .get(receiver)
+                .and_then(|p| p.max_move)
+                .unwrap_or_else(|| {
+                    env::panic_str("Keel Vault refused: idle cash only goes to a yield destination")
+                });
+            self.check_dated(rest, receiver);
+            require!(
+                amount <= max.0,
+                "Keel Vault refused: over the most Keel may move to this yield destination at once"
+            );
+        } else {
+            let (id, period) = match r.split_once(':') {
+                Some((id, p)) => (id, Some(p)),
+                None => (r, None),
+            };
+            let bill = self
+                .bills
+                .get(id)
+                .unwrap_or_else(|| env::panic_str("Keel Vault refused: no such bill"));
+            check_period(bill, period);
+            match (use_, bill.chain.as_deref()) {
+                (RefUse::Near | RefUse::Proposal, None) => require!(
+                    bill.payee == receiver.as_str() && bill.amount.0 == amount,
+                    "Keel Vault refused: payment does not match the owner's bill"
+                ),
+                (RefUse::Evm(chain_id), Some(c)) => {
+                    require!(
+                        chain_ids(c).contains(&chain_id),
+                        "Keel Vault refused: the bill is on another chain"
+                    );
+                    require!(
+                        bill.payee == receiver.as_str() && bill.amount.0 == amount,
+                        "Keel Vault refused: payment does not match the owner's bill"
+                    );
+                }
+                // NEAR Intents: the receiver is the quote's deposit address and the
+                // amount includes the swap, so neither can be pinned here. The app
+                // checks the deposit address with 1Click before the owner approves
+                // (web/src/intents.ts), and the owner must approve every one.
+                (RefUse::Proposal, Some(_)) => {}
+                _ => env::panic_str("Keel Vault refused: payment does not match the owner's bill"),
+            }
+        }
+    }
+
+    /// `<account>:<YYYY-MM-DD>` of a top-up or idle move: the account is the
+    /// receiver (its first 45 characters) and the date is today or yesterday
+    /// (UTC), so each wallet gets at most one per day.
+    fn check_dated(&self, rest: &str, receiver: &AccountId) {
+        let (acct, date) = rest
+            .rsplit_once(':')
+            .unwrap_or_else(|| env::panic_str("Keel Vault refused: malformed bill_ref"));
+        let prefix: String = receiver.as_str().chars().take(45).collect();
+        require!(
+            acct == prefix,
+            "Keel Vault refused: the bill_ref names another payee"
+        );
+        let day = env::block_timestamp() / NS_PER_DAY;
+        require!(
+            date == civil_date(day) || date == civil_date(day.saturating_sub(1)),
+            "Keel Vault refused: a top-up or idle move must be dated today"
+        );
     }
 
     fn evaluate(&self, receiver_id: &AccountId, amount: u128) -> PaymentCheck {
@@ -1179,7 +1608,7 @@ impl KeelVault {
                 format!("over the per-payment cap of {}", self.per_payment_cap),
             )
         } else if self
-            .spent_on(today())
+            .spent_window(env::block_timestamp())
             .checked_add(amount)
             .map_or(true, |total| total > self.daily_cap)
         {
@@ -1207,10 +1636,12 @@ impl KeelVault {
         );
     }
 
-        fn mark_paid(&mut self, bill_ref: &str) {
+    fn mark_paid(&mut self, bill_ref: &str) {
         check_bill_ref(bill_ref);
         require!(
-            self.paid_bills.insert(bill_ref.to_string(), env::block_timestamp_ms()).is_none(),
+            self.paid_bills
+                .insert(bill_ref.to_string(), env::block_timestamp_ms())
+                .is_none(),
             "Keel Vault refused: this bill was already paid"
         );
     }
@@ -1218,10 +1649,9 @@ impl KeelVault {
     /// The checks every EVM transfer passes before the vault signs it.
     /// Returns the amount in the route token's own decimals.
     fn check_evm(&self, e: &EvmTransfer, receiver_id: &AccountId, amount: u128) -> u128 {
-        let route = self
-            .evm_routes
-            .get(&e.chain_id)
-            .unwrap_or_else(|| env::panic_str("Keel Vault refused: chain is not one of the vault's EVM routes"));
+        let route = self.evm_routes.get(&e.chain_id).unwrap_or_else(|| {
+            env::panic_str("Keel Vault refused: chain is not one of the vault's EVM routes")
+        });
         require!(
             evm::normalize_address(&e.token) == evm::normalize_address(&route.token),
             "Keel Vault refused: only the route's token can be sent"
@@ -1232,7 +1662,10 @@ impl KeelVault {
             receiver_id.as_str() == to,
             "Keel Vault refused: receiver_id must be the payee's lowercase 0x address"
         );
-        require!(e.gas_limit <= route.max_gas, "Keel Vault refused: gas limit over the route's maximum");
+        require!(
+            e.gas_limit <= route.max_gas,
+            "Keel Vault refused: gas limit over the route's maximum"
+        );
         require!(
             e.max_fee_per_gas.0 <= route.max_fee_per_gas.0,
             "Keel Vault refused: fee over the route's maximum"
@@ -1253,7 +1686,12 @@ impl KeelVault {
             "request": { "path": EVM_PATH, "payload_v2": { "Ecdsa": evm::hex_encode(&hash) }, "domain_id": 0 }
         });
         Promise::new(self.mpc_id.clone())
-            .function_call("sign", args.to_string().into_bytes(), ONE_YOCTO, GAS_MPC_SIGN)
+            .function_call(
+                "sign",
+                args.to_string().into_bytes(),
+                ONE_YOCTO,
+                GAS_MPC_SIGN,
+            )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_SIGNED_CALLBACK)
@@ -1267,7 +1705,7 @@ impl KeelVault {
         amount: U128,
         memo: Option<String>,
         proposal_id: Option<u64>,
-        agent_day: Option<u64>,
+        agent_at: Option<u64>,
         bill_ref: Option<String>,
         reserved: Option<bool>,
     ) -> Promise {
@@ -1279,7 +1717,14 @@ impl KeelVault {
                 .ft_transfer_call(receiver_id.clone(), amount, memo, String::new());
             let done = Self::ext(env::current_account_id())
                 .with_static_gas(GAS_CALLBACK)
-                .on_deposit_done(proposal_id, receiver_id.clone(), amount, agent_day, bill_ref, reserved);
+                .on_deposit_done(
+                    proposal_id,
+                    receiver_id.clone(),
+                    amount,
+                    agent_at,
+                    bill_ref,
+                    reserved,
+                );
             if self.lending_registered.contains(&receiver_id) {
                 return transfer.then(done);
             }
@@ -1303,7 +1748,14 @@ impl KeelVault {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
-                    .on_payment_done(proposal_id, receiver_id, amount, agent_day, bill_ref, reserved),
+                    .on_payment_done(
+                        proposal_id,
+                        receiver_id,
+                        amount,
+                        agent_at,
+                        bill_ref,
+                        reserved,
+                    ),
             )
     }
 }
@@ -1314,7 +1766,13 @@ fn is_testnet() -> bool {
 
 /// NEAR's Chain Signatures contract on this network.
 fn default_mpc() -> AccountId {
-    (if is_testnet() { "v1.signer-prod.testnet" } else { "v1.signer" }).parse().unwrap()
+    (if is_testnet() {
+        "v1.signer-prod.testnet"
+    } else {
+        "v1.signer"
+    })
+    .parse()
+    .unwrap()
 }
 
 /// The vault's own token (USDC) has 6 decimals; EVM amounts are scaled from it.
@@ -1332,11 +1790,17 @@ fn default_evm_routes() -> Vec<EvmRoute> {
         decimals,
         max_fee_per_gas: U128(gwei * GWEI),
         max_gas: 100_000,
+        auto_cap: None,
     };
     if is_testnet() {
         vec![
             r(84532, "0x036cbd53842c5426634e7929541ec2318f3dcf7e", 6, 5),
-            r(11155111, "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", 6, 50),
+            r(
+                11155111,
+                "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+                6,
+                50,
+            ),
             r(421614, "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d", 6, 5),
             r(11155420, "0x5fd84259d66cd46123540766be93dfe6d43130d7", 6, 5),
         ]
@@ -1350,12 +1814,94 @@ fn default_evm_routes() -> Vec<EvmRoute> {
     }
 }
 
-fn today() -> u64 {
-    env::block_timestamp() / NS_PER_DAY
+/// How an agent's bill_ref is used, which decides what it must match.
+#[derive(Clone, Copy)]
+enum RefUse {
+    /// A NEAR payment or proposal: payee and amount must be the bill's.
+    Near,
+    /// From the vault's EVM address on this chain id: 0x payee and amount must be the bill's.
+    Evm(u64),
+    /// A proposal paid on NEAR: for a NEAR bill, payee and amount must be the
+    /// bill's; for a cross-chain bill it is a NEAR Intents deposit, and only
+    /// the bill must exist.
+    Proposal,
+}
+
+impl RefUse {
+    fn from(evm: Option<&EvmTransfer>, proposal: bool) -> Self {
+        match evm {
+            Some(e) => RefUse::Evm(e.chain_id),
+            None if proposal => RefUse::Proposal,
+            None => RefUse::Near,
+        }
+    }
+}
+
+/// The chain ids a bill's chain name stands for (testnet and mainnet).
+fn chain_ids(chain: &str) -> &'static [u64] {
+    match chain {
+        "base" => &[84532, 8453],
+        "eth" => &[11155111, 1],
+        "arb" => &[421614, 42161],
+        "op" => &[11155420, 10],
+        _ => &[],
+    }
+}
+
+/// A one-off bill has no period; a monthly bill's is YYYY-MM and a yearly
+/// bill's YYYY, from its first due date up to next month (or next year), so
+/// a stolen key cannot pay far-future periods in advance.
+fn check_period(bill: &Bill, period: Option<&str>) {
+    let today = civil_date(env::block_timestamp() / NS_PER_DAY);
+    let ok = match (bill.monthly, bill.yearly, period) {
+        (false, false, None) => true,
+        (true, _, Some(p)) => {
+            let (y, m) = (
+                today[..4].parse::<u32>().unwrap(),
+                today[5..7].parse::<u32>().unwrap(),
+            );
+            let next = if m == 12 {
+                format!("{}-01", y + 1)
+            } else {
+                format!("{y}-{:02}", m + 1)
+            };
+            p.len() == 7 && is_date(&format!("{p}-01")) && p >= &bill.due[..7] && p <= next.as_str()
+        }
+        (_, true, Some(p)) => {
+            let y = today[..4].parse::<u32>().unwrap();
+            p.len() == 4
+                && p.bytes().all(|c| c.is_ascii_digit())
+                && p >= &bill.due[..4]
+                && p.parse::<u32>().map_or(false, |x| x <= y + 1)
+        }
+        _ => false,
+    };
+    require!(
+        ok,
+        "Keel Vault refused: the bill_ref's period does not fit the bill"
+    );
+}
+
+/// Days since 1970-01-01 as YYYY-MM-DD (UTC).
+fn civil_date(days: u64) -> String {
+    // Howard Hinnant's days_from_civil, inverted.
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 fn check_bill_ref(r: &str) {
-    require!(!r.is_empty() && r.len() <= MAX_BILL_REF, "bill_ref must be 1 to 64 characters");
+    require!(
+        !r.is_empty() && r.len() <= MAX_BILL_REF,
+        "bill_ref must be 1 to 64 characters"
+    );
 }
 
 /// YYYY-MM-DD with a real month and a day from 1 to 31.
@@ -1364,7 +1910,11 @@ fn is_date(d: &str) -> bool {
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return false;
     }
-    let num = |r: std::ops::Range<usize>| d.get(r).filter(|x| x.bytes().all(|c| c.is_ascii_digit())).and_then(|x| x.parse::<u32>().ok());
+    let num = |r: std::ops::Range<usize>| {
+        d.get(r)
+            .filter(|x| x.bytes().all(|c| c.is_ascii_digit()))
+            .and_then(|x| x.parse::<u32>().ok())
+    };
     matches!((num(0..4), num(5..7), num(8..10)), (Some(y), Some(m), Some(day)) if y >= 2000 && (1..=12).contains(&m) && (1..=31).contains(&day))
 }
 

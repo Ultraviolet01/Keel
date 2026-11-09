@@ -402,7 +402,7 @@ export function Security() {
           </tr>
           <tr>
             <td>A stolen agent key</td>
-            <td>Cannot pay past your limits, add payees or bills, or approve. It cannot flood the vault: at most 50 proposals, and a storage reserve</td>
+            <td>Can only pay bills you listed, to their own payee, for their own amount, once each, inside your limits (vaults created from 9 Nov). It cannot add payees or bills, approve, or swap a waiting proposal for another payee. It cannot flood the vault: every proposal needs one of your bills, at most 50 wait, and a storage reserve</td>
           </tr>
           <tr>
             <td>The same bill paid twice</td>
@@ -410,7 +410,7 @@ export function Security() {
           </tr>
           <tr>
             <td>A look-alike address with the same first and last characters</td>
-            <td>The approval screen shows the full address</td>
+            <td>The approval screen shows the full address, and before Keel pays alone, NEAR AI compares the payee with your other payees and holds a look-alike for your approval</td>
           </tr>
           <tr>
             <td>A vault-signed transfer replayed on another chain</td>

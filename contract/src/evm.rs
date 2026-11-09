@@ -21,6 +21,11 @@ pub struct EvmRoute {
     pub decimals: u8,
     pub max_fee_per_gas: U128,
     pub max_gas: u64,
+    /// Bills on this chain up to this amount (vault token units) to an
+    /// allowlisted 0x payee are signed straight away, inside the per-payment
+    /// and daily caps. None: every payment on this chain waits for the owner.
+    #[serde(default)]
+    pub auto_cap: Option<U128>,
 }
 
 /// The fields the agent fills in from the chain when it proposes.

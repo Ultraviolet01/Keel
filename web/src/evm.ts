@@ -10,6 +10,8 @@ export interface EvmRoute {
   decimals?: number;
   max_fee_per_gas: string;
   max_gas: number;
+  /** Bills on this chain up to this amount (vault token units) to an allowlisted 0x payee are paid without asking. */
+  auto_cap?: string | null;
 }
 
 export const EVM_CHAINS: Record<number, { name: string; rpc: string; explorer: string; gas: string }> = {

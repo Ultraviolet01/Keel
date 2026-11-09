@@ -10,12 +10,12 @@ A company holds stablecoins in wallets on several chains, and running that treas
 
 ## What NEAR does here
 
-- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps, cash buffer, payees and blocklist.
+- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/lib.rs#L1504)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: there is no upgrade path, for Keel or anyone.
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
-- **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
+- **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address: routine bills inside the founder's per-chain auto cap on their own, the rest after the founder approves.
 - **Rhea Finance** NEAR's lending protocol, holds the yield investment in the vault's own account.
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
-- **NEAR AI Cloud** writes the reason on each proposal and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
+- **NEAR AI Cloud** reviews each payment before Keel makes it alone, and can only make Keel more careful: it turns a payment into a proposal or a refusal (a lookalike payee, an odd amount, a suspicious invoice), never the reverse. It also writes the reason on each proposal. **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
 ## Built during NEAR HACKATHON
 
@@ -34,7 +34,7 @@ All code in this repository was written during the hackathon: the first commit i
 You need Node.js 22 or newer (Rust only for the contract tests).
 
 1. Run `git clone https://github.com/Ultraviolet01/Keel keel && cd keel && npm run verify`. You see one `PASS`, `FAIL` or `SKIP` line per check (typechecks, agent and app tests, app build, contract tests, two dry runs on testnet, four cross-chain payments read back from their chains) and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`.
-2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `compass.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), propose Payroll (over the per-payment cap), and route an Arbitrum bill through NEAR Chain Signatures. Bills the hosted agent already handled show as `already paid` or `already proposed`.
+2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `lantern.keel.testnet` (the latest vault code) and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
 3. Run `cd ../web && npm install && npm run dev` and open the address it prints. You see the same site as above, running locally.
 
 ## Testnet tokens
@@ -62,7 +62,7 @@ To create your own company, set limits, approve payees, deposit and add or impor
 | Multisig owner | A 2-member Sputnik DAO on testnet (`sputnikv2.testnet`), every change needing both votes; Trezu's own app was not tested on testnet |
 | Email notifications | Gmail, sent from a Vercel Function after each agent round; addresses in a private Vercel Blob store, sign-up proved by a NEAR wallet-signed message (NEP-413) |
 | Excel report | Built in the browser with ExcelJS from live chain data: nearblocks' index for transfers, FastNEAR's archive node for each transaction |
-| NEAR Intents | Dry quotes only from the live mainnet service; it has no testnet |
+| NEAR Intents | Live mainnet 1Click quotes in dry mode (`dry: true`), the method the hackathon approved because Intents has no testnet (`agent/src/loop.ts` `viaIntents`; deposit check before approval in `web/src/intents.ts`) |
 
 Test tokens have no money value. Nothing here has moved real money.
 
@@ -72,14 +72,14 @@ Test tokens have no money value. Nothing here has moved real money.
 | --- | --- |
 | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | The agent's loop, every decision it makes, and how bills on other chains are paid |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The vault's methods, who can call each, and the payment bands |
-| [docs/SECURITY.md](docs/SECURITY.md) | What protects the money: Keel's key, the cash buffer, owner-only bills and payees, the counterparty check, the multisig hand-over |
+| [docs/SECURITY.md](docs/SECURITY.md) | What protects the money, each claim with the line of code that enforces it: Keel's key, bills behind every payment, the rolling cap, the cash buffer, the AI check, the counterparty check, the multisig hand-over |
 | [docs/VERIFIED.md](docs/VERIFIED.md) | 15 checks run on testnet, each with transaction links |
 | [docs/SETUP.md](docs/SETUP.md) | Creating a company, handing it to a multisig, the Excel report, email notifications, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
 
 ## Known issues
 
-- NEAR Intents is quotes only; no mainnet payment has been sent.
-- A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
+- NEAR Intents has no testnet, so Keel exercises it with dry quotes from the live mainnet service, the approved method (Q-007): `viaIntents` in `agent/src/loop.ts` asks 1Click for an exact-output quote with `dry` set, and `checkDeposit` in `web/src/intents.ts` checks a deposit address with 1Click before the owner approves. No mainnet payment has been sent.
+- A vault's address on another chain must be funded by hand (USDC and a little ETH). A payment there needs the owner's approval unless it is inside that chain's auto cap, to a 0x payee on the allowlist, and inside the vault's caps: approvals are only needed outside the owner's limits, on purpose.
 - On testnet, Rhea lending lends USDC.e only, so only a vault holding USDC.e can invest there.
 - Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it. Keel finds a member's teams by reading every vault's owner, which suits testnet's size, not thousands of vaults.
 - The Excel report's Ledger lists the latest 200 transfers from nearblocks' index, which does not index Rhea's test USDC.e.

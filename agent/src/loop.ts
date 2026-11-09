@@ -22,7 +22,8 @@ import {
   type RuleDraft,
 } from "./brain";
 import type { Chain, Config } from "./chain";
-import { explain } from "./explain";
+import { explain, template } from "./explain";
+import { review, stricter } from "./review";
 import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
 import { balances, broadcast, chainInfo, client, knownChain, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
 
@@ -286,9 +287,18 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     const raw = await chain.checkPayment(vaultId, bill.payee, bill.amount);
     // The vault reports amounts in raw units; show them as tokens.
     const vault = { ...raw, reason: raw.reason.replace(/\b\d{4,}\b/g, (n) => money(BigInt(n))) };
-    const action = decide({ bill, policy, balance: available, counterparty, spike, vaultBand: vault.band, vaultReason: vault.reason, today: o.today });
+    let action = decide({ bill, policy, balance: available, counterparty, spike, vaultBand: vault.band, vaultReason: vault.reason, today: o.today });
     const label = `${bill.memo ?? bill.id}: ${money(bill.amount)} to ${bill.payee}, due ${bill.due}`;
     say("check", `${label}. Counterparty ${counterparty.verdict} (${counterparty.reasons.join("; ")}). Vault says ${vault.band.replace("_", " ")}`);
+    // A second look by an LLM before paying alone. It can only make the decision stricter.
+    let aiCaught = false;
+    if (action.kind === "pay" && !bill.id.startsWith("top:") && !bill.id.startsWith("idle:")) {
+      const v = await review(cfg, reviewInput(company, bill, allPayees, bills, proposals, money));
+      if (v) say("check", `${v.by === "near-ai" ? "NEAR AI" : "Claude"} check: ${v.verdict}. ${v.reason}`);
+      const next = stricter(action, v);
+      aiCaught = next !== action;
+      action = next as typeof action;
+    }
 
     if (action.kind === "wait") {
       say("decide", `wait: ${action.reason}`);
@@ -323,7 +333,9 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
         available -= bill.amount;
         say("act", `paid alone: ${action.reason}`, r.hash);
       } else {
-        const why = await explain(cfg, { company: vaultId.split(".")[0], payee: bill.payee, amount: money(bill.amount), due: bill.due, rule: action.reason, memo: bill.memo });
+        // When the AI check caught it, its own reason goes on the proposal, word for word.
+        const facts = { company: vaultId.split(".")[0], payee: bill.payee, amount: money(bill.amount), due: bill.due, rule: action.reason, memo: bill.memo };
+        const why = aiCaught ? { text: template(facts), by: "template" as const } : await explain(cfg, facts);
         const r = await chain.callAsAgent(vaultId, "propose_payment", { receiver_id: bill.payee, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, reason: why.text, ...ref(bill) });
         handled[bill.id] = { action: "propose", tx: r.hash, proposalId: Number(r.value), at: new Date().toISOString() };
         say("act", `proposed #${r.value} for the owner (${why.by === "near-ai" ? "reason written by NEAR AI" : why.by === "claude" ? "reason written by Claude" : "templated reason"}): ${why.text}`, r.hash);
@@ -354,6 +366,22 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   for (const d of drafts) {
     say("learn", `rule draft for ${d.payee}: raise the cap from ${money(d.currentCap)} to ${money(d.suggestedCap)} after approvals of ${d.evidence.map(money).join(", ")}. Only the owner can apply it.`);
   }
+}
+
+/** What the AI check sees: the bill, what this payee was paid or is billed for, and the owner's other payees. */
+function reviewInput(company: string, bill: Bill, payees: { account_id: string; name: string }[], bills: Bill[], proposals: Proposal[], money: (u: bigint) => string) {
+  const approved = proposals.filter((p) => p.receiver_id === bill.payee && p.status === "executed").map((p) => `${money(BigInt(p.amount))} (approved by the owner)`);
+  const listed = bills.filter((b) => b.payee === bill.payee && b.id !== bill.id).map((b) => `${money(b.amount)} (another bill: ${b.memo ?? b.id})`);
+  return {
+    company,
+    payee: bill.payee,
+    payeeName: payees.find((p) => p.account_id === bill.payee)?.name,
+    amount: money(bill.amount),
+    due: bill.due,
+    history: [...approved, ...listed].slice(-8),
+    knownPayees: payees.filter((p) => p.account_id !== bill.payee).map((p) => `${p.name} (${p.account_id})`).slice(0, 30),
+    memo: bill.memo,
+  };
 }
 
 /**
@@ -490,7 +518,7 @@ const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals,
   return true;
 };
 
-const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say, billRef) => {
+const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, proposals, handled, label, dryRun, say, billRef) => {
   const info = await vaultRoute(chain, vaultId);
   if (!info) throw new Error("this vault was created before Chain Signatures");
   const route = routeFor(info.routes, bill.chain!);
@@ -508,12 +536,51 @@ const viaChainSignatures: Route = async (_cfg, chain, vaultId, bill, _tokenId, p
   const reserved = proposals.filter((p) => p.evm && p.evm.chain_id === route.chain_id && live(p)).map((p) => p.evm!.nonce);
   const evm = await prepareTransfer(route, from, bill.payee, units, reserved);
   const where = `from the vault's own ${bill.chain} address ${from.slice(0, 8)}… via NEAR Chain Signatures`;
+  // Routine bills: an allowlisted 0x payee, under the chain's auto cap and the vault's caps, is paid
+  // without waiting for the owner. The vault checks all of it again; the AI check may still stop it.
+  const auto = route.auto_cap ? BigInt(route.auto_cap) : 0n;
+  let aiReason: string | null = null;
+  if (auto > 0n && bill.amount <= auto && (await chain.checkPayment(vaultId, evm.to, bill.amount)).band === "runs_alone") {
+    const v = await review(cfg, { company: vaultId.split(".")[0], payee: evm.to, amount: usdc(units, route.decimals), due: bill.due, history: [], knownPayees: [], memo: bill.memo });
+    if (v) say("check", `${v.by === "near-ai" ? "NEAR AI" : "Claude"} check: ${v.verdict}. ${v.reason}`);
+    const decision = stricter({ kind: "pay", reason: "inside the auto cap" }, v);
+    if (decision.kind === "refuse") {
+      handled[bill.id] = { action: "refuse", at: new Date().toISOString() };
+      say("decide", `refuse, nothing signed: ${decision.reason}`);
+      return true;
+    }
+    if (decision.kind === "pay") {
+      if (dryRun) {
+        say("decide", `${label}. Would pay alone ${where}, inside the ${chainInfo(route.chain_id).name} auto cap (dry run, nonce ${evm.nonce})`);
+        return true;
+      }
+      const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: evm.to, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, evm, ...billRef }, 250);
+      const p = (await chain.proposals(vaultId)).filter((x) => x.bill_ref === bill.id && x.evm).at(-1);
+      const h: State["handled"][string][string] = { action: "bridge", route: "chain-signatures", tx: r.hash, proposalId: p?.id, at: new Date().toISOString() };
+      handled[bill.id] = h;
+      say("act", `paid alone ${where}: inside the ${chainInfo(route.chain_id).name} auto cap and the vault's caps; NEAR's MPC network signed it as #${p?.id ?? "?"}`, r.hash);
+      if (p?.status === "signed" && p.evm_signed) {
+        const { raw_tx, tx_hash } = p.evm_signed;
+        try {
+          if ((await broadcast(route.chain_id, raw_tx as `0x${string}`, tx_hash as `0x${string}`)) !== "stale") {
+            Object.assign(h, { evmTx: tx_hash, chainId: route.chain_id });
+            say("act", `broadcast on ${chainInfo(route.chain_id).name}: ${chainInfo(route.chain_id).explorer}/tx/${tx_hash}`);
+          }
+        } catch (e) {
+          // Signed is final on NEAR's side; the next round's reconcile step sends it.
+          say("act", `signed, but could not broadcast yet (${String((e as { shortMessage?: string }).shortMessage ?? e).slice(0, 120)}); Keel retries next round`);
+        }
+      }
+      return true;
+    }
+    aiReason = decision.reason;
+  }
   if (dryRun) {
     say("decide", `${label}. Would propose paying ${where} (dry run, nonce ${evm.nonce})`);
     return true;
   }
   const validUntil = Date.now() + 30 * 60_000; // nonce and fees go stale
-  const reason = `Cross-chain to ${bill.chain}: pay ${bill.payee} ${where}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
+  const reason = `${aiReason ? `${aiReason} ` : ""}Cross-chain to ${bill.chain}: pay ${bill.payee} ${where}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
   const r = await chain.callAsAgent(vaultId, "propose_payment", {
     receiver_id: evm.to,
     amount: bill.amount.toString(),

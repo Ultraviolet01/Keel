@@ -64,6 +64,16 @@ const refused = (r: { ok: boolean; error: string }, pattern: RegExp) => !r.ok &&
 const short = (r: { ok: boolean; error: string }) => (r.ok ? "succeeded" : r.error.replace(/\s+/g, " ").match(/(Keel Vault refused: [^"\\]+|Smart contract panicked: [^"\\]+|[A-Za-z]*(Mismatch|NotFound|private)[^"\\]{0,60}|[^"\\]{0,90})/)?.[0] ?? r.error);
 const bal = (id: string) => chain.balance(TOKEN, id);
 const run = `s${Date.now().toString(36)}`; // unique bill refs per run
+const today = new Date().toISOString().slice(0, 10);
+// Every agent payment must name a bill the owner listed, so the owner lists the suite's
+// bills first, and cancels them when the run ends.
+const listedHere: string[] = [];
+async function bill(id: string, payee: string, amount: bigint, extra: object = {}) {
+  const r = await call("owner", "add_bill", { bill: { id, payee, amount: String(amount), due: today, label: `stress ${id}`, ...extra } }, 1n);
+  if (r.ok) listedHere.push(id);
+  else console.log(`   could not list bill ${id}: ${short(r)}`);
+  return r.ok;
+}
 
 console.log(`Stress run ${run} on ${VAULT} (owner ${OWNER})\n`);
 
@@ -133,18 +143,21 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   const before = await bal(PAYEE);
   const policy = await chain.policy(VAULT);
   const room = BigInt(policy.daily_cap) - BigInt(policy.spent_today);
-  const n = Number(room / (80n * U)) + 2;
+  // Each payment is the per-payment cap, so the daily cap is what stops them.
+  const each = BigInt(policy.per_payment_cap) > 0n ? BigInt(policy.per_payment_cap) : U;
+  const n = Math.min(Number(room / each) + 2, 12);
+  for (let i = 0; i < n; i++) await bill(`${run}-cap-${i}`, PAYEE, each);
   let paid = 0;
   let refusedCap = 0;
   for (let i = 0; i < n; i++) {
-    const r = await call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(80n * U), bill_ref: `${run}-cap-${i}` });
+    const r = await call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(each), bill_ref: `${run}-cap-${i}` });
     if (r.ok) paid++;
     else if (/daily cap/.test(r.error)) refusedCap++;
   }
   const after = await bal(PAYEE);
   const spent = BigInt((await chain.policy(VAULT)).spent_today);
   record(spent <= BigInt(policy.daily_cap), `daily cap holds over ${n} payments in a row`, `${paid} paid, ${refusedCap} refused at the cap, spent today ${spent / U} of ${BigInt(policy.daily_cap) / U}`);
-  record(after - before === BigInt(paid) * 80n * U, "token balance moved exactly by the payments that passed", `payee +${(after - before) / U}`);
+  record(after - before === BigInt(paid) * each, "token balance moved exactly by the payments that passed", `payee +${(after - before) / U}`);
 }
 
 // ------------------------------------------------ 4. the same bill twice, in parallel
@@ -153,16 +166,19 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   // The cap may be used up by section 3; the owner raises it for this part.
   await call("owner", "update_policy", { update: { daily_cap: String(BigInt(policyNow.spent_today) + 1000n * U) }, reason: "stress: room for the race test" }, 1n);
   const ref = `${run}-race`;
+  await bill(ref, PAYEE, U);
   const before = await bal(PAYEE);
   // Two agent processes, two keys? No: one key. Different nonces are assigned by near-api-js per call, so fire them together.
-  const rs = await Promise.all([1, 2, 3, 4].map(() => call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(10n * U), bill_ref: ref })));
+  const rs = await Promise.all([1, 2, 3, 4].map(() => call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(U), bill_ref: ref })));
   const ok = rs.filter((r) => r.ok).length;
   const after = await bal(PAYEE);
-  record(ok <= 1 && after - before <= 10n * U, "4 parallel payments of one bill pay it at most once", `${ok} succeeded; payee +${(after - before) / U}; others: ${[...new Set(rs.filter((r) => !r.ok).map(short))].join(" / ")}`);
+  record(ok <= 1 && after - before <= U, "4 parallel payments of one bill pay it at most once", `${ok} succeeded; payee +${(after - before) / U}; others: ${[...new Set(rs.filter((r) => !r.ok).map(short))].join(" / ")}`);
 }
 
 // ------------------------------------------------ 5. proposals: approve twice, reject then approve, supersede
 {
+  for (const id of ["pa", "pb", "pc"]) await bill(`${run}-${id}`, OUTSIDER, 5n * U);
+  for (const id of ["exp", "soon"]) await bill(`${run}-${id}`, OUTSIDER, U);
   const a = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(5n * U), reason: "stress A", bill_ref: `${run}-pa` });
   const id = a.value as number;
   const first = await call("owner", "approve", { proposal_id: id }, 1n);
@@ -175,7 +191,15 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   const again = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(5n * U), reason: "stress A again", bill_ref: `${run}-pa` });
   record(refused(again, /already paid/), "an approved bill cannot be proposed again", short(again));
   const c1 = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(5n * U), reason: "quote 1", bill_ref: `${run}-pc` });
-  const c2 = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(6n * U), reason: "quote 2", bill_ref: `${run}-pc` });
+  const swapPayee = await call("agent", "propose_payment", { receiver_id: "scam2-keel.testnet", amount: String(5n * U), reason: "new bank details", bill_ref: `${run}-pc` });
+  const swapAmount = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(50n * U), reason: "corrected total", bill_ref: `${run}-pc` });
+  const waiting = await chain.view<{ receiver_id: string; amount: string } | null>(VAULT, "get_proposal", { proposal_id: c1.value });
+  record(
+    refused(swapPayee, /does not match the owner's bill/) && refused(swapAmount, /does not match the owner's bill/) && waiting?.receiver_id === OUTSIDER && waiting?.amount === String(5n * U),
+    "a waiting proposal cannot be swapped for another payee or amount",
+    `${short(swapPayee)} / ${short(swapAmount)}`,
+  );
+  const c2 = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(5n * U), reason: "quote 2", bill_ref: `${run}-pc` });
   const old = await call("owner", "approve", { proposal_id: c1.value }, 1n);
   record(refused(old, /not pending|no such proposal/), "a superseded offer cannot be approved (it is deleted)", short(old));
   await call("owner", "reject", { proposal_id: c2.value }, 1n);
@@ -210,6 +234,7 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
 
 // ------------------------------------------------ 7. kill switch and firing the agent
 {
+  await bill(`${run}-rehired`, OUTSIDER, U);
   await call("owner", "pause", {}, 1n);
   const p1 = await call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-paused` });
   const p2 = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "x", bill_ref: `${run}-paused2` });
@@ -227,6 +252,32 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   record(rv.ok && !dead.ok && pk === null && back.ok, "revoked agent can do nothing; rehired agent works again", `revoke ${rv.ok ? "ok" : short(rv)}; fired call: ${short(dead).slice(0, 50)}; rehired ${back.ok ? "ok" : short(back)}`);
   if (back.ok) await call("owner", "reject", { proposal_id: back.value }, 1n);
 }
+
+// ------------------------------------------------ 8. every agent payment names a bill the owner set
+{
+  await bill(`${run}-nw`, PAYEE, U);
+  await bill(`${run}-rent`, PAYEE, U, { monthly: true });
+  const nextYear = `${Number(today.slice(0, 4)) + 1}-${today.slice(5, 7)}`;
+  const tries: [string, object, RegExp][] = [
+    ["with no bill_ref", { receiver_id: PAYEE, amount: String(U) }, /needs a bill_ref/],
+    ["for a made-up bill", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-invented` }, /no such bill/],
+    ["of a bill to another approved payee", { receiver_id: "payroll-keel.testnet", amount: String(U), bill_ref: `${run}-nw` }, /does not match the owner's bill/],
+    ["of a bill with another amount", { receiver_id: PAYEE, amount: String(2n * U), bill_ref: `${run}-nw` }, /does not match the owner's bill/],
+    ["of a monthly bill a year early", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-rent:${nextYear}` }, /period does not fit/],
+    ["as a top-up to a vendor", { receiver_id: PAYEE, amount: String(U), bill_ref: `top:${PAYEE}:${today}` }, /top-ups only go to a card or own wallet/],
+    ["as idle cash to a non-yield payee", { receiver_id: PAYEE, amount: String(U), bill_ref: `idle:${PAYEE}:${today}` }, /idle cash only goes to a yield destination/],
+  ];
+  for (const [name, args, pattern] of tries) {
+    const r = await call("agent", "execute_payment", args);
+    record(refused(r, pattern), `agent payment ${name} is refused`, short(r));
+  }
+  const p = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "x", bill_ref: `${run}-invented2` });
+  record(refused(p, /no such bill/), "agent proposal for a made-up bill is refused", short(p));
+  const ok = await call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-nw` });
+  record(ok.ok && !ok.inner, "the owner's own bill is still paid alone", ok.ok ? "ok" : short(ok));
+}
+
+for (const id of listedHere) await call("owner", "cancel_bill", { id }, 1n);
 
 {
   const now = await chain.policy(VAULT);

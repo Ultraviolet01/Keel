@@ -3,7 +3,7 @@
 // yet (bills, minimums, other chains) the page says so plainly.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NETWORK, accountExists, companyName, formatNear, formatToken, shortKey, view, type Proposal } from "./near";
+import { NETWORK, accountExists, companyName, formatNear, formatToken, parseToken, shortKey, view, type Proposal } from "./near";
 import { Check, LoadLine, Pause, Play, Shield } from "./icons";
 import type { Send } from "./panels";
 import type { Page } from "./Sidebar";
@@ -1114,7 +1114,7 @@ export function Rules(p: PageProps) {
             <div><span><b>Per payment</b><small>Max single payment without you</small></span><span className="vbox num">{box(d.policy.per_payment_cap)}</span></div>
             <div><span><b>Per day</b><small>Max per day without you</small></span><span className="vbox num">{box(d.policy.daily_cap)}</span></div>
             <div><span><b>Approval needed above</b><small>Larger goes to Approvals</small></span><span className="vbox num">{box(d.policy.per_payment_cap)}</span></div>
-            <div><span><b>Spent today</b><small>Counts against the daily cap</small></span><span className="vbox num">{usd(d.policy.spent_today, d)} <small>{d.token.symbol}</small></span></div>
+            <div><span><b>Spent in 24 hours</b><small>Last 24 hours, counts against the daily cap</small></span><span className="vbox num">{usd(d.policy.spent_today, d)} <small>{d.token.symbol}</small></span></div>
           </div>
         </section>
         <section className="card card-pad">
@@ -1657,7 +1657,7 @@ export function Wallets(p: PageProps) {
           <ConnectedWallet p={p} />
           <NotificationsCard p={p} />
           <VaultCard p={p} selected />
-          <EvmWalletCard vaultId={p.vaultId} />
+          <EvmWalletCard p={p} />
         </div>
         <section className="card card-pad w-detail">
           <div className="card-head">
@@ -1705,13 +1705,39 @@ export function Wallets(p: PageProps) {
 
 
 /** The vault's own EVM address, controlled through NEAR Chain Signatures, with its balance on each chain. */
-function EvmWalletCard({ vaultId }: { vaultId: string }) {
+function EvmWalletCard({ p }: { p: PageProps }) {
+  const vaultId = p.vaultId;
+  const d = p.data;
   const [w, setW] = useState<EvmWallet | null | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  const [capChain, setCapChain] = useState<number | null>(null);
+  const [capText, setCapText] = useState("");
+  const [capBusy, setCapBusy] = useState(false);
+  const [capError, setCapError] = useState<string | null>(null);
   useEffect(() => {
     setW(undefined);
     evmWallet(vaultId).then(setW).catch(() => setW(null));
   }, [vaultId]);
+  const canSet = p.canAct && d.policy.owner_id === p.accountId;
+  const saveCap = async () => {
+    const c = w?.chains.find((x) => x.route.chain_id === capChain);
+    if (!c) return;
+    setCapBusy(true);
+    setCapError(null);
+    try {
+      const parsed = capText.trim() === "" ? "0" : parseToken(capText, d.token.decimals);
+      if (parsed === null) throw new Error("Enter an amount like 5 or 12.50.");
+      const units = BigInt(parsed) === 0n ? null : BigInt(parsed);
+      if (units !== null && units > BigInt(d.policy.per_payment_cap)) throw new Error("The auto cap cannot be above the per-payment cap.");
+      await p.send(vaultId, "set_evm_route", { chain_id: c.route.chain_id, route: { ...c.route, decimals: c.route.decimals ?? 6, auto_cap: units === null ? null : units.toString() } }, { deposit: "1" });
+      setCapChain(null);
+      setW(await evmWallet(vaultId).catch(() => null));
+    } catch (e) {
+      setCapError(String(e instanceof Error ? e.message : e).slice(0, 200));
+    } finally {
+      setCapBusy(false);
+    }
+  };
   if (w === undefined) return <section className="card card-pad add-wallet"><span className="muted small">Reading the vault's addresses on other chains…</span></section>;
   if (w === null)
     return (
@@ -1735,11 +1761,28 @@ function EvmWalletCard({ vaultId }: { vaultId: string }) {
               <td><a href={`${c.chain.explorer}/address/${w.address}`} target="_blank" rel="noreferrer">{c.chain.name}</a></td>
               <td className="r num">{formatToken(c.usdc, c.route.decimals ?? 6)} USDC</td>
               <td className="r muted small">{formatToken(c.gas, 18)} {c.chain.gas}</td>
+              <td className="r small">
+                {canSet ? (
+                  <button className="link-btn" onClick={() => { setCapChain(c.route.chain_id); setCapText(c.route.auto_cap ? formatToken(BigInt(c.route.auto_cap), d.token.decimals) : ""); }}>
+                    {c.route.auto_cap ? `Alone up to ${formatToken(BigInt(c.route.auto_cap), d.token.decimals)}` : "Always asks you"}
+                  </button>
+                ) : (
+                  <span className="muted">{c.route.auto_cap ? `Alone up to ${formatToken(BigInt(c.route.auto_cap), d.token.decimals)}` : "Always asks you"}</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <span className="muted small">The same address on every chain. Only this vault can sign for it, through NEAR's MPC network, after you approve. Keel pays bills on these chains from here when NEAR Intents is unavailable.</span>
+      {capChain !== null && (
+        <form className="team-form" style={{ padding: 0 }} onSubmit={(e) => { e.preventDefault(); void saveCap(); }}>
+          <input value={capText} onChange={(e) => setCapText(e.target.value)} placeholder="0 = always ask" inputMode="decimal" aria-label="Auto cap in USDC" />
+          <button className="btn sm" type="submit" disabled={capBusy}>{capBusy ? "Approve in wallet" : `Save for ${EVM_CHAINS[capChain]?.name ?? capChain}`}</button>
+        </form>
+      )}
+      {capChain !== null && <span className="muted tiny">Bills on this chain up to this amount, to a 0x payee on your allowlist and inside your caps, are paid without asking you. Above it, Keel proposes. 0 means always ask.</span>}
+      {capError && <p className="error">{capError}</p>}
+      <span className="muted small">The same address on every chain. Only this vault can sign for it, through NEAR's MPC network, after you approve or inside the auto cap you set per chain. Keel pays bills on these chains from here when NEAR Intents is unavailable.</span>
       <button className="btn" onClick={copy}>{copied ? "Copied" : "Copy address to fund it"}</button>
     </section>
   );

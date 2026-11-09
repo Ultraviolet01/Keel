@@ -93,17 +93,17 @@ All variables are optional; `cp .env.example .env` in the repository root to set
 | `NEARAI_API_KEY`, `NEARAI_MODEL` | Optional NEAR AI Cloud key and model (default `deepseek/deepseek-v3.2`) for the same wording, used first when set |
 | `ONECLICK_JWT` | Optional 1Click partner token; removes the 0.2% fee |
 | `EVM_RPC_<chain id>` | Optional RPC URL per EVM chain, for example `EVM_RPC_421614` for Arbitrum Sepolia |
-| `DEMO_VAULT` | Vault for `npm run demo`, default `compass.keel.testnet` |
+| `DEMO_VAULT` | Vault for `npm run demo`, default `lantern.keel.testnet` (the latest vault code) |
 
 The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, for invoice reading.
 
 ## Known issues
 
 - **Testnet only.** Every vault runs on NEAR testnet with test tokens; the contracts have not had an external audit.
-- **NEAR Intents:** quotes only. No mainnet payment has been sent.
-- **Other chains need funding by hand.** A vault's EVM address needs USDC and a little ETH on each chain it pays from. Keel reports what is missing but does not move USDC there from NEAR (that needs a bridge: NEAR Intents on mainnet, none on testnet). Every payment on another chain needs the owner's approval.
+- **NEAR Intents has no testnet.** Keel exercises it with dry quotes from the live mainnet 1Click service, the approved method (Q-007): `viaIntents` in `agent/src/loop.ts` requests an exact-output quote with `dry` set while developing, and `checkDeposit` in `web/src/intents.ts` asks 1Click what a deposit address pays before the owner approves. The vault cannot pin an Intents proposal's receiver (each quote has a new deposit address), so it only checks that the proposal names a cross-chain bill the owner listed; that 1Click check and the owner's approval cover the rest. No mainnet payment has been sent.
+- **Other chains need funding by hand.** A vault's EVM address needs USDC and a little ETH on each chain it pays from. Keel reports what is missing but does not move USDC there from NEAR (that needs a bridge: NEAR Intents on mainnet, none on testnet). A payment on another chain needs the owner's approval unless the owner set that chain's auto cap and the 0x payee is on the allowlist. If NEAR's MPC network fails to sign an auto-paid transfer, its amount still counts against the daily cap until 24 hours pass.
 - **Signed means sendable.** Once the MPC network signs an approved EVM transfer, anyone can broadcast it; Keel does on its next run. Transfers land in nonce order, so one approved out of order waits.
-- **Vault code is fixed at creation.** A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
+- **Vault code is fixed at creation.** Neither the vault nor the factory has an upgrade or migrate path, so nobody (not Keel, not the factory admin) can change the code under an owner. The other side: a company created before a fix shipped keeps the old code; it gets the fix by creating a new company. Vaults created before 9 Nov 2026 accept agent payments without a bill and use a calendar-day cap.
 - **Yield investment:** Rhea lending (formerly Burrow) lends USDC.e on testnet, not Circle's test USDC, so only a vault holding USDC.e can invest there on testnet. The Overview's total counts the vault's cash only; the investment shows in its own card. Keel does not claim Burrow's farming rewards.
 - **Agent key allowance:** 0.25 NEAR of gas per vault. NEAR checks each transaction against it at a worst-case gas price, so Keel asks for at most 200 Tgas per call. The owner renews it with `set_agent_key`.
 - **Hosted agent:** a GitHub outage can skip a run (seen once as `502 Bad Gateway` from GitHub's API); the next run catches up.
