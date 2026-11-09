@@ -13,12 +13,9 @@ export interface AgentEvent {
   key: string;
 }
 
-/** The round's events worth an email, with a key that stays the same while the situation does. */
+/** The round's events worth an email: the notice the agent attached, in the founder's words. */
 export function notable(e: Event): AgentEvent | null {
-  if (e.step === "decide" && e.text.startsWith("refuse")) return { vault: e.vault, kind: "refused", text: e.text, key: `${e.vault}:refused:${e.text}` };
-  const short = e.step === "forecast" && e.text.match(/^short .* on (\d{4}-\d{2}-\d{2})$/);
-  if (short) return { vault: e.vault, kind: "short", text: `The forecast is ${e.text}.`, key: `${e.vault}:short:${short[1]}` };
-  if (e.step === "act" && e.text.startsWith("the vault refused")) return { vault: e.vault, kind: "vault_refused", text: e.text, key: `${e.vault}:vault_refused:${e.text}` };
+  if (e.notice) return { vault: e.vault, ...e.notice };
   return null;
 }
 

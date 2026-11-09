@@ -65,7 +65,9 @@ export function fmt(units: bigint, decimals: number, symbol = ""): string {
   return `${neg ? "-" : ""}${s}${symbol ? ` ${symbol}` : ""}`;
 }
 
-export type Event = { vault: string; step: string; text: string; tx?: string };
+/** Something worth an email: plain words for the founder, and a key that stays the same while the situation does. */
+export type Notice = { kind: "refused" | "short" | "vault_refused"; key: string; text: string };
+export type Event = { vault: string; step: string; text: string; tx?: string; notice?: Notice };
 
 export interface RoundOptions {
   dryRun: boolean;
@@ -74,9 +76,23 @@ export interface RoundOptions {
   say: (e: Event) => void;
 }
 
+/** "2026-11-09" as "9 Nov". */
+function dayName(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/** A refused bill in the founder's words: which bill, how much, to whom, why, and what to check. */
+export function refusedNotice(vaultId: string, bill: Bill, money: (u: bigint) => string, why: string): Notice {
+  return {
+    kind: "refused",
+    key: `${vaultId}:refused:${bill.id}`,
+    text: `"${bill.memo ?? bill.id}", ${money(bill.amount)} to ${bill.payee}, due ${dayName(bill.due)}: ${why}, so nothing was signed. If you did not add this bill, check it: someone may be trying to get paid.`,
+  };
+}
+
 export async function runVault(cfg: Config, chain: Chain, vaultId: string, state: State, o: RoundOptions) {
-  const say = (step: string, text: string, tx?: string) => {
-    const e = { vault: vaultId, step, text, tx };
+  const say = (step: string, text: string, tx?: string, notice?: Notice) => {
+    const e: Event = { vault: vaultId, step, text, tx, notice };
     o.say(e);
     appendFileSync(LEDGER_FILE, JSON.stringify({ at: new Date().toISOString(), ...e }) + "\n");
   };
@@ -110,7 +126,19 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Blocklisted payees are never paid, so they do not count against the balance.
   const days = forecast(balance, open.filter((b) => !policy.blocklist.includes(b.payee)), o.today);
   const short = firstShortfall(days);
-  say("forecast", short ? `short ${money(-short.balance)} on ${short.date}` : `covered for the next ${days.length} days (ends at ${money(days.at(-1)!.balance)})`);
+  const company = vaultId.charAt(0).toUpperCase() + vaultId.split(".")[0].slice(1);
+  say(
+    "forecast",
+    short ? `short ${money(-short.balance)} on ${short.date}` : `covered for the next ${days.length} days (ends at ${money(days.at(-1)!.balance)})`,
+    undefined,
+    short
+      ? {
+          kind: "short",
+          key: `${vaultId}:short:${short.date}`,
+          text: `${company} holds ${money(balance)}, but ${money(balance - short.balance)} of bills are due by ${dayName(short.date)}${balance > 0n ? `, ${money(-short.balance)} more than it holds` : ""}. Deposit, or move or cancel a bill.`,
+        }
+      : undefined,
+  );
 
   // Reconcile cross-chain moves first, so signed transfers go out before new
   // ones take a nonce. Follow each move until it is final, and
@@ -230,7 +258,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
       const blocked = policy.blocklist.some((b) => b.toLowerCase() === bill.payee.toLowerCase());
       if (blocked) {
         if (!o.dryRun) handled[bill.id] = { action: "refuse", at: new Date().toISOString() };
-        say("decide", `refuse, nothing signed: ${bill.memo ?? bill.id} pays ${bill.payee} on ${bill.chain}, which is on the vault's blocklist`);
+        say("decide", `refuse, nothing signed: ${bill.memo ?? bill.id} pays ${bill.payee} on ${bill.chain}, which is on the vault's blocklist`, undefined, refusedNotice(vaultId, bill, money, `the payee is on ${company}'s blocklist`));
         continue;
       }
       await crossChain(cfg, chain, vaultId, bill, policy.token_id, proposals, handled, money, o.dryRun, say, ref(bill));
@@ -268,7 +296,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     }
     if (action.kind === "refuse") {
       if (!o.dryRun) handled[bill.id] = { action: "refuse", at: new Date().toISOString() };
-      say("decide", `refuse, nothing signed: ${action.reason}`);
+      say("decide", `refuse, nothing signed: ${action.reason}`, undefined, refusedNotice(vaultId, bill, money, action.reason.replace(/^refused:\s*/, "")));
       continue;
     }
     if (o.dryRun) {
@@ -298,7 +326,15 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e);
       const refused = msg.match(/Keel Vault refused: [^"\\]+/);
-      say("act", refused ? `the vault refused: ${refused[0]}` : `failed: ${msg.slice(0, 200)}`, (e as { hash?: string }).hash);
+      const why = refused?.[0].replace(/^Keel Vault refused:\s*/, "");
+      say(
+        "act",
+        refused ? `the vault refused: ${refused[0]}` : `failed: ${msg.slice(0, 200)}`,
+        (e as { hash?: string }).hash,
+        why
+          ? { kind: "vault_refused", key: `${vaultId}:vault_refused:${bill.id}:${why}`, text: `"${bill.memo ?? bill.id}", ${money(bill.amount)} to ${bill.payee}: the vault refused to pay it (${why}). Nothing was paid; the bill stays open.` }
+          : undefined,
+      );
     }
   }
 
