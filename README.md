@@ -17,6 +17,52 @@ A company holds stablecoins in wallets on several chains, and running that treas
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** reviews each payment before Keel makes it alone, and can only make Keel more careful: it turns a payment into a proposal or a refusal (a lookalike payee, an odd amount, a suspicious invoice), never the reverse. It also writes the reason on each proposal. **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
+## Lifecycle
+
+### A company
+
+1. **Create.** The founder signs `create_vault` on the factory `keel.testnet` with about 4 NEAR. The vault is deployed with fixed code (it can never be upgraded) and Keel's key is added in the same transaction.
+2. **Set the rules.** Caps per payment and per rolling 24 hours, a cash buffer, approved payees, a blocklist, and per-chain auto caps for other chains.
+3. **List bills.** One-off, monthly or yearly, typed in or imported from invoice PDFs. Only the owner can list a bill; Keel can only pay what is listed.
+4. **Fund.** Deposit USDC into the vault (and into its EVM address for bills on other chains).
+5. **Keel runs.** Every 15 minutes the hosted agent observes, forecasts, decides, asks the AI check, acts and reconciles; see [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
+6. **The owner decides what Keel may not.** Approve or reject proposals under **Approvals**; email alerts say when something waits.
+7. **Optionally hand over to a team.** Offer the vault to a Sputnik DAO multisig; it takes over once the members vote to accept.
+8. **Stay in control.** Pause, withdraw, or fire Keel (`revoke_agent`) at any time; `set_agent_key` hires it back.
+
+### A bill
+
+```mermaid
+stateDiagram-v2
+  [*] --> Listed: owner add_bill
+  Listed --> Due: within the look-ahead
+  Due --> Deferred: would break the buffer, not due yet
+  Deferred --> Due: next round
+  Due --> Refused: blocklisted or unknown payee
+  Due --> PaidAlone: rules, AI check and vault all agree
+  Due --> Proposed: new payee, over a cap, AI flagged, other chain above its auto cap
+  Proposed --> Proposed: fresh quote or nonce replaces it (same bill)
+  Proposed --> Rejected: owner rejects
+  Proposed --> Expired: Intents quote ran out
+  Expired --> Due: Keel proposes a fresh one
+  Proposed --> Approved: owner approves
+  Approved --> Paid
+  PaidAlone --> Paid
+  Paid --> Due: transfer failed, bill freed
+  Paid --> [*]
+  Refused --> [*]
+  Rejected --> [*]
+```
+
+| Step | Who or what decides | Where it is enforced |
+| --- | --- | --- |
+| Listed | The owner only | `add_bill` is an owner method |
+| Paid alone | Keel's rules, then the AI check (can only say no), then the vault | `execute_payment`: bill, payee, amount, caps, buffer ([`check_agent_ref`](contract/src/lib.rs#L1504)) |
+| Proposed | Keel files it; the owner decides | `propose_payment` (same bill checks), `approve` / `reject` |
+| Paid on another chain | Signed by NEAR's MPC network for the vault, broadcast by Keel | `check_evm` and the route's caps; proposal status `signing` then `signed` |
+| Paid once | The vault remembers every bill it paid | `bill_paid_at`; a failed transfer frees the bill again |
+| Repeats | A monthly or yearly bill comes back for its next period only | Periods checked by the vault: from the first due date to next month or year |
+
 ## Built during NEAR HACKATHON
 
 All code in this repository was written during the hackathon: the first commit is 2026-11-02, and no earlier project of ours is reused. Outside libraries are listed under [Libraries and AI-generated code](#libraries-and-ai-generated-code). The hosted app stays up through judging, until at least 2026-11-25.
