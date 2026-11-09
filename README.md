@@ -37,6 +37,18 @@ You need Node.js 22 or newer (Rust only for the contract tests).
 2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `compass.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), propose Payroll (over the per-payment cap), and route an Arbitrum bill through NEAR Chain Signatures. Bills the hosted agent already handled show as `already paid` or `already proposed`.
 3. Run `cd ../web && npm install && npm run dev` and open the address it prints. You see the same site as above, running locally.
 
+## Testnet tokens
+
+Everything runs on NEAR testnet with free test tokens.
+
+| You need | Get it from |
+| --- | --- |
+| NEAR for your wallet (about 4 to create a company, about 6 more for a team multisig) | https://near-faucet.io |
+| USDC on NEAR testnet, to deposit into your vault | https://faucet.circle.com, network **NEAR Testnet**, sent to your vault's account (shown under **Deposit**) |
+| USDC on Base, Ethereum, Arbitrum or Optimism Sepolia, for bills on those chains | https://faucet.circle.com, that network, sent to your vault's EVM address (under **Wallets**) |
+| ETH for gas on those chains | https://www.alchemy.com/faucets or https://portal.cdp.coinbase.com/products/faucet |
+| USDC.e, to try the yield investment at Rhea lending | Anyone can mint it: `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
+
 To create your own company, set limits, approve payees, deposit and add or import bills, follow [docs/SETUP.md](docs/SETUP.md).
 
 ## What is real
