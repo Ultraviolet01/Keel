@@ -3,7 +3,7 @@
 //   npm run agent                     every vault, every 5 minutes
 //   npm run agent -- --once           one round, then exit
 //   npm run agent -- --dry-run        decide but sign nothing
-//   npm run agent -- --vault compass.keel.testnet --once
+//   npm run agent -- --vault berth.keel.testnet --once
 
 import { Chain, loadConfig } from "./chain";
 import { loadState, runVault, saveState, type Event } from "./loop";

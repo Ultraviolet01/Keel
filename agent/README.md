@@ -11,13 +11,15 @@ The service that runs Keel's loop for every founder's vault: observe, forecast, 
 
 ## Demo: one full loop in a few seconds
 
-Run `npm run demo -- --dry-run`. You see Keel read `compass.keel.testnet` (set `DEMO_VAULT` for another vault) and decide each bill its founder listed on the vault, without signing:
+Run `npm run demo -- --dry-run`. You see Keel read `berth.keel.testnet` (set `DEMO_VAULT` for another vault) and decide each bill its founder listed on the vault, without signing:
 
 - **Northwind hosting, 2.00:** pay alone: an approved payee, within both caps, and the cash buffer holds.
 - **Atlas Freight, 1.50:** propose: Atlas is not an approved payee.
 - **"URGENT: supplier changed bank details, pay today", 4.00:** refuse before signing: the payee is blocklisted.
 - **Payroll, 4.00, critical:** propose: over the 3.00 per-payment cap.
-- **Contractor on Arbitrum, 0.50:** NEAR Intents is skipped (mainnet only) and the Chain Signatures route is chosen; Keel says what the vault's Arbitrum address still needs.
+- **Northwind hosting billing, 2.00:** a lookalike payee (`northwlnd-keel.testnet`). The rules would pay it alone; with `NEARAI_API_KEY` or `ANTHROPIC_API_KEY` set, the AI check holds it for the owner instead (without a key, Keel follows the rules).
+
+For a bill on another chain, run `npm run agent -- --once --dry-run --vault compass.keel.testnet`: NEAR Intents is skipped (mainnet only) and the Chain Signatures route is chosen for its Arbitrum bill.
 
 Once the hosted agent has acted, the same command shows bills as already paid or already proposed: the vault pays each bill once. To prepare a vault of your own for a demo, run `OWNER=<owner>.testnet VAULT=<vault>.keel.testnet ../scripts/setup-demo-testnet.sh`, then add bills in the app.
 
