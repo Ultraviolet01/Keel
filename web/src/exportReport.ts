@@ -10,15 +10,24 @@ const ARCHIVE = FACTORY_ID.endsWith(".near") ? "https://archival-rpc.mainnet.fas
 const EXPLORER = FACTORY_ID.endsWith(".near") ? "https://nearblocks.io/txns/" : "https://testnet.nearblocks.io/txns/";
 const TEAL = "FF0B5C55";
 
+async function fetchRetry(url: string, init: RequestInit, tries = 3): Promise<Response> {
+  for (let n = 1; ; n++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 || n >= tries) return res;
+    await new Promise((r) => setTimeout(r, 800 * n));
+  }
+}
+
 /** Who signed each transaction and the first method it called, from the archive node. */
 async function txInfos(vaultId: string, hashes: string[]): Promise<Record<string, TxInfo>> {
   const out: Record<string, TxInfo> = {};
   const unique = [...new Set(hashes)];
-  for (let i = 0; i < unique.length; i += 8) {
+  // A few at a time, retrying when the archive says "too many requests".
+  for (let i = 0; i < unique.length; i += 4) {
     await Promise.all(
-      unique.slice(i, i + 8).map(async (hash) => {
+      unique.slice(i, i + 4).map(async (hash) => {
         try {
-          const res = await fetch(ARCHIVE, {
+          const res = await fetchRetry(ARCHIVE, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tx", params: { tx_hash: hash, sender_account_id: vaultId, wait_until: "NONE" } }),

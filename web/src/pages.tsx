@@ -107,24 +107,34 @@ function when(ms: number) {
 /** Downloads the Excel treasury report: Summary, Activity, Payments, Ledger and Wallets. */
 function ExportButton({ vaultId, d, label = "Export" }: { vaultId: string; d: VaultData; label?: string }) {
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const run = async () => {
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
+    let mod: typeof import("./exportReport");
     try {
-      const { downloadReport } = await import("./exportReport");
-      await downloadReport(vaultId, d);
+      mod = await import("./exportReport");
+    } catch {
+      // Keel was redeployed while this page was open, so the old export code is gone: load the new version.
+      window.location.reload();
+      return;
+    }
+    try {
+      await mod.downloadReport(vaultId, d);
     } catch (e) {
       console.error(e);
-      setFailed(true);
+      setFailed(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <button className="btn" onClick={run} disabled={busy} title="Excel workbook: summary, activity, payments, ledger and wallets">
-      {busy ? "Preparing…" : failed ? "Export failed, retry" : label}
-    </button>
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      <button className="btn" onClick={run} disabled={busy} title={failed ? `Export failed: ${failed}` : "Excel workbook: summary, activity, payments, ledger and wallets"}>
+        {busy ? "Preparing…" : failed ? "Export failed, retry" : label}
+      </button>
+      {failed && <span className="tiny bad-t" style={{ maxWidth: 320, textAlign: "right" }}>{failed.slice(0, 140)}</span>}
+    </span>
   );
 }
 
