@@ -143,3 +143,39 @@ export function balanceSeries(
   future.push({ t: now + 14 * day, v: f });
   return { past, future };
 }
+
+/**
+ * The vault's balance over the last `rangeMs`, ending now: `count + 1`
+ * evenly spaced moments plus the moment of every transfer, each worked out
+ * as today's balance minus every transfer after it. Used for the portfolio chart.
+ */
+export function balanceSamples(
+  balance: bigint,
+  history: { at: number; delta: bigint }[] | null,
+  rangeMs: number,
+  now: number,
+  count = 60,
+): { t: number; v: bigint }[] {
+  const events = [...(history ?? [])].filter((h) => h.at <= now).sort((a, b) => b.at - a.at);
+  const out: { t: number; v: bigint }[] = [];
+  for (let i = count; i >= 0; i--) {
+    const t = now - (rangeMs * i) / count;
+    let v = balance;
+    for (const h of events) {
+      if (h.at <= t) break;
+      v -= h.delta;
+    }
+    out.push({ t, v: v > 0n ? v : 0n });
+  }
+  // Every transfer in the range also gets its own points, just before and
+  // after it, so a deposit spent minutes later still shows on the line.
+  const from = now - rangeMs;
+  let after = balance;
+  for (const h of events) {
+    if (h.at <= from) break;
+    const before = after - h.delta;
+    out.push({ t: h.at, v: after > 0n ? after : 0n }, { t: h.at - 1, v: before > 0n ? before : 0n });
+    after = before;
+  }
+  return out.sort((a, b) => a.t - b.t);
+}

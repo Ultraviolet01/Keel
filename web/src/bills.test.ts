@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { balanceSeries } from "./bills";
+import { balanceSamples, balanceSeries } from "./bills";
 
 const U = 1_000_000n;
 const day = 86_400_000;
@@ -27,4 +27,19 @@ test("balance chart: the forecast steps down on each unpaid bill and ignores bil
 test("balance chart: transfers older than 14 days stay out of the window", () => {
   const { past } = balanceSeries(5n * U, [{ at: now - 20 * day, delta: 5n * U }], [], now);
   assert.deepEqual(past.map((p) => p.v / U), [5n, 5n]);
+});
+
+test("portfolio samples: even steps over the range, ending at today's balance", () => {
+  const history = [{ at: now - 2 * day, delta: -4n * U }, { at: now - 5 * day, delta: 10n * U }];
+  const s = balanceSamples(6n * U, history, 7 * day, now, 7);
+  assert.equal(s.length, 8 + 4, "8 even samples and 2 points per transfer");
+  assert.equal(s[s.length - 1].v, 6n * U, "ends at today's balance");
+  assert.deepEqual(s.map((p) => p.v / U), [0n, 0n, 0n, 10n, 10n, 10n, 10n, 10n, 6n, 6n, 6n, 6n]);
+  assert.ok(s.every((p, i) => i === 0 || p.t >= s[i - 1].t));
+});
+
+test("portfolio samples: money in and out within minutes still shows", () => {
+  const history = [{ at: now - 3 * day + 60_000, delta: -6n * U }, { at: now - 3 * day, delta: 6n * U }];
+  const s = balanceSamples(0n, history, 14 * day, now, 60);
+  assert.ok(s.some((p) => p.v === 6n * U), "the 6 held for a minute is on the line");
 });

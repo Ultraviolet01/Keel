@@ -10,7 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSeries, billDues } from "./bills";
+import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSamples, billDues } from "./bills";
 
 export interface PageProps {
   vaultId: string;
@@ -396,70 +396,114 @@ function Step(props: { done: boolean; title: string; note: string; mono?: boolea
 }
 
 /** The 14-day chart. With no bills on file the balance runs flat, labelled honestly. */
+/** Smooth path through points, without overshooting between them (monotone cubic). */
+function smoothPath(pts: { x: number; y: number }[]): string {
+  if (pts.length < 2) return "";
+  const n = pts.length;
+  const dx = pts.slice(1).map((p, i) => p.x - pts[i].x);
+  const m = pts.slice(1).map((p, i) => (p.y - pts[i].y) / (dx[i] || 1));
+  const t = pts.map((_, i) => (i === 0 ? m[0] : i === n - 1 ? m[n - 2] : m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2));
+  let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += ` C${(pts[i].x + h).toFixed(1)} ${(pts[i].y + t[i] * h).toFixed(1)} ${(pts[i + 1].x - h).toFixed(1)} ${(pts[i + 1].y - t[i + 1] * h).toFixed(1)} ${pts[i + 1].x.toFixed(1)} ${pts[i + 1].y.toFixed(1)}`;
+  }
+  return d;
+}
+
+const RANGES = [
+  { key: "24H", ms: 86_400_000 },
+  { key: "7D", ms: 7 * 86_400_000 },
+  { key: "14D", ms: 14 * 86_400_000 },
+  { key: "30D", ms: 30 * 86_400_000 },
+] as const;
+
+/** Portfolio-style balance chart: the vault's real balance over the chosen range, with a hover readout. */
 function Forecast({ d }: { d: VaultData }) {
-  const day = 86_400_000;
-  const now = Date.now();
+  const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("7D");
+  const [hover, setHover] = useState<number | null>(null);
+  const now = useMemo(() => Date.now(), [d]);
+  const ms = RANGES.find((r) => r.key === range)!.ms;
+  const pts = useMemo(() => balanceSamples(BigInt(d.balance), d.history, ms, now, 60), [d, ms, now]);
+  const first = pts[0].v;
+  const last = pts[pts.length - 1].v;
+  const change = last - first;
+  const pct = first > 0n ? Number((change * 10_000n) / first) / 100 : null;
+  const up = change >= 0n;
+  const color = change === 0n ? "#0b5c55" : up ? "#1f8a5b" : "#c2563a";
+  const max = pts.reduce((m, p) => (p.v > m ? p.v : m), 0n);
+  const min = pts.reduce((m, p) => (p.v < m ? p.v : m), max);
+  const W = 860, H = 200, padT = 16, padB = 12;
+  const lo = max === min ? (min > 0n ? min - min / 10n : 0n) : min;
+  const hi = max === min ? max + (max / 10n || 1n) : max;
+  const xy = pts.map((p, i) => ({ x: (i / (pts.length - 1)) * W, y: padT + (H - padT - padB) * (1 - Number(((p.v - lo) * 10_000n) / (hi - lo || 1n)) / 10_000) }));
+  const line = smoothPath(xy);
+  const area = `${line} L${W} ${H} L0 ${H} Z`;
+  const h = hover !== null ? Math.max(0, Math.min(pts.length - 1, hover)) : null;
+  const fmtWhen = (t: number) =>
+    new Date(t).toLocaleString("en-GB", ms <= 86_400_000 ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setHover(Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1)));
+  };
+  // Upcoming bills, in words: the chart shows only what really happened.
   const today = new Date(now).toISOString().slice(0, 10);
-  const end = new Date(now + 14 * day).toISOString().slice(0, 10);
-  // Unpaid NEAR bills in the next 14 days draw the balance down on their due day.
-  // Bills on other chains are paid from the vault's EVM address, not this balance.
-  const dues = (d.bills ? billDues(d.bills, today) : [])
-    .filter((x) => !x.bill.chain && !d.paid[x.ref] && x.due <= end)
-    .map((x) => ({ due: x.due, amount: BigInt(x.bill.amount) }));
-  const { past, future } = balanceSeries(BigInt(d.balance), d.history, dues, now);
-  // A balance cannot go below zero: the forecast stops at 0 and the caption says how short it falls.
-  const all = [...past, ...future].map((p) => p.v);
-  const max = all.reduce((m, v) => (v > m ? v : m), 0n) || 1n;
-  const W = 860, top = 24, bottom = 180, left = 40;
-  const xAt = (t: number) => left + ((t - (now - 14 * day)) / (28 * day)) * (W - left);
-  const yAt = (v: bigint) => bottom - Number(((v > 0n ? v : 0n) * BigInt(bottom - top)) / max);
-  const line = (pts: { t: number; v: bigint }[]) => pts.map((p, i) => `${i ? "L" : "M"}${xAt(p.t).toFixed(1)} ${yAt(p.v).toFixed(1)}`).join(" ");
-  const pastPath = line(past);
-  const futurePath = line(future);
-  const zeroY = yAt(0n);
-  const xNow = xAt(now);
-  const labels = [-14, -7, 0, 7, 14].map((k) => ({ x: xAt(now + k * day), text: k === 0 ? "Today" : new Date(now + k * day).toLocaleDateString("en-GB", { month: "short", day: "numeric" }) }));
-  const ended = future[future.length - 1].v;
-  const short = ended < 0n;
-  const moved = past.length > 2;
+  const end = new Date(now + 14 * 86_400_000).toISOString().slice(0, 10);
+  const dues = (d.bills ? billDues(d.bills, today) : []).filter((x) => !x.bill.chain && !d.paid[x.ref] && x.due <= end);
+  const owed = dues.reduce((t, x) => t + BigInt(x.bill.amount), 0n);
   return (
-    <div className="forecast">
-      <span className="muted small">Vault balance, last 14 days and next 14 days</span>
-      <svg viewBox={`0 0 ${W} 220`} preserveAspectRatio="none" aria-label="Vault balance over time">
-        <g stroke="#e8eded">
-          <line x1={left} x2={W} y1={top} y2={top} />
-          <line x1={left} x2={W} y1={(top + bottom) / 2} y2={(top + bottom) / 2} />
-          <line x1={left} x2={W} y1={zeroY} y2={zeroY} />
-        </g>
-        <path className="chart-area" d={`${pastPath} L${xNow.toFixed(1)} ${zeroY} L${left} ${zeroY} Z`} fill="#eef3f3" opacity="0.8" />
-        <path className="chart-line" d={pastPath} stroke="#0b5c55" strokeWidth="2.5" fill="none" />
-        <path className="chart-line future" d={futurePath} stroke={short ? "#b4683c" : "#0b5c55"} strokeWidth="2" strokeDasharray="6 5" fill="none" />
-        <line x1={xNow} x2={xNow} y1={top - 8} y2={bottom} stroke="#c9d6d9" strokeDasharray="2 4" />
-        <circle cx={xNow} cy={yAt(BigInt(d.balance))} r="4.5" fill="#0b5c55" />
-      </svg>
-      <div className="axis-y">
-        <span className="mono">{usd(max, d).split(".")[0]}</span>
-        <span className="mono">0</span>
+    <div className="pchart">
+      <div className="pchart-head">
+        <span className={`pchart-change ${change === 0n ? "flat" : up ? "up" : "down"}`}>
+          {change === 0n ? "No change" : `${up ? "+" : "−"}${usd(up ? change : -change, d)} ${d.token.symbol}`}
+          {pct !== null && change !== 0n && ` (${up ? "+" : "−"}${Math.abs(pct).toFixed(2)}%)`}
+          <span className="muted"> · {range}</span>
+        </span>
+        <div className="pchart-tabs" role="tablist" aria-label="Range">
+          {RANGES.map((r) => (
+            <button key={r.key} role="tab" aria-selected={range === r.key} className={range === r.key ? "on" : ""} onClick={() => setRange(r.key)}>
+              {r.key}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="axis-x">
-        {labels.map((l) => (
-          <span key={l.text}>{l.text}</span>
-        ))}
+      <div className="pchart-box">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onPointerMove={onMove} onPointerLeave={() => setHover(null)} aria-label="Vault balance over time">
+          <defs>
+            <linearGradient id="pchart-fill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path key={`a${range}`} className="pchart-area" d={area} fill="url(#pchart-fill)" />
+          <path key={`l${range}`} className="pchart-line" d={line} stroke={color} strokeWidth="2.25" fill="none" vectorEffect="non-scaling-stroke" />
+          {h !== null && (
+            <g>
+              <line x1={xy[h].x} x2={xy[h].x} y1="0" y2={H} stroke="#9fb0b4" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+              <circle cx={xy[h].x} cy={xy[h].y} r="4" fill="#fff" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+            </g>
+          )}
+        </svg>
+        {h !== null && (
+          <div className="pchart-tip" style={{ left: `${(xy[h].x / W) * 100}%` }}>
+            <b className="num">
+              {usd(pts[h].v, d)} {d.token.symbol}
+            </b>
+            <span>{fmtWhen(pts[h].t)}</span>
+          </div>
+        )}
       </div>
-      <p className="muted tiny">
-        {d.history === null
-          ? "Past balance unavailable right now (the transfer index did not answer); "
-          : moved
-            ? "Solid: the balance after every deposit and payment in the last 14 days. "
-            : "No deposits or payments in the last 14 days. "}
-        {d.bills === null
-          ? "This vault's contract cannot hold bills, so the dashed forecast stays flat."
-          : dues.length === 0
-            ? "Dashed: no unpaid bills in the next 14 days."
-            : short
-              ? `Dashed: ${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} take ${usd(BigInt(d.balance) - ended, d)} ${d.token.symbol}, ${usd(-ended, d)} more than the vault holds. Deposit before they fall due.`
-              : `Dashed: ${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} take ${usd(BigInt(d.balance) - ended, d)} ${d.token.symbol}; ${usd(ended, d)} stays in the vault.`}
-      </p>
+      <div className="pchart-foot muted tiny">
+        <span>{fmtWhen(pts[0].t)}</span>
+        <span>
+          {d.history === null
+            ? "Past balance unavailable right now"
+            : dues.length
+              ? `${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} in the next 14 days: ${amt(owed.toString(), d)}${owed > BigInt(d.balance) ? `, ${usd(owed - BigInt(d.balance), d)} more than the vault holds` : ""}`
+              : "No unpaid bills in the next 14 days"}
+        </span>
+        <span>Now</span>
+      </div>
     </div>
   );
 }
