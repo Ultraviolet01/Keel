@@ -119,12 +119,12 @@ Test tokens have no money value. Nothing here has moved real money.
 | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | The agent's loop, every decision it makes, and how bills on other chains are paid |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The vault's methods, who can call each, and the payment bands |
 | [docs/SECURITY.md](docs/SECURITY.md) | What protects the money, each claim with the line of code that enforces it: Keel's key, bills behind every payment, the rolling cap, the cash buffer, the AI check, the counterparty check, the multisig hand-over |
-| [docs/VERIFIED.md](docs/VERIFIED.md) | 18 checks run on testnet, each with transaction links |
+| [docs/VERIFIED.md](docs/VERIFIED.md) | 19 checks run on testnet, each with transaction links |
 | [docs/SETUP.md](docs/SETUP.md) | Creating a company, handing it to a multisig, the Excel report, email notifications, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
 
 ## Known issues
 
-- NEAR Intents has no testnet, so Keel exercises it with dry quotes from the live mainnet service, the approved method (Q-007). The vault accepts an Intents proposal only to a 64-character deposit address and at most 3% over the bill; that address shape is not yet confirmed against a live non-dry quote. `viaIntents` in `agent/src/loop.ts` asks 1Click for an exact-output quote with `dry` set, and `checkDeposit` in `web/src/intents.ts` checks a deposit address with 1Click before the owner approves. No mainnet payment has been sent.
+- NEAR Intents has no testnet, so Keel exercises it with dry quotes from the live mainnet service, the approved method (Q-007). The vault accepts an Intents proposal only to a 64-character deposit address (the shape 1Click returns, confirmed with a live non-dry quote, [docs/VERIFIED.md](docs/VERIFIED.md) item 19) and at most 3% over the bill. `viaIntents` in `agent/src/loop.ts` asks 1Click for an exact-output quote with `dry` set, and `checkDeposit` in `web/src/intents.ts` checks a deposit address with 1Click before the owner approves. No mainnet payment has been sent.
 - One Keel agent key serves every vault (the factory adds it; the hosted agent keeps it in one GitHub Actions secret). Each vault's rules bound what it can do, and each owner can replace it with their own key (`set_agent_key`) or remove it (`revoke_agent`).
 - The AI check fails open: if the model is unreachable, Keel follows its rules, and the vault's limits still apply. It can also hold a payment that is fine: with two near-identical payees approved, it held both, costing one extra approval.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH). A payment there needs the owner's approval unless it is inside that chain's auto cap, to a 0x payee on the allowlist, and inside the vault's caps: approvals are only needed outside the owner's limits, on purpose.
