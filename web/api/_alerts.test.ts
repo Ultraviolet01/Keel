@@ -45,6 +45,18 @@ test("a multisig vote goes only to voters who have not voted", () => {
   assert.deepEqual(recipients(alerts[0], "team.sputnikv2.testnet", ["a.testnet", "b.testnet"]), ["b.testnet"]);
 });
 
+test("proposals filed by outsiders are not emailed; the digest counts them", () => {
+  const dao = [
+    { id: 8, proposer: "spammer.testnet", votes: {}, methods: ["withdraw"] },
+    { id: 9, proposer: "b.testnet", votes: {}, methods: ["add_payee"] },
+  ];
+  const { alerts } = vaultAlerts(snap({ voters: ["a.testnet", "b.testnet"], members: ["a.testnet", "b.testnet"], dao }), seen);
+  assert.deepEqual(alerts.map((a) => a.title), ["Vote needed: multisig proposal #9"]);
+  const lines = digestLines([], 0, 6, "USDC", {}, 0, 1);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^1 open multisig proposal filed by accounts outside the team/);
+});
+
 test("pause, ownership offer and falling below the buffer each alert once", () => {
   const s = snap({ policy: { owner_id: "founder.testnet", paused: true, min_balance: (10n * U).toString(), pending_owner: "team.sputnikv2.testnet" }, balance: 5n * U });
   const first = vaultAlerts(s, seen);

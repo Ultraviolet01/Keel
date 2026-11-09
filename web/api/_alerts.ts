@@ -63,6 +63,8 @@ export interface Snapshot {
   dao: DaoVote[];
   /** Members of the owning multisig who may vote, if a multisig owns the vault. */
   voters: string[] | null;
+  /** All members of the owning multisig. Proposals filed by anyone else are not emailed (anyone may file on an open multisig). */
+  members?: string[] | null;
   balance: bigint;
   decimals: number;
   symbol: string;
@@ -114,7 +116,8 @@ export function vaultAlerts(s: Snapshot, prev: VaultState | null): { alerts: Ale
       detail: `Keel proposed payment #${p.id}. Keel's reason: ${p.reason}${expiry}`,
     });
   }
-  for (const d of s.dao.filter((d) => !prev.daoSeen.includes(d.id))) {
+  const fromTeam = (d: DaoVote) => !s.members || s.members.includes(d.proposer);
+  for (const d of s.dao.filter((d) => !prev.daoSeen.includes(d.id) && fromTeam(d))) {
     const voters = (s.voters ?? []).filter((v) => !(v in d.votes));
     if (voters.length === 0) continue;
     alerts.push({
@@ -164,7 +167,7 @@ export interface Transfer {
 }
 
 /** The daily digest lines for one vault: what moved after `since`, oldest first. */
-export function digestLines(transfers: Transfer[], since: number, decimals: number, symbol: string, names: Record<string, string>, waiting: number): string[] {
+export function digestLines(transfers: Transfer[], since: number, decimals: number, symbol: string, names: Record<string, string>, waiting: number, outsiders = 0): string[] {
   const lines = transfers
     .filter((t) => t.at > since)
     .sort((a, b) => a.at - b.at)
@@ -173,6 +176,7 @@ export function digestLines(transfers: Transfer[], since: number, decimals: numb
       return t.delta < 0n ? `Paid ${money(-t.delta, decimals, symbol)} to ${who}` : `Received ${money(t.delta, decimals, symbol)} from ${who}`;
     });
   if (lines.length && waiting) lines.push(`${waiting} payment${waiting === 1 ? "" : "s"} still waiting for approval`);
+  if (outsiders) lines.push(`${outsiders} open multisig proposal${outsiders === 1 ? "" : "s"} filed by accounts outside the team, not emailed one by one: check ${outsiders === 1 ? "it" : "them"} under Rules before voting`);
   return lines;
 }
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createTeamArgs, memberProposal, memberRole, rightsOf, validTeamName, type Multisig } from "./multisig";
+import { createTeamArgs, memberProposal, memberRole, membersOnly, openToAll, rightsOf, validTeamName, type Multisig } from "./multisig";
 
 // The policy Sputnik DAO's testnet factory gives a new multisig: anyone may file, the council votes.
 const ms: Multisig = {
@@ -41,8 +41,30 @@ test("member changes are proposals in the voting role", () => {
 test("a new team multisig: Sputnik's create args, with its members as the policy", () => {
   const a = createTeamArgs("acme-team", ["a.testnet", "b.testnet"], "Treasury team");
   assert.equal(a.name, "acme-team");
-  assert.deepEqual(JSON.parse(Buffer.from(a.args, "base64").toString()), { config: { name: "acme-team", purpose: "Treasury team", metadata: "" }, policy: ["a.testnet", "b.testnet"] });
+  const decoded = JSON.parse(Buffer.from(a.args, "base64").toString());
+  assert.deepEqual(decoded.config, { name: "acme-team", purpose: "Treasury team", metadata: "" });
+  assert.equal(decoded.policy.roles.length, 1, "no open role: only members file proposals");
+  assert.deepEqual(decoded.policy.roles[0].kind, { Group: ["a.testnet", "b.testnet"] });
+  assert.ok(decoded.policy.roles[0].permissions.includes("*:AddProposal"));
+  assert.deepEqual(decoded.policy.default_vote_policy.threshold, [1, 2]);
   assert.ok(validTeamName("acme-team"));
   assert.ok(!validTeamName("Acme Team"));
   assert.ok(!validTeamName("-acme"));
+});
+
+test("open multisigs are spotted, and the members-only policy closes them", () => {
+  assert.ok(openToAll(ms));
+  assert.ok(!openToAll({ ...ms, roles: ms.roles.filter((r) => r.members !== "everyone") }));
+  const policy = {
+    roles: [
+      { name: "all", kind: "Everyone", permissions: ["*:AddProposal"], vote_policy: {} },
+      { name: "council", kind: { Group: ["a.testnet"] }, permissions: ["*:AddProposal", "*:VoteApprove"], vote_policy: {} },
+    ],
+    proposal_bond: "1",
+  };
+  const closed = membersOnly(policy);
+  assert.deepEqual(closed.roles.map((r) => r.name), ["council"]);
+  assert.equal(closed.proposal_bond, "1", "the rest of the policy is kept");
+  const mixed = membersOnly({ ...policy, roles: [{ ...policy.roles[0], permissions: ["*:AddProposal", "*:Finalize"] }, policy.roles[1]] });
+  assert.deepEqual(mixed.roles[0].permissions, ["*:Finalize"], "the open role keeps what is not filing");
 });

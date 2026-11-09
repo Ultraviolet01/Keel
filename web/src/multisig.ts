@@ -37,6 +37,7 @@ export interface DaoProposal {
   kind: {
     FunctionCall?: { receiver_id: string; actions: { method_name: string; args: string; deposit: string; gas: string }[] };
     AddMemberToRole?: { member_id: string; role: string };
+    ChangePolicy?: { policy: unknown };
     RemoveMemberFromRole?: { member_id: string; role: string };
   };
 }
@@ -72,7 +73,7 @@ export async function openProposalsFor(dao: string, vaultId: string): Promise<Da
   const from = Math.max(0, last - 60);
   const list = await view<DaoProposal[]>(dao, "get_proposals", { from_index: from, limit: 60 });
   return list
-    .filter((p) => p.status === "InProgress" && (p.kind.FunctionCall?.receiver_id === vaultId || p.kind.AddMemberToRole || p.kind.RemoveMemberFromRole))
+    .filter((p) => p.status === "InProgress" && (p.kind.FunctionCall?.receiver_id === vaultId || p.kind.AddMemberToRole || p.kind.RemoveMemberFromRole || p.kind.ChangePolicy))
     .reverse();
 }
 
@@ -95,9 +96,44 @@ export const SPUTNIK_CREATE_DEPOSIT = "6000000000000000000000000";
 /** Sputnik names: lowercase letters, digits and hyphens. */
 export const validTeamName = (n: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(n) && n.length >= 2 && n.length <= 40;
 
-/** The factory call that creates a multisig with these members; a change needs more than half of them. */
+const MEMBER_PERMISSIONS = ["*:Finalize", "*:AddProposal", "*:VoteApprove", "*:VoteReject", "*:VoteRemove"];
+
+/**
+ * The factory call that creates a multisig with these members. Only members can
+ * file proposals (Sputnik's default lets anyone, for a bond), and a change needs
+ * more than half of them.
+ */
 export function createTeamArgs(name: string, members: string[], purpose: string) {
-  return { name, args: toBase64({ config: { name, purpose, metadata: "" }, policy: members }) };
+  const policy = {
+    roles: [{ name: "council", kind: { Group: members }, permissions: MEMBER_PERMISSIONS, vote_policy: {} }],
+    default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: [1, 2] },
+    proposal_bond: "100000000000000000000000", // 0.1 NEAR: only members file, so it need not deter strangers
+    proposal_period: "604800000000000", // 7 days
+    bounty_bond: "1000000000000000000000000",
+    bounty_forgiveness_period: "86400000000000",
+  };
+  return { name, args: toBase64({ config: { name, purpose, metadata: "" }, policy }) };
+}
+
+type FullPolicy = { roles: { name: string; kind: unknown; permissions: string[]; vote_policy: unknown }[] } & Record<string, unknown>;
+
+/** True when anyone, not just members, may file proposals on this multisig. */
+export function openToAll(ms: Multisig): boolean {
+  return ms.roles.some((r) => r.members === "everyone" && r.permissions.some((x) => /^\*:(\*|AddProposal)$|^[a-z_]+:AddProposal$/.test(x)));
+}
+
+/** The policy change that lets only members file proposals: the open role loses AddProposal (and goes if empty). */
+export function membersOnly(policy: FullPolicy): FullPolicy {
+  const roles = policy.roles
+    .map((r) => (r.kind === "Everyone" ? { ...r, permissions: r.permissions.filter((x) => !/AddProposal|^\*:\*$/.test(x)) } : r))
+    .filter((r) => r.kind !== "Everyone" || r.permissions.length > 0);
+  return { ...policy, roles };
+}
+
+/** The add_proposal call for that change, built from the multisig's current policy. */
+export async function membersOnlyProposal(dao: string) {
+  const policy = await view<FullPolicy>(dao, "get_policy");
+  return { proposal: { description: "Keel: only members can file proposals", kind: { ChangePolicy: { policy: membersOnly(policy) } } } };
 }
 
 /** Gas all of a proposal's actions may use together; Sputnik runs them inside the final vote (sent with 300 Tgas). */
@@ -154,6 +190,7 @@ export function describeCall(method: string): string {
     set_agent_key: "Set Keel's key",
     transfer_owner: "Offer the vault to a new owner",
     AddMemberToRole: "Add a team member",
+    ChangePolicy: "Change the multisig's rules",
     RemoveMemberFromRole: "Remove a team member",
     cancel_owner_transfer: "Withdraw the ownership offer",
     accept_owner: "Accept ownership of the vault",

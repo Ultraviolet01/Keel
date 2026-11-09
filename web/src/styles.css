@@ -800,3 +800,4 @@ input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover
 .create-team summary { cursor: pointer; font-weight: 600; }
 .create-team[open] { display: flex; flex-direction: column; gap: 10px; }
 .create-team[open] summary { margin-bottom: 4px; }
+.ms-open { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border-radius: 10px; background: var(--brass-tint); color: var(--brass); }

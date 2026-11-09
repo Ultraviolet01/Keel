@@ -40,9 +40,16 @@ const fail = (status: number, error: string) => Response.json({ error }, { statu
 const EMAIL = /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i;
 const DIGEST_HOUR_UTC = 7;
 
-function page(title: string, text: string): Response {
+/** The status this browser remembers for an account (the app reads it; the server no longer tells strangers). */
+const LOCAL_KEY = (account: string) => `keel-notify:${account}`;
+
+function page(title: string, text: string, remember?: { account: string; value: object | null }): Response {
+  // On Keel's own site, so it can tell this browser the account's email status.
+  const script = remember
+    ? `<script>try{${remember.value ? `localStorage.setItem(${JSON.stringify(LOCAL_KEY(remember.account))},${JSON.stringify(JSON.stringify(remember.value))})` : `localStorage.removeItem(${JSON.stringify(LOCAL_KEY(remember.account))})`}}catch(e){}</script>`
+    : "";
   const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
-<body style="font-family:system-ui,sans-serif;max-width:520px;margin:12vh auto;padding:0 16px;color:#12313b"><h1 style="color:#0b5c55">${title}</h1><p>${text}</p><p><a href="${APP_URL}/app">Open Keel</a></p></body>`;
+<body style="font-family:system-ui,sans-serif;max-width:520px;margin:12vh auto;padding:0 16px;color:#12313b"><h1 style="color:#0b5c55">${title}</h1><p>${text}</p><p><a href="${APP_URL}/app">Open Keel</a></p>${script}</body>`;
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
@@ -126,6 +133,7 @@ async function run(events: AgentEvent[]): Promise<Response> {
   const inbox = new Map<string, Alert[]>();
   const vaultsOf = new Map<string, string[]>();
   const views = new Map<string, Awaited<ReturnType<typeof readVault>>>();
+  const teamOfVault = new Map<string, string[]>();
   for (const [vault, owner] of followed) {
     const team = teams.get(owner) ?? null;
     let v;
@@ -135,11 +143,12 @@ async function run(events: AgentEvent[]): Promise<Response> {
       continue;
     }
     views.set(vault, v);
+    if (team) teamOfVault.set(vault, team.members);
     for (const a of people(owner)) vaultsOf.set(a, [...(vaultsOf.get(a) ?? []), vault]);
     const statePath = `state/${vault}.json`;
     const prev = await readJson<VaultState>(statePath);
     const { alerts, next } = vaultAlerts(
-      { vault, policy: v.policy, proposals: v.proposals, dao: v.dao, voters: team?.voters ?? null, balance: v.balance, decimals: v.decimals, symbol: v.symbol, events: events.filter((e) => e.vault === vault) },
+      { vault, policy: v.policy, proposals: v.proposals, dao: v.dao, voters: team?.voters ?? null, members: team?.members ?? null, balance: v.balance, decimals: v.decimals, symbol: v.symbol, events: events.filter((e) => e.vault === vault) },
       prev,
     );
     for (const al of alerts) for (const a of recipients(al, owner, team?.members ?? null)) if (byAccount.has(a)) inbox.set(a, [...(inbox.get(a) ?? []), al]);
@@ -181,7 +190,9 @@ async function run(events: AgentEvent[]): Promise<Response> {
       for (const vault of vaultsOf.get(s.account) ?? []) {
         const v = views.get(vault)!;
         const waiting = v.proposals.filter((p) => p.status === "pending").length;
-        const lines = digestLines(await transfers(vault, v.policy.token_id), since, v.decimals, v.symbol, v.names, waiting);
+        const members = teamOfVault.get(vault);
+        const outsiders = members ? v.dao.filter((d) => !members.includes(d.proposer)).length : 0;
+        const lines = digestLines(await transfers(vault, v.policy.token_id), since, v.decimals, v.symbol, v.names, waiting, outsiders);
         if (lines.length) sections.push({ title: companyTitle(vault), lines });
       }
       if (sections.length) {
@@ -209,10 +220,8 @@ export default {
     if (!process.env.BLOB_STORE_ID && !process.env.BLOB_READ_WRITE_TOKEN) return fail(503, "Notifications are not set up on this deployment (no Blob store).");
     try {
       if (request.method === "GET" && action === "status") {
-        const account = url.searchParams.get("account") ?? "";
-        if (!/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(account) || account.length > 64) return fail(400, "That is not a NEAR account.");
-        const s = account ? await getSub(account) : null;
-        return Response.json({ ready: mailReady(), subscribed: !!s, confirmed: !!s?.confirmed, email: s ? maskEmail(s.email) : null });
+        // Public: only whether email is set up here. Who gets alerts, and where, is never told to strangers.
+        return Response.json({ ready: mailReady() });
       }
       if (request.method === "GET" && action === "confirm") {
         const s = await byToken(url.searchParams.get("token"), "confirm");
@@ -222,13 +231,14 @@ export default {
         return page(
           "Notifications on",
           `Keel will email ${maskEmail(s.email)} about every company ${s.account} owns or votes on. If the confirmation email was in Spam, mark it Not spam so the alerts reach your inbox.`,
+          { account: s.account, value: { subscribed: true, confirmed: true, email: maskEmail(s.email) } },
         );
       }
       if (request.method === "GET" && action === "unsubscribe") {
         const s = await byToken(url.searchParams.get("token"), "unsubscribe");
         if (!s) return page("Already off", "These notifications are already off.");
         await Promise.all([removeJson(`subs/${s.account}.json`), removeJson(tokenPath(s.confirmToken)), removeJson(tokenPath(s.unsubToken))]);
-        return page("Notifications off", `Keel no longer emails about ${s.account}, and the address was deleted.`);
+        return page("Notifications off", `Keel no longer emails about ${s.account}, and the address was deleted.`, { account: s.account, value: null });
       }
       if (request.method !== "POST") return fail(405, "Unknown action.");
 
@@ -249,6 +259,11 @@ export default {
         return await subscribe(body);
       }
       if (action === "test") return await test(body);
+      if (action === "status") {
+        await verifySigned(body, "status");
+        const s = await getSub(body.accountId);
+        return Response.json({ ready: mailReady(), subscribed: !!s, confirmed: !!s?.confirmed, email: s ? maskEmail(s.email) : null });
+      }
       return fail(404, "Unknown action.");
     } catch (e) {
       return fail(400, e instanceof Error ? e.message.slice(0, 200) : "Something went wrong.");

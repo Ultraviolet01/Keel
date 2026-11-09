@@ -17,7 +17,9 @@ import {
   describeCall,
   memberProposal,
   memberRole,
+  membersOnlyProposal,
   multisigOf,
+  openToAll,
   proposalCall,
   readArgs,
   rightsOf,
@@ -1200,7 +1202,9 @@ function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list
                   ? `Add ${x.kind.AddMemberToRole.member_id} to the team`
                   : x.kind.RemoveMemberFromRole
                     ? `Remove ${x.kind.RemoveMemberFromRole.member_id} from the team`
-                    : [...new Set(actions.map((a) => describeCall(a.method_name)))].join(", ") || "Proposal"}
+                    : x.kind.ChangePolicy
+                      ? "Change the multisig's rules: only members can file proposals"
+                      : [...new Set(actions.map((a) => describeCall(a.method_name)))].join(", ") || "Proposal"}
               </b>
               {actions.map((a, k) => (
                 <span key={k} className="mono tiny wrap-any">
@@ -1316,6 +1320,19 @@ function MultisigCard({ p }: { p: PageProps }) {
           </form>
         )}
         {canPropose && <p className="muted tiny">Adding or removing a member is a proposal too: it happens once enough members approve it below.</p>}
+        {openToAll(ms) && (
+          <div className="ms-open small">
+            <span>
+              Anyone on NEAR can file proposals on this multisig for a {formatNear(ms.bond)} NEAR bond, so outsiders can fill your vote list. Keel only
+              emails you about proposals filed by members.
+            </span>
+            {canPropose && !d.multisigProposals.some((x) => x.kind.ChangePolicy) && (
+              <button className="btn sm" onClick={() => act("members-only", async () => p.send(ms.dao, "add_proposal", await membersOnlyProposal(ms.dao), { deposit: ms.bond, gas: TGAS(50) }))} disabled={busy !== null}>
+                {busy === "members-only" ? "Approve in wallet" : "Only members can propose"}
+              </button>
+            )}
+          </div>
+        )}
         {pending && <p className="small brass">This vault is offered to <span className="mono">{pending}</span>; it has not accepted.</p>}
         <DaoVotes p={p} ms={ms} list={d.multisigProposals} busy={busy} act={act} />
         {errorLine}
@@ -1493,10 +1510,31 @@ function NotificationsCard({ p }: { p: PageProps }) {
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const account = p.accountId;
 
+  // The server tells strangers only whether email is set up; this browser remembers the account's own status
+  // (saved at sign-up and by the confirmation page), and "Check my status" asks the server with a signature.
+  const localKey = `keel-notify:${account}`;
+  const remembered = (): Partial<Status> => {
+    try {
+      return JSON.parse(localStorage.getItem(localKey) ?? "{}");
+    } catch {
+      return {};
+    }
+  };
+  const remember = (v: Partial<Status> | null) => {
+    try {
+      if (v && v.subscribed) localStorage.setItem(localKey, JSON.stringify(v));
+      else localStorage.removeItem(localKey);
+    } catch {
+      /* private mode: status lasts for this page only */
+    }
+  };
   const load = async () => {
     try {
-      const res = await fetch(`/api/notify?action=status&account=${encodeURIComponent(account)}`);
-      setStatus(res.ok ? ((await res.json()) as Status) : "none");
+      const res = await fetch(`/api/notify?action=status`);
+      const { ready } = res.ok ? ((await res.json()) as { ready: boolean }) : { ready: false };
+      if (!res.ok) return setStatus("none");
+      const mine = remembered();
+      setStatus({ ready, subscribed: !!mine.subscribed, confirmed: !!mine.confirmed, email: mine.email ?? null });
     } catch {
       setStatus("none");
     }
@@ -1512,8 +1550,15 @@ function NotificationsCard({ p }: { p: PageProps }) {
     try {
       const signed = await p.signMessage(["Keel notifications", `Account: ${account}`, ...lines, `Time: ${new Date().toISOString()}`].join("\n"));
       const res = await fetch(`/api/notify?action=${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(signed) });
-      const out = (await res.json().catch(() => ({}))) as { error?: string; email?: string };
+      const out = (await res.json().catch(() => ({}))) as { error?: string; email?: string; subscribed?: boolean; confirmed?: boolean };
       if (!res.ok) throw new Error(out.error ?? `Request failed (${res.status})`);
+      if (action === "subscribe") remember({ subscribed: true, confirmed: false, email: out.email ?? null });
+      if (action === "status") {
+        remember({ subscribed: !!out.subscribed, confirmed: !!out.confirmed, email: out.email ?? null });
+        setNote({ ok: true, text: out.subscribed ? (out.confirmed ? `Alerts go to ${out.email}.` : `Waiting for you to confirm ${out.email}.`) : "No email alerts for this account yet." });
+        await load();
+        return;
+      }
       setNote({ ok: true, text: action === "subscribe" ? `Check ${out.email} for the confirmation link, and look in Spam if it is not in your inbox: mark it Not spam so later alerts arrive. Nothing is sent until you click it.` : "Test email sent. Check your inbox, and Spam if it is not there." });
       setEditing(false);
       await load();
@@ -1572,6 +1617,11 @@ function NotificationsCard({ p }: { p: PageProps }) {
           {form}
           <span className="muted tiny">Your wallet signs a message to prove the account is yours: no transaction, no fee. The address is kept private, never on chain; every email has a link to stop them and delete it.</span>
         </>
+      )}
+      {p.signMessage && s?.ready && (
+        <button className="link-btn" style={{ alignSelf: "flex-start" }} onClick={() => void call("status", "status", ["Action: status"])} disabled={busy !== null}>
+          {busy === "status" ? "Sign in wallet" : "Check my status"}
+        </button>
       )}
       {note && <span className={`small ${note.ok ? "" : "bad-t"}`}>{note.text}</span>}
     </section>

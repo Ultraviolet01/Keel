@@ -24,11 +24,12 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 ## Hand a company to a multisig (optional)
 
 1. Create the company from one member's wallet, as above.
-2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`). No multisig yet? Under **Rules**, open **No multisig yet? Create one for your team here**, enter a team name and the members' accounts (yours included) and click **Create multisig**: your wallet creates the Sputnik DAO with about 6 NEAR, which stays in it for storage, and any change then needs more than half of the members.
+2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`). No multisig yet? Under **Rules**, open **No multisig yet? Create one for your team here**, enter a team name and the members' accounts (yours included) and click **Create multisig**: your wallet creates the Sputnik DAO with about 6 NEAR, which stays in it for storage, and any change then needs more than half of the members. Only members can file proposals on it.
 3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Offer**. You see **Ownership offered**; nothing has changed yet.
 4. Click **File acceptance on** the multisig, and have enough members approve it under **Rules**. You see **Multisig owner** with the members and the votes needed.
 5. Other members open the app and connect their own wallet. You see the team's companies in the list: Keel finds every multisig that owns a Keel vault and lists their wallet as a member. Members are added and removed in the multisig itself (in Trezu, by a vote), and Keel follows. To list a team by hand, pick **Add a team's companies (multisig)** in the company card.
 6. To add or remove a member, use **Propose adding** or the **×** next to a member on the **Multisig owner** card; like any change, it happens once enough members approve it.
+   If the card says anyone on NEAR can file proposals (Sputnik's default, and Trezu's), click **Only members can propose** and have members approve it: outsiders' proposals are then refused by the multisig itself.
 7. What each member can do follows their role in the multisig. Keel reads the roles: a member whose role may file proposals gets the editing controls, one whose role may vote gets **Approve** and **Reject** under **Rules**, and the Rules page shows each member's rights. Everyone, members or not, can see all of the company's data: it is on chain.
 8. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
 
@@ -58,6 +59,9 @@ The file is built in your browser from live chain data: the Ledger comes from ne
    - **Right away**, at most one email per agent round: a payment waiting for approval, a multisig vote waiting for you (only if your role may vote and you have not voted), a bill Keel refused, a forecast that runs short, a payment the vault declined, payments paused or resumed, an ownership offer, cash below the buffer. Each is sent once.
    - **A daily digest** after 07:00 UTC, only when money moved: what was paid and received, and how many payments still wait.
 3. **Send a test email** on the same card checks it works. Every email has a link that stops them and deletes the address.
+4. On another browser, the card does not know your status: click **Check my status** and sign (no fee). Nobody else can look up whether you get alerts or where.
+
+On a multisig that anyone may file proposals on, vote requests are emailed only for proposals filed by members; the digest counts the others.
 
 How it works: after each round, the hosted agent posts what it saw but did not sign to `/api/notify?action=run`, signed with Keel's agent key; the server checks that signature against the factory's record, reads each followed vault from the chain itself, and sends mail through Gmail. Email addresses live in a private Vercel Blob store, never on chain.
 
