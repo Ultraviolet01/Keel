@@ -1,6 +1,6 @@
 # Keel
 
-Keel is an AI treasury agent for a small company. The company's money sits in a vault, a NEAR smart contract the founder owns. The founder sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
+Keel is an AI treasury agent for a small company. The company's money sits in a vault, a NEAR smart contract owned by the founder or, optionally, by the team's multisig. The owner sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
 
 Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
@@ -25,7 +25,9 @@ All code in this repository was written during the hackathon: the first commit i
 
 1. Open https://keel-treasury.vercel.app. You see the landing page and the **How it works**, **Security** and **Docs** pages.
 2. Open https://keel-treasury.vercel.app/app?view=keel-owner.testnet and pick **Compass** in the company card. You see a founder's vault read-only with live testnet data: balance chart, bills, Keel's decisions and the rules.
-3. Open https://github.com/Ultraviolet01/Keel/actions/workflows/agent.yml. You see the hosted agent's runs, every 15 minutes; each log lists what Keel did in every vault, with transaction links.
+3. On the same page, click **Export**. You get an Excel workbook with five sheets: **Summary** (balances, counts, rules), **Activity** (every decision, who made it and why), **Payments** (the bill schedule and each bill's status), **Ledger** (every transfer, labelled from the transaction that made it, with links) and **Wallets** (the vault on NEAR, the yield investment and the vault's address on each other chain).
+4. Open https://keel-treasury.vercel.app/app?view=keelteam85369.sputnikv2.testnet, pick **Deck85369** in the company card, then open **Rules**. You see a company owned by a 2-member Sputnik DAO multisig: its members and what each may do, the votes a change needs, and any open proposals with their exact calls and arguments.
+5. Open https://github.com/Ultraviolet01/Keel/actions/workflows/agent.yml. You see the hosted agent's runs, every 15 minutes; each log lists what Keel did in every vault, with transaction links.
 
 ## Try it
 
@@ -45,6 +47,8 @@ To create your own company, set limits, approve payees, deposit and add or impor
 | Payments on other chains | Base, Ethereum, Arbitrum and Optimism Sepolia, signed by NEAR's testnet MPC network |
 | Yield investment | Burrow's testnet lending market (about 10% a year on Nov 4), in Burrow's own test USDC (USDC.e) |
 | Invoice reading | Claude, called from the hosted app |
+| Multisig owner | A 2-member Sputnik DAO on testnet (`sputnikv2.testnet`), every change needing both votes; Trezu's own app was not tested on testnet |
+| Excel report | Built in the browser with ExcelJS from live chain data: nearblocks' index for transfers, FastNEAR's archive node for each transaction |
 | NEAR Intents | Dry quotes only from the live mainnet service; it has no testnet |
 
 Test tokens have no money value. Nothing here has moved real money.
@@ -55,9 +59,9 @@ Test tokens have no money value. Nothing here has moved real money.
 | --- | --- |
 | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | The agent's loop, every decision it makes, and how bills on other chains are paid |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The vault's methods, who can call each, and the payment bands |
-| [docs/SECURITY.md](docs/SECURITY.md) | What protects the money: Keel's key, the cash buffer, owner-only bills and payees, the counterparty check |
+| [docs/SECURITY.md](docs/SECURITY.md) | What protects the money: Keel's key, the cash buffer, owner-only bills and payees, the counterparty check, the multisig hand-over |
 | [docs/VERIFIED.md](docs/VERIFIED.md) | 14 checks run on testnet, each with transaction links |
-| [docs/SETUP.md](docs/SETUP.md) | Creating a company, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
+| [docs/SETUP.md](docs/SETUP.md) | Creating a company, handing it to a multisig, the Excel report, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
 
 ## Known issues
 
@@ -66,7 +70,8 @@ Test tokens have no money value. Nothing here has moved real money.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
 - A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
 - On testnet, Burrow lends USDC.e only, so only a vault holding USDC.e can invest there.
-- Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it.
+- Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it. Keel finds a member's teams by reading every vault's owner, which suits testnet's size, not thousands of vaults.
+- The Excel report's Ledger lists the latest 200 transfers from nearblocks' index, which does not index Burrow's test USDC.e.
 
 The full list is in [docs/SETUP.md](docs/SETUP.md#known-issues).
 
