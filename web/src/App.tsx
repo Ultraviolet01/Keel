@@ -5,7 +5,7 @@ import { Sidebar, type Page } from "./Sidebar";
 import { BillPanel, ImportPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send, type SendBatch } from "./panels";
 import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
-import { describeCall, proposalCall, savedTeams, saveTeams } from "./multisig";
+import { describeCall, proposalCall, savedTeams, saveTeams, teamsOf } from "./multisig";
 
 // `?view=<account>` shows a founder's companies read-only, without a wallet.
 const viewAs = new URLSearchParams(window.location.search).get("view");
@@ -84,6 +84,26 @@ export default function App() {
     saveTeams(next);
     setTeams(next);
   };
+
+  // A connected member's teams: the multisigs that own Keel vaults and list this wallet.
+  useEffect(() => {
+    if (readOnly || !wallet || !accountId) return;
+    let live = true;
+    teamsOf(accountId, FACTORY_ID)
+      .then((found) => {
+        if (!live || found.length === 0) return;
+        setTeams((cur) => {
+          const next = [...new Set([...cur, ...found])];
+          if (next.length === cur.length) return cur;
+          saveTeams(next);
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [readOnly, wallet, accountId]);
 
   useEffect(() => {
     if (!accountId) {

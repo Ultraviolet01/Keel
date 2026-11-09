@@ -126,3 +126,21 @@ export function saveTeams(teams: string[]) {
     /* private mode: the list lasts for this page only */
   }
 }
+
+/**
+ * The multisigs that own a Keel vault and list `accountId` as a member, so a
+ * member's team companies show up without typing the team's account. Reads
+ * every vault's owner from the factory (fine at testnet scale).
+ */
+export async function teamsOf(accountId: string, factoryId: string): Promise<string[]> {
+  const vaults: string[] = [];
+  for (let from = 0; from < 2000; from += 100) {
+    const page = await view<string[]>(factoryId, "get_vaults", { from_index: from, limit: 100 });
+    vaults.push(...page);
+    if (page.length < 100) break;
+  }
+  const owners = await Promise.all(vaults.map((v) => view<string | null>(factoryId, "get_owner", { vault_id: v }).catch(() => null)));
+  const candidates = [...new Set(owners.filter((o): o is string => !!o && o !== accountId))];
+  const found = await Promise.all(candidates.map((o) => multisigOf(o).catch(() => null)));
+  return found.filter((m): m is Multisig => !!m && m.members.includes(accountId)).map((m) => m.dao);
+}
