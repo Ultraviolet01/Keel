@@ -16,11 +16,14 @@ const VAULT = process.env.STRESS_VAULT ?? "stress.keel.testnet";
 const OWNER = process.env.STRESS_OWNER ?? "vega-founder.testnet";
 const OUTSIDER = "atlas-keel.testnet";
 const PAYEE = "northwind-keel.testnet";
-const TOKEN = "usdc.keel-owner.testnet";
 const U = 1_000_000n;
 
 const cfg = loadConfig();
 const chain = new Chain(cfg);
+// The vault's own token, and its caps as they are now: the suite raises the daily cap for
+// its race test and puts the caps back when it ends, so it never leaves a vault looser.
+const START = await chain.policy(VAULT);
+const TOKEN = START.token_id;
 const provider = new JsonRpcProvider({ url: cfg.rpcUrl });
 const legacyKey = (id: string) => JSON.parse(readFileSync(`${homedir()}/.near-credentials/testnet/${id}.json`, "utf8")).private_key;
 const agentKey = JSON.parse(readFileSync(cfg.agentKeyFile, "utf8")).private_key;
@@ -223,6 +226,14 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   if (!back.ok) console.log("   rehired call 1:", back.error.slice(0, 300));
   record(rv.ok && !dead.ok && pk === null && back.ok, "revoked agent can do nothing; rehired agent works again", `revoke ${rv.ok ? "ok" : short(rv)}; fired call: ${short(dead).slice(0, 50)}; rehired ${back.ok ? "ok" : short(back)}`);
   if (back.ok) await call("owner", "reject", { proposal_id: back.value }, 1n);
+}
+
+{
+  const now = await chain.policy(VAULT);
+  if (now.daily_cap !== START.daily_cap || now.per_payment_cap !== START.per_payment_cap) {
+    const back = await call("owner", "update_policy", { update: { daily_cap: START.daily_cap, per_payment_cap: START.per_payment_cap }, reason: "stress: restore the caps the run started with" }, 1n);
+    record(back.ok, "caps are restored after the run", back.ok ? `daily ${BigInt(START.daily_cap) / U}, per payment ${BigInt(START.per_payment_cap) / U}` : short(back));
+  }
 }
 
 console.log(`\n${results.length - failures} passed, ${failures} failed`);

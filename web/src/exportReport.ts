@@ -78,7 +78,13 @@ export async function downloadReport(vaultId: string, d: VaultData, range: Range
       head.alignment = { vertical: "middle" };
       head.height = 20;
     }
-    for (const row of s.rows) ws.addRow(row);
+    for (const row of s.rows) {
+      const added = ws.addRow(row);
+      // Text from the chain that looks like a formula stays text, even if someone edits the cell later.
+      added.eachCell((c) => {
+        if (typeof c.value === "string" && /^[=+\-@]/.test(c.value)) c.numFmt = "@";
+      });
+    }
     s.columns.forEach((c, i) => {
       if (c.money) ws.getColumn(i + 1).numFmt = '#,##0.00;[Red]-#,##0.00';
     });

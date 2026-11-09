@@ -108,7 +108,7 @@ export interface SignedRequest {
  * and that it is less than ten minutes old. Returns the message's fields.
  */
 export async function verifySigned(r: SignedRequest, action: string, now = Date.now()): Promise<Record<string, string>> {
-  if (!r || typeof r.message !== "string" || typeof r.accountId !== "string") throw new Error("Sign the message with your wallet first.");
+  if (!r || [r.message, r.accountId, r.publicKey, r.signature, r.nonce].some((x) => typeof x !== "string")) throw new Error("Sign the message with your wallet first.");
   const nonce = base64.decode(r.nonce);
   if (nonce.length !== 32) throw new Error("The signed message needs a 32-byte nonce.");
   const ok = ed25519.verify(sigBytes(r.signature), nep413Hash(r.message, nonce, RECIPIENT), keyBytes(r.publicKey));

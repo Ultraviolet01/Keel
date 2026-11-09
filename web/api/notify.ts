@@ -210,6 +210,7 @@ export default {
     try {
       if (request.method === "GET" && action === "status") {
         const account = url.searchParams.get("account") ?? "";
+        if (!/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(account) || account.length > 64) return fail(400, "That is not a NEAR account.");
         const s = account ? await getSub(account) : null;
         return Response.json({ ready: mailReady(), subscribed: !!s, confirmed: !!s?.confirmed, email: s ? maskEmail(s.email) : null });
       }
