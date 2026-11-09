@@ -554,7 +554,7 @@ const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, pr
         say("decide", `${label}. Would pay alone ${where}, inside the ${chainInfo(route.chain_id).name} auto cap (dry run, nonce ${evm.nonce})`);
         return true;
       }
-      const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: evm.to, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, evm, ...billRef }, 250);
+      const r = await chain.callAsAgent(vaultId, "execute_payment", { receiver_id: evm.to, amount: bill.amount.toString(), memo: bill.memo ?? bill.id, evm, ...billRef }, 200);
       const p = (await chain.proposals(vaultId)).filter((x) => x.bill_ref === bill.id && x.evm).at(-1);
       const h: State["handled"][string][string] = { action: "bridge", route: "chain-signatures", tx: r.hash, proposalId: p?.id, at: new Date().toISOString() };
       handled[bill.id] = h;

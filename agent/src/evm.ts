@@ -118,6 +118,8 @@ export async function prepareTransfer(route: EvmRoute, from: Hex, to: string, am
   const maxFee = fees.maxFeePerGas * 2n > cap ? cap : fees.maxFeePerGas * 2n;
   if (fees.maxFeePerGas > cap) throw new Error(`fees on chain ${route.chain_id} are above the vault's cap right now`);
   const priority = fees.maxPriorityFeePerGas > maxFee ? maxFee : fees.maxPriorityFeePerGas;
+  // A limit under what the transfer needs is certain to revert and still burn gas, so refuse instead.
+  if (gas > BigInt(route.max_gas)) throw new Error(`this transfer needs about ${gas} gas, above the vault's cap of ${route.max_gas} on chain ${route.chain_id}; the owner can raise max_gas with set_evm_route`);
   const gasLimit = Math.min(Number((gas * 13n) / 10n), route.max_gas);
   return {
     chain_id: route.chain_id,
