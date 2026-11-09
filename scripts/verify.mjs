@@ -173,11 +173,12 @@ await check("testnet: cross-chain bill reaches Chain Signatures", async () => {
 // The payments recorded in the README, checked on each chain: success, from the vault's own address.
 const VAULT_EVM = "0x3d003b3d8da32261fbba854dc16188cd02436644";
 const PROOFS = [
-  ["Optimism Sepolia", "https://sepolia.optimism.io", "0xa7312eb69bde5c12aade691af65f96e293fa291a0c3524eb2cd2b272f33b468f"],
-  ["Arbitrum Sepolia", "https://sepolia-rollup.arbitrum.io/rpc", "0x4864319fc6f117023ba00a343641c6f2eae02e573ef756dca5aa2ca16d9417d2"],
-  ["Base Sepolia", "https://sepolia.base.org", "0x4df6011a6fcc8f5896c29f5cb3e773d5f8cfcda6effc02d893c051123b3fd674"],
-  // publicnode no longer serves this older receipt; 1rpc does. Each chain's RPCs are tried in order.
-  ["Ethereum Sepolia", "https://ethereum-sepolia-rpc.publicnode.com https://1rpc.io/sepolia", "0x044b25a1517da47944215cf34177ed7c3b746a7db783799c0e9f15598c63d66e"],
+  ["Optimism Sepolia", "https://sepolia.optimism.io https://optimism-sepolia-rpc.publicnode.com", "0xa7312eb69bde5c12aade691af65f96e293fa291a0c3524eb2cd2b272f33b468f"],
+  ["Arbitrum Sepolia", "https://sepolia-rollup.arbitrum.io/rpc https://arbitrum-sepolia-rpc.publicnode.com", "0x4864319fc6f117023ba00a343641c6f2eae02e573ef756dca5aa2ca16d9417d2"],
+  ["Base Sepolia", "https://sepolia.base.org https://base-sepolia-rpc.publicnode.com", "0x4df6011a6fcc8f5896c29f5cb3e773d5f8cfcda6effc02d893c051123b3fd674"],
+  // Public RPCs come and go (publicnode sometimes answers null for this older receipt, 1rpc rate-limits),
+  // so each chain lists several, tried in order until one returns the receipt.
+  ["Ethereum Sepolia", "https://sepolia.gateway.tenderly.co https://sepolia.rpc.thirdweb.com https://eth-sepolia.api.onfinality.io/public https://ethereum-sepolia-rpc.publicnode.com", "0x044b25a1517da47944215cf34177ed7c3b746a7db783799c0e9f15598c63d66e"],
 ];
 for (const [chain, rpc, hash] of PROOFS) {
   await check(`${chain}: vault-signed USDC payment landed`, async () => {
