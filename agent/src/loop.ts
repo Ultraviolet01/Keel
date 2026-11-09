@@ -119,7 +119,14 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const listed = [...vaultBills(await chain.bills(vaultId), o.today), ...topUps(payees, held, o.today)];
   const bills = listed;
   const handled = (state.handled[vaultId] ??= {});
-  const open = bills.filter((b) => !handled[b.id]);
+  // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
+  const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);
+  // A bill the vault already paid is not due, whatever this run remembers: the hosted agent starts every
+  // run with no memory, and counting paid bills made it pull the yield investment back right after depositing it.
+  const paidOnChain = remembers
+    ? await Promise.all(bills.map((b) => chain.view<number | null>(vaultId, "bill_paid_at", { bill_ref: b.id }).then((at) => at !== null, () => false)))
+    : bills.map(() => false);
+  const open = bills.filter((b, i) => !handled[b.id] && !paidOnChain[i]);
   say("observe", `balance ${money(balance)}, ${proposals.filter((p) => p.status === "pending").length} proposals waiting, ${open.length} open bills`);
 
   // Forecast
@@ -247,8 +254,6 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     due.push(idle);
   }
   let available = balance;
-  // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
-  const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);
   const ref = (bill: Bill) => (remembers ? { bill_ref: bill.id } : {});
 
   for (const bill of due) {
