@@ -66,7 +66,7 @@ export interface VaultPayee {
   kind: string;
   keep_at?: string | null; // smallest units; Keel tops a card or own wallet up to this
   max_move?: string | null; // smallest units; the most Keel moves to a yield destination at once
-  lending?: boolean; // a lending market (Burrow): deposits earn in the vault's own account there
+  lending?: boolean; // a lending market (Rhea lending, formerly Burrow): deposits earn in the vault's own account there
 }
 
 /**

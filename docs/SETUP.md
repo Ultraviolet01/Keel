@@ -6,7 +6,7 @@
 
 1. **Create your company.** In the app, click **Open app**, connect a NEAR testnet wallet holding about 4 NEAR (free from https://near-faucet.io), name your company and click **Create vault**. You see your vault, owned by you, with Keel's agent key already on it and no limits, so every payment needs your approval. The 3.86 NEAR deposit (`min_vault_deposit` on `keel.testnet`) pays the vault's storage and stays in it. Command line: `near contract call-function as-transaction keel.testnet create_vault json-args '{"name":"<company>"}' prepaid-gas '300 Tgas' attached-deposit '3.9 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send`.
 2. **Set your limits.** Click **Set limits**: per payment, per day, a cash buffer, approved payees and blocked addresses. You see them under **Active rules**. Command line: `update_policy` with `{"update":{"per_payment_cap":"3000000","daily_cap":"10000000","min_balance":"1000000","allow":["<payee>.testnet"]},"reason":"initial limits"}` and 1 yoctoNEAR attached.
-3. **Approve payees.** Open **Payees**, click **Approve a payee**: a name, the kind (vendor, employee, company card wallet, bank off-ramp, your own wallet, yield destination) and the NEAR account. A card or your own wallet can have a balance to keep; a yield destination has a most-per-move limit and can be marked as a lending market (Burrow). You see it as **Approved by you**.
+3. **Approve payees.** Open **Payees**, click **Approve a payee**: a name, the kind (vendor, employee, company card wallet, bank off-ramp, your own wallet, yield destination) and the NEAR account. A card or your own wallet can have a balance to keep; a yield destination has a most-per-move limit and can be marked as a lending market (Rhea lending, formerly Burrow). You see it as **Approved by you**.
 4. **Deposit USDC.** Click **Deposit** and send Circle's testnet USDC from https://faucet.circle.com (network "Near Testnet") to your vault's account. You see the balance on the Overview.
 5. **Add bills.** Click **Add bill**: what it is for, the payee, amount, due date, category, once, monthly or yearly, and whether it is critical. Optionally upload the invoice (PDF or photo) and Claude fills in the form for you to check. To add several at once, click **Import invoices**: drop up to 10 PDFs or photos, check the rows Claude drafts, and sign them all in one transaction. You see the bill under **Upcoming payments** as **Scheduled**; from three days before it is due, the next agent run shows it as **Paid**, **Needs approval** or **Deferred: cash buffer**.
 6. **Approve.** Open **Approvals**. Each proposal shows the full payee address, the amount, the rule that sent it to you and Keel's reason; invoice text is marked unverified. Approving signs the payment with your wallet.
@@ -19,7 +19,7 @@
 - **Ledger:** every token movement in and out of the vault, signed, labelled from the method its transaction called (Keel's payment, your approval, a withdrawal, a deposit, the yield investment), with a link to the transaction.
 - **Wallets:** the vault on NEAR (balance, buffer, above the buffer), the yield investment and its rate, and the vault's address and balance on each other chain.
 
-The file is built in your browser from live chain data: the Ledger comes from nearblocks' public index and each transaction's details from FastNEAR's archive node. Burrow's test token (USDC.e) is not indexed there, so a USDC.e vault's Ledger is empty and the Summary says so.
+The file is built in your browser from live chain data: the Ledger comes from nearblocks' public index and each transaction's details from FastNEAR's archive node. Rhea's test token (USDC.e) is not indexed there, so a USDC.e vault's Ledger is empty and the Summary says so.
 
 ## Hand a company to a multisig (optional)
 
@@ -39,7 +39,7 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 | USDC on NEAR testnet | https://faucet.circle.com, network "Near Testnet", sent to the vault's account |
 | USDC on Base, Ethereum, Arbitrum or Optimism Sepolia | https://faucet.circle.com, picking that exact network, sent to the vault's EVM address (on the app's **Wallets** page; the same address on every chain) |
 | Testnet ETH for gas on those chains | https://portal.cdp.coinbase.com/products/faucet (Base Sepolia), https://www.alchemy.com/faucets (Ethereum, Arbitrum, Optimism and Base Sepolia), https://console.optimism.io/faucet (Optimism Sepolia) |
-| USDC.e, for a vault that invests at Burrow on testnet | `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
+| USDC.e, for a vault that invests at Rhea lending on testnet | `near contract call-function as-transaction usdc.fakes.testnet mint json-args '{"account_id":"<vault>.keel.testnet","amount":"50000000"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as <you>.testnet network-config testnet sign-with-legacy-keychain send` (50 USDC.e) |
 
 ## Hosted agent
 
@@ -87,11 +87,11 @@ The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, 
 - **Other chains need funding by hand.** A vault's EVM address needs USDC and a little ETH on each chain it pays from. Keel reports what is missing but does not move USDC there from NEAR (that needs a bridge: NEAR Intents on mainnet, none on testnet). Every payment on another chain needs the owner's approval.
 - **Signed means sendable.** Once the MPC network signs an approved EVM transfer, anyone can broadcast it; Keel does on its next run. Transfers land in nonce order, so one approved out of order waits.
 - **Vault code is fixed at creation.** A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
-- **Yield investment:** Burrow's testnet lends USDC.e, not Circle's test USDC, so only a vault holding USDC.e can invest there on testnet. The Overview's total counts the vault's cash only; the investment shows in its own card. Keel does not claim Burrow's farming rewards.
+- **Yield investment:** Rhea lending (formerly Burrow) lends USDC.e on testnet, not Circle's test USDC, so only a vault holding USDC.e can invest there on testnet. The Overview's total counts the vault's cash only; the investment shows in its own card. Keel does not claim Burrow's farming rewards.
 - **Agent key allowance:** 0.25 NEAR of gas per vault. NEAR checks each transaction against it at a worst-case gas price, so Keel asks for at most 200 Tgas per call. The owner renews it with `set_agent_key`.
 - **Hosted agent:** a GitHub outage can skip a run (seen once as `502 Bad Gateway` from GitHub's API); the next run catches up.
 - **Invoice reading** needs `ANTHROPIC_API_KEY` in Vercel. Its limit of 10 invoices per visitor per hour is kept per running server, so it is best effort.
-- **Excel report:** the Ledger lists the latest 200 token transfers from nearblocks' index; tokens it does not index (Burrow's test USDC.e) leave the Ledger empty. A row whose transaction the archive node cannot return is labelled by direction only, with "Unknown" as who made it.
+- **Excel report:** the Ledger lists the latest 200 token transfers from nearblocks' index; tokens it does not index (Rhea's test USDC.e) leave the Ledger empty. A row whose transaction the archive node cannot return is labelled by direction only, with "Unknown" as who made it.
 - **Bills are entered by the founder** (or drafted from an uploaded invoice), not imported from an accounting system or an inbox.
 - **Learning is rule-based,** and the counterparty check uses on-chain signals and the vault's lists only, with no external risk scoring.
 - **Multisig ownership** is optional and works with Sputnik DAO multisigs (the contracts behind Trezu) only. A company is created from one wallet and then handed over; going back needs the multisig to vote for it.

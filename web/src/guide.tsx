@@ -236,7 +236,7 @@ export function HowItWorks() {
           </tr>
           <tr>
             <td>Deploy idle</td>
-            <td>Moves cash above your buffer and the next 14 days of bills into your vault's own account at Burrow, NEAR's lending protocol, as a yield investment, and withdraws it back to the vault when bills need it</td>
+            <td>Moves cash above your buffer and the next 14 days of bills into your vault's own account at Rhea lending (formerly Burrow), NEAR's lending protocol, as a yield investment, and withdraws it back to the vault when bills need it</td>
             <td>Approved destination and a per-move limit; withdrawals only back to the vault. All enforced by the vault</td>
           </tr>
           <tr>
@@ -256,7 +256,7 @@ export function HowItWorks() {
           </tr>
         </tbody>
       </table>
-      <p className="muted small">On testnet, Burrow lends its own test USDC (USDC.e), so the demo vault that invests at Burrow holds USDC.e instead of Circle's test USDC.</p>
+      <p className="muted small">On testnet, Rhea lending lends Rhea's test USDC (USDC.e), so the demo vault that invests there holds USDC.e instead of Circle's test USDC.</p>
 
       <h2 id="chains">Paying on other chains</h2>
       <p>

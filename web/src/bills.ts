@@ -43,11 +43,11 @@ export interface VaultPayee {
   keep_at?: string | null;
   /** For a yield destination: the most Keel moves there at once. */
   max_move?: string | null;
-  /** A lending market (Burrow): deposits earn in the vault's own account there. */
+  /** A lending market (Rhea lending, formerly Burrow): deposits earn in the vault's own account there. */
   lending?: boolean;
 }
 
-/** Burrow's lending contract on each network. */
+/** Rhea's lending contract on each network (still named after Burrow, which merged into Rhea Finance). */
 export const BURROW = { testnet: "contract.1638481328.burrow.testnet", mainnet: "contract.main.burrow.near" };
 
 export const PAYEE_KINDS: Record<string, { label: string; note: string }> = {

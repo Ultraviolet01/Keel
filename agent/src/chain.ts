@@ -177,8 +177,8 @@ export class Chain {
 
   /** Signs a call as the vault with the agent key. Returns the transaction hash and the decoded return value. */
   /**
-   * The vault's supply at a lending market (Burrow), in the vault token's
-   * units, and the market's supply APR. Burrow counts with extra decimals.
+   * The vault's supply at a lending market (Rhea lending, formerly Burrow), in the vault token's
+   * units, and the market's supply APR. Rhea lending counts with extra decimals.
    */
   async lendingPosition(market: string, vaultId: string, tokenId: string): Promise<{ units: bigint; extra: number; apr: number }> {
     const [acct, asset] = await Promise.all([

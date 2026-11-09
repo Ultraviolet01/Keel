@@ -49,7 +49,7 @@ const GAS_CALLBACK: Gas = Gas::from_tgas(10);
 /// Cash buffer: reading the vault's balance, then paying from the callback.
 const GAS_BALANCE_OF: Gas = Gas::from_tgas(5);
 const GAS_BALANCE_CHECKED: Gas = Gas::from_tgas(45);
-/// Lending markets (Burrow): register once, deposit with ft_transfer_call,
+/// Lending markets (Rhea lending, formerly Burrow): register once, deposit with ft_transfer_call,
 /// withdraw with the market's execute. The balance callback needs room for
 /// the whole deposit chain.
 const GAS_BALANCE_CHECKED_LENDING: Gas = Gas::from_tgas(130);
@@ -57,7 +57,7 @@ const GAS_LENDING_REGISTER: Gas = Gas::from_tgas(10);
 const GAS_FT_TRANSFER_CALL: Gas = Gas::from_tgas(80);
 const GAS_RECALL: Gas = Gas::from_tgas(120);
 const GAS_OWNER_RECORD: Gas = Gas::from_tgas(15);
-/// Burrow's storage_balance_bounds minimum (0.1 NEAR), paid once per market.
+/// Rhea lending's storage_balance_bounds minimum (0.1 NEAR), paid once per market.
 const LENDING_STORAGE: NearToken = NearToken::from_millinear(100);
 const MAX_TEXT: usize = 280;
 const MAX_BILL_REF: usize = 64;
@@ -99,7 +99,7 @@ trait FungibleToken {
     fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String) -> U128;
 }
 
-/// A lending market such as Burrow: deposits arrive by ft_transfer_call with
+/// A lending market such as Rhea lending (formerly Burrow): deposits arrive by ft_transfer_call with
 /// an empty message and are credited to the sender; Withdraw sends them back.
 #[ext_contract(ext_lending)]
 #[allow(dead_code)]
@@ -226,7 +226,7 @@ pub struct Payee {
     /// Keel moves only cash above the buffer, so a buffer must be set.
     #[serde(default)]
     pub max_move: Option<U128>,
-    /// For a yield destination that is a lending market (Burrow): the vault
+    /// For a yield destination that is a lending market (Rhea lending): the vault
     /// deposits into its own account there, earning interest, and can
     /// withdraw it back with recall_from_yield. Nobody else can.
     #[serde(default)]
@@ -848,7 +848,7 @@ impl KeelVault {
 
     /// Withdraws the vault's yield investment from one of its lending markets
     /// back into the vault, and nowhere else. `max_amount` is in the market's
-    /// own units (Burrow: token decimals plus its extra_decimals); omit it to
+    /// own units (Rhea lending: token decimals plus its extra_decimals); omit it to
     /// withdraw everything. Keel's agent calls it when bills or the cash
     /// buffer need the cash; the owner can too (1 yoctoNEAR attached). Works
     /// while paused.

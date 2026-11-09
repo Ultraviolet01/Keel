@@ -94,7 +94,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   // Bills the owner listed on the vault: the only source of work for Keel.
   // Top-ups for the owner's card and own wallets that run below their target.
   const allPayees = (await chain.payees(vaultId)).filter((p) => !policy.blocklist.includes(p.account_id));
-  // The yield investment at a lending market (Burrow) the owner approved.
+  // The yield investment at a lending market (Rhea lending) the owner approved.
   const market = allPayees.find((p) => p.kind === "yield" && p.lending);
   const position = market ? await chain.lendingPosition(market.account_id, vaultId, policy.token_id).catch(() => null) : null;
   const payees = allPayees.filter((p) => p.keep_at);

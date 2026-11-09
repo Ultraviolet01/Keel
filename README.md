@@ -13,7 +13,7 @@ A small company holds stablecoins in wallets on several chains and has no one to
 - **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps, cash buffer, payees and blocklist.
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
-- **Burrow**, NEAR's lending protocol, holds the yield investment in the vault's own account.
+- **Rhea lending** (formerly Burrow, which merged into Rhea Finance), NEAR's lending protocol, holds the yield investment in the vault's own account.
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** writes the reason on each proposal when its key is set (Claude otherwise), and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
@@ -45,7 +45,7 @@ To create your own company, set limits, approve payees, deposit and add or impor
 | --- | --- |
 | Vaults, factory, agent, approvals | NEAR testnet, paying Circle's testnet USDC |
 | Payments on other chains | Base, Ethereum, Arbitrum and Optimism Sepolia, signed by NEAR's testnet MPC network |
-| Yield investment | Burrow's testnet lending market (about 10% a year on Nov 4), in Burrow's own test USDC (USDC.e) |
+| Yield investment | Rhea lending's testnet market, `contract.1638481328.burrow.testnet` (about 10% a year on Nov 4), in Rhea's test USDC (USDC.e) |
 | Invoice reading | Claude, called from the hosted app |
 | Multisig owner | A 2-member Sputnik DAO on testnet (`sputnikv2.testnet`), every change needing both votes; Trezu's own app was not tested on testnet |
 | Excel report | Built in the browser with ExcelJS from live chain data: nearblocks' index for transfers, FastNEAR's archive node for each transaction |
@@ -69,9 +69,9 @@ Test tokens have no money value. Nothing here has moved real money.
 - NEAR Intents is quotes only; no mainnet payment has been sent.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
 - A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
-- On testnet, Burrow lends USDC.e only, so only a vault holding USDC.e can invest there.
+- On testnet, Rhea lending lends USDC.e only, so only a vault holding USDC.e can invest there.
 - Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it. Keel finds a member's teams by reading every vault's owner, which suits testnet's size, not thousands of vaults.
-- The Excel report's Ledger lists the latest 200 transfers from nearblocks' index, which does not index Burrow's test USDC.e.
+- The Excel report's Ledger lists the latest 200 transfers from nearblocks' index, which does not index Rhea's test USDC.e.
 
 The full list is in [docs/SETUP.md](docs/SETUP.md#known-issues).
 

@@ -15,7 +15,7 @@ export interface VaultData {
   paid: Record<string, number>;
   /** Payees the owner named; null for vaults created before payees had names. */
   payees: VaultPayee[] | null;
-  /** Savings at an approved lending market (Burrow), if there is one. */
+  /** Savings at an approved lending market (Rhea lending), if there is one. */
   savings: { market: string; name: string; units: string; apr: number } | null;
   /** What Keel's key may call on this vault (newer vaults add recall_from_yield). */
   agentMethods: string[];

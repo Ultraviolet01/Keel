@@ -902,11 +902,11 @@ export function PayeePanel(props: {
                 setLending(e.target.checked);
                 if (e.target.checked) {
                   setAccount(FACTORY_ID.endsWith(".near") ? BURROW.mainnet : BURROW.testnet);
-                  if (!name) setName("Burrow lending");
+                  if (!name) setName("Rhea lending");
                 }
               }}
             />{" "}
-            It's a lending market (Burrow): deposits earn interest in the vault's own account there
+            It's a lending market (Rhea lending, formerly Burrow): deposits earn interest in the vault's own account there
           </label>
         )}
         {isYield && (

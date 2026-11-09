@@ -8,7 +8,7 @@
 flowchart LR
   S["1. Setup<br/>founder creates vault, sets rules"] --> O["2. Observe<br/>balance, bills, payees"]
   O --> F["3. Forecast<br/>14 days, buffer"] --> D["4. Decide<br/>pay, defer, top up, invest, withdraw"] --> C["5. Check<br/>check_payment view"]
-  C -- within limits --> A["6. Act<br/>vault, Burrow, Chain Signatures"]
+  C -- within limits --> A["6. Act<br/>vault, Rhea lending, Chain Signatures"]
   C -- outside limits --> E["9. Escalate<br/>propose, founder approves"]
   E -- approved --> A
   A --> R["7. Reconcile<br/>receipts, signed transfers"] --> L["8. Learn<br/>rule drafts"] --> O

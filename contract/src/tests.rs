@@ -1351,12 +1351,12 @@ fn idle_move_within_the_limit_goes_through_the_buffer_check() {
     assert!(matches!(v.on_balance_checked(acc("savings.kora.testnet"), U128(50 * USDC), None, 1, Some("idle:savings:2026-11-04".into())), PromiseOrValue::Value(false)));
 }
 
-// ------------------------------------------------------------ lending market (Burrow)
+// ------------------------------------------------------------ lending market (Rhea lending, formerly Burrow)
 
 const MARKET: &str = "contract.burrow.testnet";
 
 fn market_payee(max: u128) -> Payee {
-    Payee { account_id: acc(MARKET), name: "Burrow".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)), lending: true }
+    Payee { account_id: acc(MARKET), name: "Rhea lending".into(), kind: "yield".into(), keep_at: None, max_move: Some(U128(max * USDC)), lending: true }
 }
 
 fn with_market() -> KeelVault {
