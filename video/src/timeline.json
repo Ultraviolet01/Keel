@@ -1,0 +1,17 @@
+{
+  "fps": 30,
+  "transition": 14,
+  "scenes": [
+    { "id": "chains", "frames": 150 },
+    { "id": "someone", "frames": 165 },
+    { "id": "key", "frames": 165 },
+    { "id": "turn", "frames": 120 },
+    { "id": "line", "frames": 270 },
+    { "id": "proof", "frames": 240 },
+    { "id": "treasury", "frames": 240 },
+    { "id": "team", "frames": 180 },
+    { "id": "alerts", "frames": 195 },
+    { "id": "near", "frames": 165 },
+    { "id": "cta", "frames": 165 }
+  ]
+}

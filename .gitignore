@@ -10,3 +10,4 @@ out/
 *.log
 ledger.csv
 neardev/
+video/public/audio/
