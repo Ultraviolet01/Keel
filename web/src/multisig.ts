@@ -34,7 +34,11 @@ export interface DaoProposal {
   description: string;
   status: string;
   votes: Record<string, string>;
-  kind: { FunctionCall?: { receiver_id: string; actions: { method_name: string; args: string; deposit: string; gas: string }[] } };
+  kind: {
+    FunctionCall?: { receiver_id: string; actions: { method_name: string; args: string; deposit: string; gas: string }[] };
+    AddMemberToRole?: { member_id: string; role: string };
+    RemoveMemberFromRole?: { member_id: string; role: string };
+  };
 }
 
 type DaoPolicy = {
@@ -62,12 +66,38 @@ export async function multisigOf(owner: string): Promise<Multisig | null> {
   return { dao: owner, bond: p.proposal_bond, members, threshold: Array.isArray(t) ? t : null, roles };
 }
 
-/** Open proposals in the DAO that call this vault. */
+/** Open proposals in the DAO that call this vault, and the team's member changes. */
 export async function openProposalsFor(dao: string, vaultId: string): Promise<DaoProposal[]> {
   const last = await view<number>(dao, "get_last_proposal_id");
   const from = Math.max(0, last - 60);
   const list = await view<DaoProposal[]>(dao, "get_proposals", { from_index: from, limit: 60 });
-  return list.filter((p) => p.status === "InProgress" && p.kind.FunctionCall?.receiver_id === vaultId).reverse();
+  return list
+    .filter((p) => p.status === "InProgress" && (p.kind.FunctionCall?.receiver_id === vaultId || p.kind.AddMemberToRole || p.kind.RemoveMemberFromRole))
+    .reverse();
+}
+
+/** The role members vote in: the first group role whose members may approve function calls. */
+export function memberRole(ms: Multisig): string | null {
+  const voting = ms.roles.find((r) => r.members !== "everyone" && r.permissions.some((x) => /^(\*|call):(\*|VoteApprove)$/.test(x)));
+  return voting?.name ?? ms.roles.find((r) => r.members !== "everyone")?.name ?? null;
+}
+
+/** The add_proposal call to add or remove a member; it runs once enough members approve. */
+export function memberProposal(change: "add" | "remove", member: string, role: string) {
+  const kind = change === "add" ? { AddMemberToRole: { member_id: member, role } } : { RemoveMemberFromRole: { member_id: member, role } };
+  return { proposal: { description: `Keel: ${change === "add" ? "add" : "remove"} ${member} ${change === "add" ? "to" : "from"} the team`, kind } };
+}
+
+/** Sputnik DAO's factory, which creates team multisigs (the contracts behind Trezu treasuries). */
+export const SPUTNIK_FACTORY = { testnet: "sputnikv2.testnet", mainnet: "sputnik-dao.near" };
+/** NEAR a new multisig is created with; it stays in the multisig and pays its storage. */
+export const SPUTNIK_CREATE_DEPOSIT = "6000000000000000000000000";
+/** Sputnik names: lowercase letters, digits and hyphens. */
+export const validTeamName = (n: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(n) && n.length >= 2 && n.length <= 40;
+
+/** The factory call that creates a multisig with these members; a change needs more than half of them. */
+export function createTeamArgs(name: string, members: string[], purpose: string) {
+  return { name, args: toBase64({ config: { name, purpose, metadata: "" }, policy: members }) };
 }
 
 /** Gas all of a proposal's actions may use together; Sputnik runs them inside the final vote (sent with 300 Tgas). */
@@ -123,6 +153,8 @@ export function describeCall(method: string): string {
     revoke_agent: "Remove Keel's key",
     set_agent_key: "Set Keel's key",
     transfer_owner: "Offer the vault to a new owner",
+    AddMemberToRole: "Add a team member",
+    RemoveMemberFromRole: "Remove a team member",
     cancel_owner_transfer: "Withdraw the ownership offer",
     accept_owner: "Accept ownership of the vault",
   };

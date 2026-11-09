@@ -3,14 +3,28 @@
 // yet (bills, minimums, other chains) the page says so plainly.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { companyName, formatNear, formatToken, shortKey, view, type Proposal } from "./near";
+import { NETWORK, accountExists, companyName, formatNear, formatToken, shortKey, view, type Proposal } from "./near";
 import { Check, LoadLine, Pause, Play, Shield } from "./icons";
 import type { Send } from "./panels";
 import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { describeCall, multisigOf, proposalCall, readArgs, rightsOf, type DaoProposal, type Multisig } from "./multisig";
+import {
+  SPUTNIK_CREATE_DEPOSIT,
+  SPUTNIK_FACTORY,
+  createTeamArgs,
+  describeCall,
+  memberProposal,
+  memberRole,
+  multisigOf,
+  proposalCall,
+  readArgs,
+  rightsOf,
+  validTeamName,
+  type DaoProposal,
+  type Multisig,
+} from "./multisig";
 import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSamples, billDues } from "./bills";
 
 export interface PageProps {
@@ -1180,7 +1194,14 @@ function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list
         return (
           <div className="ms-prop" key={x.id}>
             <span>
-              <b>#{x.id} {[...new Set(actions.map((a) => describeCall(a.method_name)))].join(", ") || "Proposal"}</b>
+              <b>
+                #{x.id}{" "}
+                {x.kind.AddMemberToRole
+                  ? `Add ${x.kind.AddMemberToRole.member_id} to the team`
+                  : x.kind.RemoveMemberFromRole
+                    ? `Remove ${x.kind.RemoveMemberFromRole.member_id} from the team`
+                    : [...new Set(actions.map((a) => describeCall(a.method_name)))].join(", ") || "Proposal"}
+              </b>
               {actions.map((a, k) => (
                 <span key={k} className="mono tiny wrap-any">
                   {a.method_name}({readArgs(a.args)}){a.deposit !== "1" && a.deposit !== "0" ? `, attaches ${formatNear(a.deposit)} NEAR` : ""}
@@ -1188,8 +1209,7 @@ function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list
               ))}
               <span className="muted small">
                 Filed by <span className="mono">{x.proposer}</span>
-                {ms.members.includes(x.proposer) ? "" : <b className="bad-t"> (not a member of this multisig: anyone may file here, so check it carefully)</b>}. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}. Check the
-                arguments above, not the description.
+                {ms.members.includes(x.proposer) ? "" : <b className="bad-t"> (not a member of this multisig: anyone may file here, so check it carefully)</b>}. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}.{actions.length ? " Check the arguments above, not the description." : ""}
               </span>
             </span>
             {connected && (me.approve || me.reject) && !voted ? (
@@ -1219,6 +1239,10 @@ function MultisigCard({ p }: { p: PageProps }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [team, setTeam] = useState("");
+  const [newMember, setNewMember] = useState("");
+  const [teamName, setTeamName] = useState("");
+  const [teamMembers, setTeamMembers] = useState(p.accountId);
+  const [created, setCreated] = useState<string | null>(null);
   const isOwner = d.policy.owner_id === p.accountId;
 
   const act = async (key: string, run: () => Promise<unknown>) => {
@@ -1237,6 +1261,15 @@ function MultisigCard({ p }: { p: PageProps }) {
   const errorLine = error && <p className="error">{error}</p>;
 
   if (ms) {
+    const role = memberRole(ms);
+    const canPropose = !!p.onSignOut && rightsOf(ms, p.accountId).propose;
+    const fileMember = (change: "add" | "remove", member: string) =>
+      act("member", async () => {
+        if (change === "add" && !(await accountExists(member))) throw new Error(`${member} does not exist on NEAR testnet.`);
+        if (change === "add" && ms.members.includes(member)) throw new Error(`${member} is already a member.`);
+        await p.send(ms.dao, "add_proposal", memberProposal(change, member, role!), { deposit: ms.bond, gas: TGAS(50) });
+        setNewMember("");
+      });
     const voters = ms.members.filter((m) => rightsOf(ms, m).approve).length;
     const need = ms.threshold ? Math.min(Math.floor((voters * ms.threshold[0]) / ms.threshold[1]) + 1, voters) : null;
     return (
@@ -1254,9 +1287,35 @@ function MultisigCard({ p }: { p: PageProps }) {
           {ms.members.map((m) => {
             const r = rightsOf(ms, m);
             const what = r.propose && r.approve ? "proposes and votes" : r.approve ? "votes" : r.propose ? "proposes" : "no rights here";
-            return <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`} title={what}>{m}{m === p.accountId ? " (you)" : ""} · {what}</span>;
+            return (
+              <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`} title={what}>
+                {m}
+                {m === p.accountId ? " (you)" : ""} · {what}
+                {canPropose && role && ms.members.length > 1 && (
+                  <button className="pill-x" title={`Propose removing ${m}`} aria-label={`Propose removing ${m}`} onClick={() => fileMember("remove", m)} disabled={busy !== null}>
+                    ×
+                  </button>
+                )}
+              </span>
+            );
           })}
         </div>
+        {canPropose && role && (
+          <form
+            className="team-form"
+            style={{ padding: 0, marginBottom: 12 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              fileMember("add", newMember.trim().toLowerCase());
+            }}
+          >
+            <input placeholder="new-member.testnet" value={newMember} onChange={(e) => setNewMember(e.target.value)} aria-label="Account to add to the team" />
+            <button className="btn sm" type="submit" disabled={!newMember.trim() || busy !== null}>
+              {busy === "member" ? "Approve in wallet" : "Propose adding"}
+            </button>
+          </form>
+        )}
+        {canPropose && <p className="muted tiny">Adding or removing a member is a proposal too: it happens once enough members approve it below.</p>}
         {pending && <p className="small brass">This vault is offered to <span className="mono">{pending}</span>; it has not accepted.</p>}
         <DaoVotes p={p} ms={ms} list={d.multisigProposals} busy={busy} act={act} />
         {errorLine}
@@ -1318,6 +1377,20 @@ function MultisigCard({ p }: { p: PageProps }) {
   if (!p.canAct || !isOwner) return null;
   const supported = "pending_owner" in d.policy;
 
+  const createTeam = () =>
+    act("create", async () => {
+      const members = [...new Set(teamMembers.split(/[\s,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
+      if (!members.includes(p.accountId)) throw new Error("Include your own account, or you could not offer the company to the team.");
+      for (const m of members) if (!(await accountExists(m))) throw new Error(`${m} does not exist on NEAR testnet.`);
+      const dao = `${teamName}.${SPUTNIK_FACTORY[NETWORK]}`;
+      if (await accountExists(dao)) throw new Error(`${dao} is already taken: pick another team name.`);
+      await p.send(SPUTNIK_FACTORY[NETWORK], "create", createTeamArgs(teamName, members, `Treasury team for ${p.vaultId}`), { deposit: SPUTNIK_CREATE_DEPOSIT, gas: TGAS(150) });
+      if (!(await accountExists(dao))) throw new Error("The multisig was not created. Check your NEAR balance (it needs about 6 NEAR) and try again.");
+      setCreated(dao);
+      setTeam(dao);
+      p.onTeam(dao);
+    });
+
   const offer = () =>
     act("hand", async () => {
       const dao = team.trim().toLowerCase();
@@ -1339,6 +1412,31 @@ function MultisigCard({ p }: { p: PageProps }) {
           </p>
         </div>
       </div>
+      {supported && (
+        <details className="create-team">
+          <summary>No multisig yet? Create one for your team here</summary>
+          <p className="muted small">
+            Keel creates a Sputnik DAO multisig with these members (the same contracts Trezu uses). Any change then needs more than half of them to
+            approve. It costs {formatNear(SPUTNIK_CREATE_DEPOSIT)} NEAR, which stays in the multisig for its storage. Members can be added or removed
+            later by a vote.
+          </p>
+          <label className="field">
+            <span className="label">Team name</span>
+            <div className="input-group">
+              <input value={teamName} onChange={(e) => setTeamName(e.target.value.toLowerCase())} placeholder="acme-team" />
+              <span className="suffix">.{SPUTNIK_FACTORY[NETWORK]}</span>
+            </div>
+          </label>
+          <label className="field">
+            <span className="label">Members (one NEAR account per line, including you)</span>
+            <textarea className="mono-input" rows={3} value={teamMembers} onChange={(e) => setTeamMembers(e.target.value)} />
+          </label>
+          <button className="btn" onClick={createTeam} disabled={busy !== null || !validTeamName(teamName)}>
+            {busy === "create" ? "Approve in wallet" : "Create multisig"}
+          </button>
+          {created && <p className="small">Created <span className="mono">{created}</span>. It is filled in below: click Offer to hand this company to it.</p>}
+        </details>
+      )}
       {supported ? (
         <div className="team-form" style={{ padding: 0 }}>
           <input placeholder="team.sputnikv2.testnet" value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Multisig account" />

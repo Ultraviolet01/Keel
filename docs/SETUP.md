@@ -24,12 +24,13 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 ## Hand a company to a multisig (optional)
 
 1. Create the company from one member's wallet, as above.
-2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`).
+2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`). No multisig yet? Under **Rules**, open **No multisig yet? Create one for your team here**, enter a team name and the members' accounts (yours included) and click **Create multisig**: your wallet creates the Sputnik DAO with about 6 NEAR, which stays in it for storage, and any change then needs more than half of the members.
 3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Offer**. You see **Ownership offered**; nothing has changed yet.
 4. Click **File acceptance on** the multisig, and have enough members approve it under **Rules**. You see **Multisig owner** with the members and the votes needed.
 5. Other members open the app and connect their own wallet. You see the team's companies in the list: Keel finds every multisig that owns a Keel vault and lists their wallet as a member. Members are added and removed in the multisig itself (in Trezu, by a vote), and Keel follows. To list a team by hand, pick **Add a team's companies (multisig)** in the company card.
-6. What each member can do follows their role in the multisig. Keel reads the roles: a member whose role may file proposals gets the editing controls, one whose role may vote gets **Approve** and **Reject** under **Rules**, and the Rules page shows each member's rights. Everyone, members or not, can see all of the company's data: it is on chain.
-7. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
+6. To add or remove a member, use **Propose adding** or the **×** next to a member on the **Multisig owner** card; like any change, it happens once enough members approve it.
+7. What each member can do follows their role in the multisig. Keel reads the roles: a member whose role may file proposals gets the editing controls, one whose role may vote gets **Approve** and **Reject** under **Rules**, and the Rules page shows each member's rights. Everyone, members or not, can see all of the company's data: it is on chain.
+8. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
 
 ## Get testnet tokens
 

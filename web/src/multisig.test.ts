@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rightsOf, type Multisig } from "./multisig";
+import { createTeamArgs, memberProposal, memberRole, rightsOf, validTeamName, type Multisig } from "./multisig";
 
 // The policy Sputnik DAO's testnet factory gives a new multisig: anyone may file, the council votes.
 const ms: Multisig = {
@@ -30,4 +30,19 @@ test("a vote-only role can approve function calls but not file or reject", () =>
 test("permissions for other proposal kinds do not count for vault calls", () => {
   const t: Multisig = { ...ms, roles: [{ name: "tx", members: ["c.testnet"], permissions: ["transfer:AddProposal", "policy:VoteApprove"] }] };
   assert.deepEqual(rightsOf(t, "c.testnet"), { member: true, propose: false, approve: false, reject: false });
+});
+
+test("member changes are proposals in the voting role", () => {
+  assert.equal(memberRole(ms), "council");
+  assert.deepEqual(memberProposal("add", "c.testnet", "council").proposal.kind, { AddMemberToRole: { member_id: "c.testnet", role: "council" } });
+  assert.deepEqual(memberProposal("remove", "b.testnet", "council").proposal.kind, { RemoveMemberFromRole: { member_id: "b.testnet", role: "council" } });
+});
+
+test("a new team multisig: Sputnik's create args, with its members as the policy", () => {
+  const a = createTeamArgs("acme-team", ["a.testnet", "b.testnet"], "Treasury team");
+  assert.equal(a.name, "acme-team");
+  assert.deepEqual(JSON.parse(Buffer.from(a.args, "base64").toString()), { config: { name: "acme-team", purpose: "Treasury team", metadata: "" }, policy: ["a.testnet", "b.testnet"] });
+  assert.ok(validTeamName("acme-team"));
+  assert.ok(!validTeamName("Acme Team"));
+  assert.ok(!validTeamName("-acme"));
 });
