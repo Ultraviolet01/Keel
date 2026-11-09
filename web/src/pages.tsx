@@ -735,7 +735,7 @@ function checksFor(x: Proposal, d: VaultData): Check[] {
     { label: "Not on the blocklist", ok: !blocked, bad: blocked, result: blocked ? "Blocked" : "Pass" },
     { label: "Destination allowlisted", ok: d.policy.allowlist.includes(x.receiver_id), result: d.policy.allowlist.includes(x.receiver_id) ? "Pass" : "Needs you" },
     { label: per === 0n ? "Per-payment cap" : `Under the ${usd(per, d)} per-payment cap`, ok: per > 0n && amount <= per, result: per > 0n && amount <= per ? "Pass" : "Needs you" },
-    { label: "Within today's cap", ok: daily > 0n && spent + amount <= daily, result: daily > 0n && spent + amount <= daily ? "Pass" : "Needs you" },
+    { label: "Within the 24-hour cap", ok: daily > 0n && spent + amount <= daily, result: daily > 0n && spent + amount <= daily ? "Pass" : "Needs you" },
     { label: "Vault holds enough", ok: enough, bad: !enough, result: enough ? "Pass" : "Short" },
     { label: "Payments running", ok: !d.policy.paused, bad: d.policy.paused, result: d.policy.paused ? "Paused" : "Pass" },
   ];
@@ -889,7 +889,7 @@ export function Approvals(p: PageProps) {
               {route?.kind === "intents" ? (
                 <li className="brass">This pays a NEAR Intents deposit address, not the payee directly. Check the payee and amount in Keel's reason before approving.</li>
               ) : null}
-              {verdict && <li>The vault says: {verdict.reason}</li>}
+              {verdict && <li>The vault says: {verdict.reason.replace(/\b\d{4,}\b/g, (n) => `${formatToken(BigInt(n), d.token.decimals)} ${d.token.symbol}`)}</li>}
             </ol>
 
             <div className="sec-row">
