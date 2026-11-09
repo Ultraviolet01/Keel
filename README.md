@@ -65,7 +65,6 @@ Test tokens have no money value. Nothing here has moved real money.
 
 ## Known issues
 
-- Testnet only, with test tokens; the contracts have not had an external audit.
 - NEAR Intents is quotes only; no mainnet payment has been sent.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
 - A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
