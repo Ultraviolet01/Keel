@@ -1,12 +1,12 @@
 # Keel
 
-Keel is an AI treasury agent for a small company. The company's money sits in a vault, a NEAR smart contract owned by the founder or, optionally, by the team's multisig. The owner sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
+Keel is an AI treasury agent for companies of any size, from a solo founder to a team run by a multisig. The company's money sits in a vault, a NEAR smart contract owned by the founder or, optionally, by the team's multisig. The owner sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
 
 Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
 ## The problem
 
-A small company holds stablecoins in wallets on several chains and has no one to run its treasury. Bills get paid late or by hand, idle cash earns nothing, and giving an AI agent a wallet key lets it spend everything. Keel lets an agent do the treasury work while a contract the founder owns decides what it may do.
+A company holds stablecoins in wallets on several chains, and running that treasury by hand does not scale: someone has to pay every bill, watch every balance and move every idle dollar. So bills get paid late, idle cash earns nothing, and handing an AI agent a wallet key would let it spend everything. Keel lets an agent do the treasury work while a contract the company owns decides what it may do.
 
 ## What NEAR does here
 
