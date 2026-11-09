@@ -634,6 +634,10 @@ fn failed_owner_withdrawal_does_not_touch_agent_cap() {
 
 const MS: u64 = 1_000_000; // block timestamps are in nanoseconds
 
+/// 1Click deposit addresses on NEAR are 64-character implicit accounts.
+const DEPOSIT: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+const DEPOSIT2: &str = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+
 #[test]
 fn intents_offer_can_be_approved_before_it_expires() {
     let mut v = vault();
@@ -641,7 +645,7 @@ fn intents_offer_can_be_approved_before_it_expires() {
     let deadline = DAY / MS + 10 * 60 * 1000; // ten minutes from now, in ms
     propose(
         &mut v,
-        "deposit.1click.near",
+        DEPOSIT,
         5 * USDC,
         "Move 5 USDC to Base via NEAR Intents",
         Some(deadline),
@@ -662,7 +666,7 @@ fn expired_intents_offer_is_never_paid() {
     let deadline = DAY / MS + 10 * 60 * 1000;
     propose(
         &mut v,
-        "deposit.1click.near",
+        DEPOSIT,
         5 * USDC,
         "Move 5 USDC to Base",
         Some(deadline),
@@ -680,7 +684,7 @@ fn cannot_propose_an_offer_that_already_expired() {
     as_agent(DAY);
     propose(
         &mut v,
-        "deposit.1click.near",
+        DEPOSIT,
         5 * USDC,
         "stale",
         Some(DAY / MS - 1),
@@ -1040,7 +1044,7 @@ fn a_newer_proposal_for_the_same_bill_replaces_the_old_one() {
     let deadline = Some(DAY / MS + 10 * 60 * 1000);
     propose(
         &mut v,
-        "deposit.1click.near",
+        DEPOSIT,
         5 * USDC,
         "quote 1",
         deadline,
@@ -1049,7 +1053,7 @@ fn a_newer_proposal_for_the_same_bill_replaces_the_old_one() {
     );
     propose(
         &mut v,
-        "deposit2.1click.near",
+        DEPOSIT2,
         5 * USDC,
         "quote 2",
         deadline,
@@ -1070,7 +1074,7 @@ fn a_superseded_proposal_cannot_be_approved() {
     let deadline = Some(DAY / MS + 10 * 60 * 1000);
     propose(
         &mut v,
-        "deposit.1click.near",
+        DEPOSIT,
         5 * USDC,
         "quote 1",
         deadline,
@@ -1079,7 +1083,7 @@ fn a_superseded_proposal_cannot_be_approved() {
     );
     propose(
         &mut v,
-        "deposit2.1click.near",
+        DEPOSIT2,
         5 * USDC,
         "quote 2",
         deadline,
@@ -1211,6 +1215,7 @@ fn approving_or_rejecting_frees_a_waiting_slot() {
     let mut v = vault();
     monthly_bills(&mut v);
     for i in 0..50 {
+        as_agent(NOV9); // each proposal is its own transaction
         propose(
             &mut v,
             "atlas.testnet",
@@ -1253,6 +1258,7 @@ fn at_most_50_proposals_wait_at_once() {
     let mut v = vault();
     monthly_bills(&mut v);
     for i in 0..51 {
+        as_agent(NOV9); // each proposal is its own transaction
         propose(
             &mut v,
             "atlas.testnet",
@@ -2506,8 +2512,14 @@ fn top_up_rules() {
         Some("top:card.kora.testnet:1970-01-02".into()),
         None,
     );
-    let cases: [(&str, u128, &str); 4] = [
+    let cases: [(&str, u128, &str); 5] = [
         ("top:card.kora.testnet:1970-01-02", 10, "already paid"),
+        // Yesterday's date is refused too: one top-up per wallet per calendar day.
+        (
+            "top:card.kora.testnet:1970-01-01",
+            10,
+            "must be dated today",
+        ),
         (
             "top:card.kora.testnet:1971-03-01",
             10,
@@ -2519,7 +2531,7 @@ fn top_up_rules() {
             "names another payee",
         ),
         (
-            "top:card.kora.testnet:1970-01-01",
+            "top:card.kora.testnet:1970-01-02",
             60,
             "more than the wallet's target",
         ),
@@ -2757,7 +2769,7 @@ fn a_near_bill_cannot_be_turned_into_an_intents_deposit() {
     v.add_bill(listed("nw", "northwind.testnet", 40));
     as_agent(DAY);
     v.propose_payment(
-        acc("deposit.1click.near"),
+        acc(DEPOSIT),
         U128(40 * USDC),
         None,
         "x".into(),
@@ -2905,4 +2917,96 @@ fn civil_dates_match_the_calendar() {
     assert_eq!(civil_date(20_766), "2026-11-09");
     assert_eq!(civil_date(11_016), "2000-02-29");
     assert_eq!(civil_date(20_818), "2026-12-31");
+}
+
+// ------------------------------- NEAR Intents proposals are bounded on chain
+
+/// A cross-chain bill of 5 USDC on Base.
+fn intents_vault() -> KeelVault {
+    let mut v = vault();
+    as_owner(DAY);
+    v.add_bill(Bill {
+        chain: Some("base".into()),
+        ..listed("base-inv", PAYEE_EVM, 5)
+    });
+    v
+}
+
+fn intents_propose(v: &mut KeelVault, receiver: &str, amount: u128) -> u64 {
+    as_agent(DAY);
+    v.propose_payment(
+        acc(receiver),
+        U128(amount),
+        None,
+        "quote".into(),
+        Some(DAY / MS + 600_000),
+        None,
+        Some("base-inv".into()),
+    )
+}
+
+#[test]
+fn an_intents_proposal_within_3_percent_to_a_deposit_address_is_filed() {
+    let mut v = intents_vault();
+    // 5 USDC plus 3% is 5.15 USDC: the most a quote may cost.
+    let id = intents_propose(&mut v, DEPOSIT, 5_150_000);
+    assert_eq!(v.get_proposal(id).unwrap().status, ProposalStatus::Pending);
+}
+
+#[test]
+#[should_panic(expected = "a cross-chain proposal must pay a 1Click deposit address")]
+fn an_intents_proposal_to_a_named_account_is_refused() {
+    let mut v = intents_vault();
+    intents_propose(&mut v, "attacker.testnet", 5 * USDC);
+}
+
+#[test]
+#[should_panic(expected = "a cross-chain proposal must pay a 1Click deposit address")]
+fn an_intents_proposal_to_an_uppercase_or_short_hex_account_is_refused() {
+    let mut v = intents_vault();
+    intents_propose(&mut v, &"a1".repeat(31), 5 * USDC);
+}
+
+#[test]
+#[should_panic(expected = "more than 3% over the bill")]
+fn an_intents_proposal_more_than_3_percent_over_the_bill_is_refused() {
+    let mut v = intents_vault();
+    intents_propose(&mut v, DEPOSIT, 5_150_001);
+}
+
+#[test]
+fn a_swapped_intents_proposal_stays_inside_the_same_bounds() {
+    let mut v = intents_vault();
+    intents_propose(&mut v, DEPOSIT, 5 * USDC);
+    // A stolen key re-proposing the bill can only name another deposit address
+    // within 3%; an ordinary account or a larger amount is refused.
+    for (to, amount) in [("attacker.testnet", 5 * USDC), (DEPOSIT2, 50 * USDC)] {
+        let msg = refused(|| {
+            intents_propose(&mut v, to, amount);
+        });
+        assert!(
+            msg.contains("1Click deposit address") || msg.contains("3% over"),
+            "{to}: {msg}"
+        );
+    }
+    assert_eq!(v.get_proposal(1).unwrap().amount, U128(5 * USDC));
+}
+
+#[test]
+fn a_failed_signature_gives_back_its_share_of_the_cap() {
+    let mut v = auto_vault(Some(10));
+    evm_pay(&mut v, 5);
+    assert_eq!(v.get_policy().spent_today, U128(5 * USDC));
+    as_callback(PromiseResult::Failed);
+    assert!(v.on_evm_signed(1).is_none());
+    as_agent(DAY);
+    assert_eq!(
+        v.get_policy().spent_today,
+        U128(0),
+        "nothing was signed, so nothing counts"
+    );
+    assert!(
+        v.bill_paid_at("b".into()).is_none(),
+        "and the bill can be paid again"
+    );
 }

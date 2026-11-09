@@ -10,7 +10,7 @@ A company holds stablecoins in wallets on several chains, and running that treas
 
 ## What NEAR does here
 
-- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/lib.rs#L1504)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: there is no upgrade path, for Keel or anyone.
+- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/lib.rs#L1520)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: there is no upgrade path, for Keel or anyone.
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address: routine bills inside the founder's per-chain auto cap on their own, the rest after the founder approves.
 - **Rhea Finance** NEAR's lending protocol, holds the yield investment in the vault's own account.
@@ -57,7 +57,7 @@ stateDiagram-v2
 | Step | Who or what decides | Where it is enforced |
 | --- | --- | --- |
 | Listed | The owner only | `add_bill` is an owner method |
-| Paid alone | Keel's rules, then the AI check (can only say no), then the vault | `execute_payment`: bill, payee, amount, caps, buffer ([`check_agent_ref`](contract/src/lib.rs#L1504)) |
+| Paid alone | Keel's rules, then the AI check (can only say no), then the vault | `execute_payment`: bill, payee, amount, caps, buffer ([`check_agent_ref`](contract/src/lib.rs#L1520)) |
 | Proposed | Keel files it; the owner decides | `propose_payment` (same bill checks), `approve` / `reject` |
 | Paid on another chain | Signed by NEAR's MPC network for the vault, broadcast by Keel | `check_evm` and the route's caps; proposal status `signing` then `signed` |
 | Paid once | The vault remembers every bill it paid | `bill_paid_at`; a failed transfer frees the bill again |
@@ -80,7 +80,7 @@ All code in this repository was written during the hackathon: the first commit i
 You need Node.js 22 or newer (Rust only for the contract tests).
 
 1. Run `git clone https://github.com/Ultraviolet01/Keel keel && cd keel && npm run verify`. You see one `PASS`, `FAIL` or `SKIP` line per check (typechecks, agent and app tests, app build, contract tests, two dry runs on testnet, four cross-chain payments read back from their chains) and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`.
-2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `lantern.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
+2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `mooring.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
 3. Run `cd ../web && npm install && npm run dev` and open the address it prints. You see the same site as above, running locally.
 
 ## Testnet tokens
@@ -124,7 +124,9 @@ Test tokens have no money value. Nothing here has moved real money.
 
 ## Known issues
 
-- NEAR Intents has no testnet, so Keel exercises it with dry quotes from the live mainnet service, the approved method (Q-007): `viaIntents` in `agent/src/loop.ts` asks 1Click for an exact-output quote with `dry` set, and `checkDeposit` in `web/src/intents.ts` checks a deposit address with 1Click before the owner approves. No mainnet payment has been sent.
+- NEAR Intents has no testnet, so Keel exercises it with dry quotes from the live mainnet service, the approved method (Q-007). The vault accepts an Intents proposal only to a 64-character deposit address and at most 3% over the bill; that address shape is not yet confirmed against a live non-dry quote. `viaIntents` in `agent/src/loop.ts` asks 1Click for an exact-output quote with `dry` set, and `checkDeposit` in `web/src/intents.ts` checks a deposit address with 1Click before the owner approves. No mainnet payment has been sent.
+- One Keel agent key serves every vault (the factory adds it; the hosted agent keeps it in one GitHub Actions secret). Each vault's rules bound what it can do, and each owner can replace it with their own key (`set_agent_key`) or remove it (`revoke_agent`).
+- The AI check fails open: if the model is unreachable, Keel follows its rules, and the vault's limits still apply.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH). A payment there needs the owner's approval unless it is inside that chain's auto cap, to a 0x payee on the allowlist, and inside the vault's caps: approvals are only needed outside the owner's limits, on purpose.
 - On testnet, Rhea lending lends USDC.e only, so only a vault holding USDC.e can invest there.
 - Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it. Keel finds a member's teams by reading every vault's owner, which suits testnet's size, not thousands of vaults.

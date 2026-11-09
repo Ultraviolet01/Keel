@@ -271,6 +271,21 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
     const r = await call("agent", "execute_payment", args);
     record(refused(r, pattern), `agent payment ${name} is refused`, short(r));
   }
+  // A cross-chain bill paid through NEAR Intents: the receiver is a quote's deposit address.
+  await bill(`${run}-xc`, "0x00000000000000000000000000000000000000aa", U, { chain: "base" });
+  const until = Date.now() + 10 * 60_000;
+  const deposit = "a1".repeat(32);
+  const xcTries: [string, object, RegExp][] = [
+    ["to a named account", { receiver_id: OUTSIDER, amount: String(U) }, /1Click deposit address/],
+    ["more than 3% over the bill", { receiver_id: deposit, amount: String(U + U / 20n) }, /3% over the bill/],
+  ];
+  for (const [name, args, pattern] of xcTries) {
+    const r = await call("agent", "propose_payment", { ...args, reason: "quote", valid_until_ms: until, bill_ref: `${run}-xc` });
+    record(refused(r, pattern), `cross-chain (NEAR Intents) proposal ${name} is refused`, short(r));
+  }
+  const xcOk = await call("agent", "propose_payment", { receiver_id: deposit, amount: String(U + U / 50n), reason: "quote", valid_until_ms: until, bill_ref: `${run}-xc` });
+  record(xcOk.ok, "a cross-chain proposal to a deposit address within 3% is filed", xcOk.ok ? `#${xcOk.value}` : short(xcOk));
+  if (xcOk.ok) await call("owner", "reject", { proposal_id: xcOk.value }, 1n);
   const p = await call("agent", "propose_payment", { receiver_id: OUTSIDER, amount: String(U), reason: "x", bill_ref: `${run}-invented2` });
   record(refused(p, /no such bill/), "agent proposal for a made-up bill is refused", short(p));
   const ok = await call("agent", "execute_payment", { receiver_id: PAYEE, amount: String(U), bill_ref: `${run}-nw` });

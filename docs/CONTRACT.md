@@ -7,7 +7,7 @@
 | Method | Who can call it | What it does |
 | --- | --- | --- |
 | `execute_payment` | Agent key | Pays an approved payee within the per-payment cap and the rolling 24-hour cap, for a bill the owner set (`bill_ref`, checked by `check_agent_ref`: same payee and amount, once), a top-up of a card or own wallet, or an idle-cash move; with a cash buffer set, only if the vault still holds it afterwards. A payment to a lending market is deposited into the vault's own account there. With `evm`, pays a bill on another chain from the vault's EVM address if it is inside that chain's `auto_cap` and the 0x payee is allowlisted |
-| `propose_payment` | Agent key | Files a proposal for a bill the owner set, optionally with an expiry (`valid_until_ms`) or an EVM transfer (`evm`). A NEAR or EVM proposal must pay the bill's own payee its own amount; only a NEAR Intents proposal for a cross-chain bill may name the quote's deposit address. At most 50 wait at once; a newer proposal for the same bill replaces the waiting one, after the same checks |
+| `propose_payment` | Agent key | Files a proposal for a bill the owner set, optionally with an expiry (`valid_until_ms`) or an EVM transfer (`evm`). A NEAR or EVM proposal must pay the bill's own payee its own amount; a NEAR Intents proposal for a cross-chain bill pays the quote's deposit address, which must be a 64-character implicit account, for at most 3% over the bill. At most 50 wait at once; a newer proposal for the same bill replaces the waiting one, after the same checks |
 | `recall_from_yield` | Agent key, or the owner | Withdraws from the vault's approved lending market back into the vault, and nowhere else; works while paused |
 | `approve` / `reject` | Owner | Executes or closes a proposal |
 | `update_policy` | Owner | Caps, the cash buffer (`min_balance`), allowlist and blocklist; logs old value, new value and reason |
@@ -28,7 +28,7 @@
 | Needs approval | A new payee, over the per-payment cap, or another chain above its auto cap | Proposal waits for the owner |
 | Blocked | Blocklisted payee, vault paused, the 24-hour cap reached, no bill from the owner behind the payment, or (for Keel) the buffer would break | Vault refuses; Keel logs it and holds back or proposes the bill |
 
-Every agent `bill_ref` is one of `<bill id>`, `<bill id>:<YYYY-MM>` (monthly), `<bill id>:<YYYY>` (yearly), `top:<account>:<YYYY-MM-DD>` or `idle:<account>:<YYYY-MM-DD>`; dates are today or yesterday (UTC). Why each rule exists, with the line that enforces it: [SECURITY.md](SECURITY.md).
+Every agent `bill_ref` is one of `<bill id>`, `<bill id>:<YYYY-MM>` (monthly), `<bill id>:<YYYY>` (yearly), `top:<account>:<YYYY-MM-DD>` or `idle:<account>:<YYYY-MM-DD>`; dates must be today (UTC). Why each rule exists, with the line that enforces it: [SECURITY.md](SECURITY.md).
 
 The vault has no upgrade or migrate method, and neither has the factory: a vault keeps the code it was created with.
 

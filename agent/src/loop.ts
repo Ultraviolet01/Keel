@@ -503,6 +503,8 @@ const viaIntents: Route = async (cfg, chain, vaultId, bill, tokenId, _proposals,
     say("decide", `${label}. Would propose a cross-chain move (dry run): ${route}`);
     return true;
   }
+  // The vault only accepts a 64-character implicit account here (the shape of a 1Click deposit address on NEAR).
+  if (!/^[0-9a-f]{64}$/.test(q.depositAddress)) throw new Error(`1Click returned a deposit address the vault would refuse (${q.depositAddress.slice(0, 20)}…)`);
   const validUntil = Date.parse(q.deadline ?? deadlineFromNow(60)) - 2 * 60_000; // two minutes of margin
   const reason = `Cross-chain to ${bill.chain}: ${route}. Approve before ${new Date(validUntil).toISOString().slice(11, 16)} UTC.`;
   const r = await chain.callAsAgent(vaultId, "propose_payment", {
@@ -541,7 +543,10 @@ const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, pr
   const auto = route.auto_cap ? BigInt(route.auto_cap) : 0n;
   let aiReason: string | null = null;
   if (auto > 0n && bill.amount <= auto && (await chain.checkPayment(vaultId, evm.to, bill.amount)).band === "runs_alone") {
-    const v = await review(cfg, { company: vaultId.split(".")[0], payee: evm.to, amount: usdc(units, route.decimals), due: bill.due, history: [], knownPayees: [], memo: bill.memo });
+    // The same view as on NEAR: what this payee was paid or billed before and the owner's other payees,
+    // so a lookalike 0x address is caught on exactly the payments no human approves.
+    const [payees, listed] = await Promise.all([chain.payees(vaultId), chain.bills(vaultId)]);
+    const v = await review(cfg, reviewInput(vaultId.split(".")[0], { ...bill, payee: evm.to }, payees, vaultBills(listed, bill.due), proposals, (u) => fmt(u, 6, "USDC")));
     if (v) say("check", `${v.by === "near-ai" ? "NEAR AI" : "Claude"} check: ${v.verdict}. ${v.reason}`);
     const decision = stricter({ kind: "pay", reason: "inside the auto cap" }, v);
     if (decision.kind === "refuse") {

@@ -198,6 +198,10 @@ pub struct Proposal {
     pub evm_signed: Option<EvmSigned>,
     /// The bill this pays. The vault pays each bill at most once.
     pub bill_ref: Option<String>,
+    /// For an EVM bill Keel paid alone: when it was counted against the rolling
+    /// cap (ns), so a failed MPC signature gives that share back.
+    #[serde(default)]
+    pub spent_at: Option<u64>,
 }
 
 /// A bill the owner asked Keel to pay. `id` is the `bill_ref` its payment
@@ -466,6 +470,7 @@ impl KeelVault {
                 evm_amount: Some(U128(units)),
                 evm_signed: None,
                 bill_ref,
+                spent_at: Some(at),
             };
             emit("evm_payment_started", json!(proposal));
             self.proposals.insert(id, proposal);
@@ -582,6 +587,7 @@ impl KeelVault {
             evm_amount,
             evm_signed: None,
             bill_ref,
+            spent_at: None,
         };
         require!(
             self.pending_count < MAX_PENDING,
@@ -725,6 +731,7 @@ impl KeelVault {
             evm_amount: Some(U128(units)),
             evm_signed: None,
             bill_ref: None,
+            spent_at: None,
         };
         emit("withdrawal_started", json!(proposal));
         self.proposals.insert(id, proposal);
@@ -1319,12 +1326,21 @@ impl KeelVault {
         } else {
             ProposalStatus::Failed
         };
+        proposal.evm_signed = signed.clone();
+        let (bill_ref, spent_at, amount) = (
+            proposal.bill_ref.clone(),
+            proposal.spent_at,
+            proposal.amount.0,
+        );
         if signed.is_none() {
-            if let Some(r) = &proposal.bill_ref {
+            if let Some(r) = &bill_ref {
                 self.paid_bills.remove(r);
             }
+            // Nothing was signed, so an EVM bill Keel paid alone stops counting against the cap.
+            if let Some(at) = spent_at {
+                self.unspend(at, amount);
+            }
         }
-        proposal.evm_signed = signed.clone();
         emit(
             if signed.is_some() {
                 "evm_signed"
@@ -1561,19 +1577,30 @@ impl KeelVault {
                         "Keel Vault refused: payment does not match the owner's bill"
                     );
                 }
-                // NEAR Intents: the receiver is the quote's deposit address and the
-                // amount includes the swap, so neither can be pinned here. The app
-                // checks the deposit address with 1Click before the owner approves
-                // (web/src/intents.ts), and the owner must approve every one.
-                (RefUse::Proposal, Some(_)) => {}
+                // NEAR Intents: the receiver is the quote's deposit address, new with
+                // every quote, so it cannot be the bill's payee. The vault still bounds
+                // it: the receiver must have the shape of a 1Click deposit address (a
+                // 64-character implicit account) and the amount, which includes the
+                // swap, at most 3% over the bill. The app also asks 1Click where the
+                // address pays (web/src/intents.ts), and the owner approves every one.
+                (RefUse::Proposal, Some(_)) => {
+                    require!(
+                        is_implicit(receiver.as_str()),
+                        "Keel Vault refused: a cross-chain proposal must pay a 1Click deposit address"
+                    );
+                    require!(
+                        amount <= intents_max(bill.amount.0),
+                        "Keel Vault refused: more than 3% over the bill for a cross-chain swap"
+                    );
+                }
                 _ => env::panic_str("Keel Vault refused: payment does not match the owner's bill"),
             }
         }
     }
 
     /// `<account>:<YYYY-MM-DD>` of a top-up or idle move: the account is the
-    /// receiver (its first 45 characters) and the date is today or yesterday
-    /// (UTC), so each wallet gets at most one per day.
+    /// receiver (its first 45 characters) and the date is today (UTC), so each
+    /// wallet gets at most one per calendar day.
     fn check_dated(&self, rest: &str, receiver: &AccountId) {
         let (acct, date) = rest
             .rsplit_once(':')
@@ -1583,9 +1610,8 @@ impl KeelVault {
             acct == prefix,
             "Keel Vault refused: the bill_ref names another payee"
         );
-        let day = env::block_timestamp() / NS_PER_DAY;
         require!(
-            date == civil_date(day) || date == civil_date(day.saturating_sub(1)),
+            date == civil_date(env::block_timestamp() / NS_PER_DAY),
             "Keel Vault refused: a top-up or idle move must be dated today"
         );
     }
@@ -1880,6 +1906,21 @@ fn check_period(bill: &Bill, period: Option<&str>) {
         ok,
         "Keel Vault refused: the bill_ref's period does not fit the bill"
     );
+}
+
+/// A NEAR implicit account: 64 lowercase hex characters, the shape of every
+/// 1Click deposit address on NEAR.
+fn is_implicit(account: &str) -> bool {
+    account.len() == 64
+        && account
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+/// The most a NEAR Intents proposal may send for a bill: 3% over it, the same
+/// limit Keel's agent applies to quotes before it proposes one.
+fn intents_max(bill: u128) -> u128 {
+    bill.saturating_add(bill.saturating_mul(3).div_ceil(100))
 }
 
 /// Days since 1970-01-01 as YYYY-MM-DD (UTC).
