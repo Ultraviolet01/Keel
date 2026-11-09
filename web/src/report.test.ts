@@ -117,3 +117,25 @@ test("movement without the archive falls back to the direction", () => {
   assert.deepEqual(movementOf(1n, "burrow", undefined, V, "burrow"), { movement: "From yield investment", by: "Unknown" });
   assert.equal(movementOf(-1n, "burrow", { signer: V, method: "execute_payment" }, V, "burrow").movement, "To yield investment");
 });
+
+test("period: only what happened inside it, with the period named in the summary", () => {
+  const range = { from: now - 3.5 * day, to: now - 1.5 * day };
+  const sheets = buildReport({ vaultId: V, company: "Acme", d: data(), now, txs, evm: null, explorerTx: "https://x/", range });
+  const get = (name: string) => sheets.find((s) => s.name === name)!.rows;
+  // Inside: the approved payroll (3 days ago) and Keel's Northwind payment (2 days ago); outside: the deposit and the withdrawal.
+  assert.deepEqual(get("Ledger").map((r) => r[1]), ["Payment", "Payment"]);
+  assert.deepEqual(get("Activity").map((r) => r[2]), ["Proposed paying payroll.testnet", "Paid Northwind"]);
+  const summary = get("Summary");
+  assert.match(String(summary.find((r) => r[0] === "Period")?.[1]), /^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/);
+  assert.equal(summary.find((r) => r[0] === "Deposits")?.[1], 0);
+  assert.equal(summary.find((r) => r[0] === "Waiting for approval")?.[1], 0, "the Atlas proposal is from yesterday, outside the period");
+});
+
+test("period up to the present keeps upcoming bills; a closed period drops them", () => {
+  const open = buildReport({ vaultId: V, company: "Acme", d: data(), now, txs, evm: null, explorerTx: "", range: { from: now - day, to: null } });
+  const closed = buildReport({ vaultId: V, company: "Acme", d: data(), now, txs, evm: null, explorerTx: "", range: { from: now - 10 * day, to: now - day } });
+  const pay = (s: typeof open) => s.find((x) => x.name === "Payments")!.rows.length;
+  assert.equal(pay(open), 2, "this month's and next month's payment of the monthly bill");
+  assert.equal(pay(closed), 0);
+  assert.equal(open.find((x) => x.name === "Summary")!.rows.find((r) => r[0] === "Period")?.[1], `${new Date(now - day).toISOString().slice(0, 10)} to present`);
+});

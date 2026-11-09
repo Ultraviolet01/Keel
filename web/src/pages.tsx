@@ -2,7 +2,7 @@
 // Rules, Wallets). Live vault data fills them; where the contract has no data
 // yet (bills, minimums, other chains) the page says so plainly.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { companyName, formatNear, formatToken, shortKey, view, type Proposal } from "./near";
 import { Check, LoadLine, Pause, Play, Shield } from "./icons";
 import type { Send } from "./panels";
@@ -104,10 +104,44 @@ function when(ms: number) {
   return new Date(ms).toLocaleString("en-GB", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-/** Downloads the Excel treasury report: Summary, Activity, Payments, Ledger and Wallets. */
+type Preset = "month" | "lastmonth" | "30d" | "all" | "custom";
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/** The From and To dates (YYYY-MM-DD, "" = open) for a preset. */
+function presetDates(p: Preset, now = new Date()): { from: string; to: string } {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  if (p === "month") return { from: isoDay(new Date(Date.UTC(y, m, 1))), to: "" };
+  if (p === "lastmonth") return { from: isoDay(new Date(Date.UTC(y, m - 1, 1))), to: isoDay(new Date(Date.UTC(y, m, 0))) };
+  if (p === "30d") return { from: isoDay(new Date(now.getTime() - 29 * 86_400_000)), to: "" };
+  return { from: "", to: "" };
+}
+
+/** Downloads the Excel treasury report for a period the founder picks: Summary, Activity, Payments, Ledger and Wallets. */
 function ExportButton({ vaultId, d, label = "Export" }: { vaultId: string; d: VaultData; label?: string }) {
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [preset, setPreset] = useState<Preset>("month");
+  const [{ from, to }, setDates] = useState(() => presetDates("month"));
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  const pick = (p: Preset) => {
+    setPreset(p);
+    if (p !== "custom") setDates(presetDates(p));
+  };
+  const badRange = Boolean(from && to && from > to);
+
   const run = async () => {
     setBusy(true);
     setFailed(null);
@@ -120,7 +154,8 @@ function ExportButton({ vaultId, d, label = "Export" }: { vaultId: string; d: Va
       return;
     }
     try {
-      await mod.downloadReport(vaultId, d);
+      await mod.downloadReport(vaultId, d, { from: from ? Date.parse(`${from}T00:00:00Z`) : null, to: to ? Date.parse(`${to}T23:59:59.999Z`) : null });
+      setOpen(false);
     } catch (e) {
       console.error(e);
       setFailed(e instanceof Error ? e.message : String(e));
@@ -128,12 +163,46 @@ function ExportButton({ vaultId, d, label = "Export" }: { vaultId: string; d: Va
       setBusy(false);
     }
   };
+  const PRESETS: [Preset, string][] = [
+    ["month", "This month"],
+    ["lastmonth", "Last month"],
+    ["30d", "Last 30 days"],
+    ["all", "All time"],
+  ];
   return (
-    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-      <button className="btn" onClick={run} disabled={busy} title={failed ? `Export failed: ${failed}` : "Excel workbook: summary, activity, payments, ledger and wallets"}>
-        {busy ? "Preparing…" : failed ? "Export failed, retry" : label}
+    <span ref={box} style={{ position: "relative", display: "inline-flex" }}>
+      <button className="btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Excel workbook: summary, activity, payments, ledger and wallets">
+        {label}
       </button>
-      {failed && <span className="tiny bad-t" style={{ maxWidth: 320, textAlign: "right" }}>{failed.slice(0, 140)}</span>}
+      {open && (
+        <div className="export-pop" role="dialog" aria-label="Export to Excel">
+          <b>Export to Excel</b>
+          <span className="muted small">Pick the period. Balances are as of now.</span>
+          <div className="export-presets">
+            {PRESETS.map(([k, t]) => (
+              <button key={k} className={`chip-btn ${preset === k ? "on" : ""}`} onClick={() => pick(k)}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="export-dates">
+            <label className="field">
+              <span className="label">From</span>
+              <input type="date" value={from} max={to || undefined} onChange={(e) => (setPreset("custom"), setDates({ from: e.target.value, to }))} />
+            </label>
+            <label className="field">
+              <span className="label">To</span>
+              <input type="date" value={to} min={from || undefined} onChange={(e) => (setPreset("custom"), setDates({ from, to: e.target.value }))} />
+              <span className="hint">{to ? "" : "Empty: up to the present"}</span>
+            </label>
+          </div>
+          {badRange && <span className="small bad-t">From is after To.</span>}
+          {failed && <span className="small bad-t">Export failed: {failed.slice(0, 140)}</span>}
+          <button className="btn primary" onClick={run} disabled={busy || badRange}>
+            {busy ? "Preparing…" : "Download .xlsx"}
+          </button>
+        </div>
+      )}
     </span>
   );
 }

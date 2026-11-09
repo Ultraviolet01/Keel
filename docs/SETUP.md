@@ -11,9 +11,9 @@
 5. **Add bills.** Click **Add bill**: what it is for, the payee, amount, due date, category, once, monthly or yearly, and whether it is critical. Optionally upload the invoice (PDF or photo) and Claude fills in the form for you to check. To add several at once, click **Import invoices**: drop up to 10 PDFs or photos, check the rows Claude drafts, and sign them all in one transaction. You see the bill under **Upcoming payments** as **Scheduled**; from three days before it is due, the next agent run shows it as **Paid**, **Needs approval** or **Deferred: cash buffer**.
 6. **Approve.** Open **Approvals**. Each proposal shows the full payee address, the amount, the rule that sent it to you and Keel's reason; invoice text is marked unverified. Approving signs the payment with your wallet.
 
-**Export for your accountant:** click **Export** on the Overview page (or **Export to Excel** on Activity). You get an Excel workbook, `keel-<company>-<date>.xlsx`, with five sheets:
+**Export for your accountant:** click **Export** on the Overview page (or **Export to Excel** on Activity), pick the period (This month, Last month, Last 30 days, All time, or any From and To dates; an empty To means up to the present) and click **Download .xlsx**. You get an Excel workbook, `keel-<company>-<from>-to-<to>.xlsx`, covering that period, with five sheets:
 
-- **Summary:** balances (vault cash, yield investment, other chains, total), counts (paid by Keel alone, approved, waiting, refused, deposits) and the rules.
+- **Summary:** the period, balances as of now (vault cash, yield investment, other chains, total), the period's counts (paid by Keel alone, approved, waiting, refused, deposits) and the rules.
 - **Activity:** every decision in time order: what happened, amount, outcome, who decided (Keel alone, you or the multisig), the rule checked, Keel's explanation and a reference.
 - **Payments:** the bill schedule: due date, payee, category, amount, repeat, chain, status (Paid, Needs approval, Deferred, Blocked, Overdue, Scheduled), critical, memo and the bill reference the vault pays only once.
 - **Ledger:** every token movement in and out of the vault, signed, labelled from the method its transaction called (Keel's payment, your approval, a withdrawal, a deposit, the yield investment), with a link to the transaction.

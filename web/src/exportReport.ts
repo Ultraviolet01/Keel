@@ -3,7 +3,7 @@
 
 import { FACTORY_ID, companyName } from "./near";
 import { evmWallet } from "./evm";
-import { buildReport, type TxInfo } from "./report";
+import { buildReport, type Range, type TxInfo } from "./report";
 import type { VaultData } from "./vault";
 
 const ARCHIVE = FACTORY_ID.endsWith(".near") ? "https://archival-rpc.mainnet.fastnear.com" : "https://archival-rpc.testnet.fastnear.com";
@@ -46,7 +46,7 @@ async function txInfos(vaultId: string, hashes: string[]): Promise<Record<string
   return out;
 }
 
-export async function downloadReport(vaultId: string, d: VaultData): Promise<void> {
+export async function downloadReport(vaultId: string, d: VaultData, range: Range = { from: null, to: null }): Promise<void> {
   const [{ default: ExcelJS }, txs, evm] = await Promise.all([
     import("exceljs"),
     txInfos(vaultId, (d.history ?? []).map((h) => h.hash).filter((h): h is string => !!h)),
@@ -62,6 +62,7 @@ export async function downloadReport(vaultId: string, d: VaultData): Promise<voi
     txs,
     evm: evm ? { address: evm.address, chains: evm.chains.map((c) => ({ name: c.chain.name, usdc: c.usdc, gas: c.gas, decimals: c.route.decimals ?? 6 })) } : null,
     explorerTx: EXPLORER,
+    range,
   });
 
   const wb = new ExcelJS.Workbook();
@@ -83,7 +84,7 @@ export async function downloadReport(vaultId: string, d: VaultData): Promise<voi
     });
     if (s.name === "Summary") {
       ws.getCell("A1").font = { bold: true, size: 14, color: { argb: TEAL } };
-      for (const label of ["Balances", "Activity", "Rules"]) {
+      for (const label of ["Balances (now)", "Activity", "Rules"]) {
         const r = s.rows.findIndex((x) => x[0] === label) + 1;
         if (r > 0) {
           ws.getRow(r).font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -113,7 +114,8 @@ export async function downloadReport(vaultId: string, d: VaultData): Promise<voi
   const buf = await wb.xlsx.writeBuffer();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-  a.download = `keel-${vaultId.split(".")[0]}-${new Date(now).toISOString().slice(0, 10)}.xlsx`;
+  const span = range.from === null && range.to === null ? "all-time" : `${range.from === null ? "start" : new Date(range.from).toISOString().slice(0, 10)}-to-${range.to === null ? "present" : new Date(range.to).toISOString().slice(0, 10)}`;
+  a.download = `keel-${vaultId.split(".")[0]}-${span}.xlsx`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

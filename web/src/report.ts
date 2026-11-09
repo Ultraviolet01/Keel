@@ -27,6 +27,21 @@ export interface ReportInput {
   txs: Record<string, TxInfo>;
   evm: { address: string; chains: { name: string; usdc: bigint; gas: bigint; decimals: number }[] } | null;
   explorerTx: string;
+  /** The period to report, in ms (to is the end of its day); null ends mean from the start / up to now. */
+  range?: Range;
+}
+
+export interface Range {
+  from: number | null;
+  to: number | null;
+}
+
+const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** "2026-11-01 to present", "All time", ... */
+export function periodLabel(r?: Range): string {
+  if (!r || (r.from === null && r.to === null)) return "All time";
+  return `${r.from === null ? "Start" : day(r.from)} to ${r.to === null ? "present" : day(r.to)}`;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 16);
@@ -73,7 +88,9 @@ export function buildReport(r: ReportInput): Sheet[] {
   const u = (raw: string | bigint) => units(raw, dec);
   const market = d.savings?.market ?? null;
   const payeeName = (id: string) => d.payees?.find((p) => p.account_id === id)?.name ?? id;
-  const history = d.history ?? [];
+  const range = r.range ?? { from: null, to: null };
+  const inRange = (ms: number) => (range.from === null || ms >= range.from) && (range.to === null || ms <= range.to);
+  const history = (d.history ?? []).filter((h) => inRange(h.at));
 
   // ---------------------------------------------------------------- ledger
   const ledger: Cell[][] = [];
@@ -92,7 +109,8 @@ export function buildReport(r: ReportInput): Sheet[] {
   // -------------------------------------------------------------- activity
   type Act = { at: number; row: Cell[] };
   const acts: Act[] = [];
-  for (const x of d.proposals) {
+  const proposals = d.proposals.filter((x) => inRange(x.created_at_ms));
+  for (const x of proposals) {
     const outcome: Record<string, string> = {
       pending: "Waiting for approval",
       executing: "Paying",
@@ -123,6 +141,7 @@ export function buildReport(r: ReportInput): Sheet[] {
   const buffer = BigInt(d.policy.min_balance ?? "0");
   const soon = new Date(now + 3 * 86_400_000).toISOString().slice(0, 10);
   const payments = (d.bills ? billDues(d.bills, today) : [])
+    .filter((x) => inRange(Date.parse(`${x.due}T00:00:00Z`)) || (range.to === null && x.due >= today))
     .sort((a, b) => a.due.localeCompare(b.due))
     .map((x) => {
       const prop = d.proposals.find((p) => p.bill_ref === x.ref && ["pending", "executing", "signing", "signed"].includes(p.status));
@@ -152,16 +171,17 @@ export function buildReport(r: ReportInput): Sheet[] {
   }
 
   // --------------------------------------------------------------- summary
-  const count = (s: string) => d.proposals.filter((x) => x.status === s).length;
+  const count = (s: string) => proposals.filter((x) => x.status === s).length;
   const evmTotal = (r.evm?.chains ?? []).reduce((s, c) => s + units(c.usdc, c.decimals), 0);
   const p = d.policy;
   const summary: Cell[][] = [
     [`Keel treasury report: ${r.company}`, ""],
+    ["Period", periodLabel(r.range)],
     ["Generated", `${iso(now)} UTC`],
     ["Vault", vaultId],
     ["Owner", d.multisig ? `${p.owner_id} (multisig, ${d.multisig.members.length} members)` : p.owner_id],
     ["", ""],
-    ["Balances", ""],
+    ["Balances (now)", ""],
     [`Cash in the vault (${sym})`, u(cash)],
     [`Yield investment (${sym})`, u(invested)],
     [`On other chains (USDC)`, evmTotal],
@@ -185,6 +205,10 @@ export function buildReport(r: ReportInput): Sheet[] {
     ["Blocked addresses", p.blocklist.length],
     ["Keel's key", p.agent_key ? "On the vault" : "Removed"],
   ];
+  const all = d.history ?? [];
+  const oldest = all.length ? Math.min(...all.map((h) => h.at)) : null;
+  if (all.length >= 200 && oldest !== null && (range.from === null || oldest > range.from))
+    summary.push(["", ""], ["Note", `Only the latest ${all.length} transfers could be read, so transfers before ${day(oldest)} are missing from Ledger.`]);
   if (!d.history) summary.push(["", ""], ["Note", "The transfer index could not be read, so Ledger and Keel's own payments are missing."]);
   else if (d.history.length === 0 && (cash > 0n || invested > 0n))
     summary.push(["", ""], ["Note", `The public transfer index (nearblocks) lists no ${sym} transfers for this vault, so Ledger and Keel's own payments are empty. Some test tokens are not indexed.`]);

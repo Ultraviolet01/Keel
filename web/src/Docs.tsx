@@ -198,7 +198,7 @@ export default function Docs() {
         such as cross-chain moves, carry a deadline; after it, Keel proposes again with a fresh one.
       </p>
       <p>
-        <b>Activity</b> lists every payment and proposal. <b>Export</b> on the Overview page downloads an Excel workbook for your accountant: a summary,
+        <b>Activity</b> lists every payment and proposal. <b>Export</b> on the Overview page downloads an Excel workbook for your accountant, for the period you pick (this month, last month, any dates, or all time): a summary,
         every decision with who made it and why, the bill schedule, a ledger of every transfer with its transaction link, and your wallets.
       </p>
 

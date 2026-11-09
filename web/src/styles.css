@@ -168,7 +168,7 @@ a.btn { text-decoration: none; }
 
 .main { padding: 32px; min-width: 0; max-width: 1240px; }
 .banner { margin: -32px -32px 24px; padding: 10px 32px; background: var(--brass-tint); color: var(--brass-ink); font-size: 13px; }
-.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; position: relative; z-index: 20; }
 .head h1 { font-size: 40px; line-height: 1.1; }
 .head .sub { margin-top: 6px; font-size: 14px; }
 .tools { display: flex; gap: 8px; flex: none; }
@@ -783,3 +783,12 @@ input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover
 .theme-btn:active { transform: scale(0.92); }
 .theme-btn svg { width: 16px; height: 16px; }
 .sidebar .theme-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 4px 0; }
+
+/* Export to Excel: period picker */
+.export-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 340px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25); text-align: left; }
+.export-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent; color: var(--ink); cursor: pointer; }
+.chip-btn.on { background: var(--teal-tint); border-color: var(--teal); color: var(--teal); }
+.export-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.export-dates .field { margin: 0; }
+@media (max-width: 640px) { .export-pop { position: fixed; left: 16px; right: 16px; top: auto; bottom: 16px; width: auto; } }
