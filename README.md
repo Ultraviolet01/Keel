@@ -10,7 +10,7 @@ A company holds stablecoins in wallets on several chains, and running that treas
 
 ## What NEAR does here
 
-- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/lib.rs#L1520)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: the vault has no upgrade path and the factory cannot redeploy it, for Keel or anyone.
+- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/internal.rs#L138)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: the vault has no upgrade path and the factory cannot redeploy it, for Keel or anyone.
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, bring the earning cash back from Rhea lending to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address: routine bills inside the founder's per-chain auto cap on their own, the rest after the founder approves.
 - **Keel earns on idle cash.** It moves cash above the buffer and the next 14 days of bills into Rhea lending (NEAR's lending protocol, about 10% a year on testnet), held in the vault's own account there, and pulls it back before bills are due ([docs/VERIFIED.md](docs/VERIFIED.md), item 10).
@@ -57,7 +57,7 @@ stateDiagram-v2
 | Step | Who or what decides | Where it is enforced |
 | --- | --- | --- |
 | Listed | The owner only | `add_bill` is an owner method |
-| Paid alone | Keel's rules, then the AI check (can only say no), then the vault | `execute_payment`: bill, payee, amount, caps, buffer ([`check_agent_ref`](contract/src/lib.rs#L1520)) |
+| Paid alone | Keel's rules, then the AI check (can only say no), then the vault | `execute_payment`: bill, payee, amount, caps, buffer ([`check_agent_ref`](contract/src/internal.rs#L138)) |
 | Proposed | Keel files it; the owner decides | `propose_payment` (same bill checks), `approve` / `reject` |
 | Paid on another chain | Signed by NEAR's MPC network for the vault, broadcast by Keel | `check_evm` and the route's caps; proposal status `signing` then `signed` |
 | Paid once | The vault remembers every bill it paid | `bill_paid_at`; a failed transfer frees the bill again |
@@ -80,7 +80,7 @@ All code in this repository was written during the hackathon: the first commit i
 You need Node.js 22 or newer (Rust only for the contract tests).
 
 1. Run `git clone https://github.com/Ultraviolet01/Keel keel && cd keel && npm run verify`. You see one `PASS`, `FAIL` or `SKIP` line per check (typechecks, agent and app tests, app build, contract tests, two dry runs on testnet, four cross-chain payments read back from their chains) and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`.
-2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `mooring.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
+2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `berth.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
 3. Run `cd ../web && npm install && npm run dev` and open the address it prints. You see the same site as above, running locally.
 
 ## Testnet tokens

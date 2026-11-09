@@ -93,7 +93,7 @@ All variables are optional; `cp .env.example .env` in the repository root to set
 | `NEARAI_API_KEY`, `NEARAI_MODEL` | Optional NEAR AI Cloud key and model (default `deepseek/deepseek-v3.2`) for the same wording, used first when set |
 | `ONECLICK_JWT` | Optional 1Click partner token; removes the 0.2% fee |
 | `EVM_RPC_<chain id>` | Optional RPC URL per EVM chain, for example `EVM_RPC_421614` for Arbitrum Sepolia |
-| `DEMO_VAULT` | Vault for `npm run demo`, default `mooring.keel.testnet` |
+| `DEMO_VAULT` | Vault for `npm run demo`, default `berth.keel.testnet` |
 
 The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, for invoice reading.
 

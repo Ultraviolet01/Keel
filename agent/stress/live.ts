@@ -292,6 +292,17 @@ for (const m of ["update_policy", "withdraw", "pause", "release_bill", "set_evm_
   record(ok.ok && !ok.inner, "the owner's own bill is still paid alone", ok.ok ? "ok" : short(ok));
 }
 
+// ------------------------------------------------ 9. top-ups only fill a wallet up to its target
+{
+  // The outsider's account stands in for a card that already holds more than its 1 USDC target.
+  const held = await bal(OUTSIDER);
+  await call("owner", "add_payee", { payee: { account_id: OUTSIDER, name: "Stress card", kind: "card", keep_at: String(U) } }, 1n);
+  const r = await call("agent", "execute_payment", { receiver_id: OUTSIDER, amount: String(U), bill_ref: `top:${OUTSIDER}:${today}` }, 0n, 150_000_000_000_000n);
+  const after = await bal(OUTSIDER);
+  record(r.ok && r.value === false && after === held, "a top-up to a wallet already at its target is refused on chain", r.ok ? `vault returned ${r.value}; wallet ${held / U} -> ${after / U}` : short(r));
+  await call("owner", "remove_payee", { account_id: OUTSIDER }, 1n);
+}
+
 for (const id of listedHere) await call("owner", "cancel_bill", { id }, 1n);
 
 {
