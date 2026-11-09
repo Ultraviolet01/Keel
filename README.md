@@ -67,7 +67,6 @@ Test tokens have no money value. Nothing here has moved real money.
 
 - NEAR Intents is quotes only; no mainnet payment has been sent.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
-- A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
 - On testnet, Rhea lending lends USDC.e only, so only a vault holding USDC.e can invest there.
 - Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it. Keel finds a member's teams by reading every vault's owner, which suits testnet's size, not thousands of vaults.
 - The Excel report's Ledger lists the latest 200 transfers from nearblocks' index, which does not index Rhea's test USDC.e.
