@@ -8,7 +8,7 @@
 //   POST ?action=run        Keel's agent, signed with its key, after each round:
 //                           emails what needs people now, and once a day a digest
 //
-// Needs BLOB_READ_WRITE_TOKEN (the private Blob store), GMAIL_USER and
+// Needs BLOB_STORE_ID (the private Blob store, reached with Vercel OIDC) or BLOB_READ_WRITE_TOKEN, GMAIL_USER and
 // GMAIL_APP_PASSWORD (a Gmail app password) in the Vercel project.
 
 import { digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
@@ -203,7 +203,9 @@ export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const action = url.searchParams.get("action");
-    if (!process.env.BLOB_READ_WRITE_TOKEN) return fail(503, "Notifications are not set up on this deployment (no Blob store).");
+    // On Vercel the Blob store is reached with the deployment's short-lived OIDC credentials (BLOB_STORE_ID);
+    // a long-lived BLOB_READ_WRITE_TOKEN also works, for copies hosted elsewhere.
+    if (!process.env.BLOB_STORE_ID && !process.env.BLOB_READ_WRITE_TOKEN) return fail(503, "Notifications are not set up on this deployment (no Blob store).");
     try {
       if (request.method === "GET" && action === "status") {
         const account = url.searchParams.get("account") ?? "";

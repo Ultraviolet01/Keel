@@ -60,7 +60,7 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 
 How it works: after each round, the hosted agent posts what it saw but did not sign to `/api/notify?action=run`, signed with Keel's agent key; the server checks that signature against the factory's record, reads each followed vault from the chain itself, and sends mail through Gmail. Email addresses live in a private Vercel Blob store, never on chain.
 
-To host your own copy, the Vercel project needs `BLOB_READ_WRITE_TOKEN` (a private Blob store connected to the project), `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a [Google app password](https://myaccount.google.com/apppasswords), which needs 2-Step Verification). The agent reports to `KEEL_NOTIFY_URL` (default: the hosted app); set it to `off` to stop.
+To host your own copy, the Vercel project needs a private Blob store connected to it, named by `BLOB_STORE_ID` (the app then signs in with Vercel's short-lived OIDC credentials; `BLOB_READ_WRITE_TOKEN` also works outside Vercel), `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a [Google app password](https://myaccount.google.com/apppasswords), which needs 2-Step Verification). The agent reports to `KEEL_NOTIFY_URL` (default: the hosted app); set it to `off` to stop.
 
 ## Repo layout and configuration
 
