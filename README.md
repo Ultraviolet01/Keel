@@ -13,7 +13,7 @@ A small company holds stablecoins in wallets on several chains and has no one to
 - **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps, cash buffer, payees and blocklist.
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
-- **Rhea lending** (formerly Burrow, which merged into Rhea Finance), NEAR's lending protocol, holds the yield investment in the vault's own account.
+- **Rhea lending** NEAR's lending protocol, holds the yield investment in the vault's own account.
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** writes the reason on each proposal when its key is set (Claude otherwise), and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
