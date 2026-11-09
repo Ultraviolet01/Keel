@@ -4,7 +4,7 @@
 
 ## What protects the money
 
-Each claim names the code that enforces it. Line numbers are for vault code `DNE1QpLHM5cf8XsvEvaFEGQpuFepTiac4h7CLd3xUgoM` (vaults created from 9 Nov 2026, such as `lantern.keel.testnet`).
+Each claim names the code that enforces it. Line numbers are for the vault code the factory deploys now (`DNE1QpLHM5cf8XsvEvaFEGQpuFepTiac4h7CLd3xUgoM`).
 
 - **Vault code cannot change under the owner.** Neither the vault nor the factory has an upgrade or migrate method: the factory deploys the code once when it creates the vault ([`lib.rs:180`](../factory/src/lib.rs#L180)), and `set_vault_code` only changes the code for vaults created later. Not Keel, not the factory admin, can swap a vault's rules for looser ones. The other side: fixes reach new vaults only.
 - **Keel's key reaches three methods.** The factory adds Keel's key in the same transaction that creates the vault, as a NEAR function-call key limited to `execute_payment`, `propose_payment` and `recall_from_yield` with a 0.25 NEAR gas allowance ([`lib.rs:181`](../factory/src/lib.rs#L181), [`lib.rs:101`](../contract/src/lib.rs#L101)). It cannot transfer NEAR, add keys, change the rules, approve or touch another vault. The vault also checks that Keel's key signed each call ([`lib.rs:1450`](../contract/src/lib.rs#L1450)), and owner methods need 1 yoctoNEAR, which a function-call key cannot attach ([`lib.rs:1460`](../contract/src/lib.rs#L1460)).

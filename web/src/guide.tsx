@@ -402,7 +402,7 @@ export function Security() {
           </tr>
           <tr>
             <td>A stolen agent key</td>
-            <td>Can only pay bills you listed, to their own payee, for their own amount, once each, inside your limits (vaults created from 9 Nov). It cannot add payees or bills, approve, or swap a waiting proposal for another payee. It cannot flood the vault: every proposal needs one of your bills, at most 50 wait, and a storage reserve</td>
+            <td>Can only pay bills you listed, to their own payee, for their own amount, once each, inside your limits. It cannot add payees or bills, approve, or swap a waiting proposal for another payee. It cannot flood the vault: every proposal needs one of your bills, at most 50 wait, and a storage reserve</td>
           </tr>
           <tr>
             <td>The same bill paid twice</td>

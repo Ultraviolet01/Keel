@@ -80,7 +80,7 @@ All code in this repository was written during the hackathon: the first commit i
 You need Node.js 22 or newer (Rust only for the contract tests).
 
 1. Run `git clone https://github.com/Ultraviolet01/Keel keel && cd keel && npm run verify`. You see one `PASS`, `FAIL` or `SKIP` line per check (typechecks, agent and app tests, app build, contract tests, two dry runs on testnet, four cross-chain payments read back from their chains) and a last line like `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`.
-2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `lantern.keel.testnet` (the latest vault code) and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
+2. Run `cd agent && npm install && npm run demo -- --dry-run`. You see Keel read `lantern.keel.testnet` and decide each bill its founder listed, signing nothing: pay Northwind alone (approved payee, inside the caps), propose Atlas (not an approved payee), refuse the "supplier changed bank details" bill (blocklisted), and propose Payroll (over the per-payment cap). Bills the hosted agent already handled show as `already paid` or `already proposed`.
 3. Run `cd ../web && npm install && npm run dev` and open the address it prints. You see the same site as above, running locally.
 
 ## Testnet tokens
