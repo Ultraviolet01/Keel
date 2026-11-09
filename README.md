@@ -73,7 +73,7 @@ Test tokens have no money value. Nothing here has moved real money.
 | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | The agent's loop, every decision it makes, and how bills on other chains are paid |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The vault's methods, who can call each, and the payment bands |
 | [docs/SECURITY.md](docs/SECURITY.md) | What protects the money, each claim with the line of code that enforces it: Keel's key, bills behind every payment, the rolling cap, the cash buffer, the AI check, the counterparty check, the multisig hand-over |
-| [docs/VERIFIED.md](docs/VERIFIED.md) | 17 checks run on testnet, each with transaction links |
+| [docs/VERIFIED.md](docs/VERIFIED.md) | 18 checks run on testnet, each with transaction links |
 | [docs/SETUP.md](docs/SETUP.md) | Creating a company, handing it to a multisig, the Excel report, email notifications, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
 
 ## Known issues

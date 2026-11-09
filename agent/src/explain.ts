@@ -23,7 +23,7 @@ const MAX = 270; // the vault caps reasons at 280 characters
  * before it can push Keel's facts out of the 270 characters.
  */
 export function template(x: ExplainInput): string {
-  const facts = `Pay ${x.amount} to ${x.payee}, due ${x.due}. Needs you because ${x.rule}.`;
+  const facts = `Pay ${x.amount} to ${x.payee}, due ${x.due}. Needs you because ${x.rule.replace(/[.\s]+$/, "")}.`;
   if (!x.memo) return facts.slice(0, MAX);
   const room = MAX - facts.length - ' Invoice text (unverified): ""'.length;
   const memo = room > 8 ? x.memo.replace(/["\s]+/g, " ").trim() : "";
