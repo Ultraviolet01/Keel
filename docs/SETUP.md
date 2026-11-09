@@ -71,7 +71,6 @@ To host your own copy, the Vercel project needs a private Blob store connected t
 | `agent/` | The agent: observe, forecast, check, decide, act, reconcile, learn, for every vault; `agent/stress/` holds the live attack suites |
 | `web/` | The site and app: landing, How it works, Security and Docs pages; Overview, Approvals, Activity, Payees, Rules and Wallets (Vite, React, TypeScript, NEAR Connect) |
 | `web/api/` | `read-invoice.ts`, the Vercel function that reads an uploaded invoice with Claude; `notify.ts`, email notifications |
-| `video/` | The demo video, made in code. In `video/`, run `npm install`, then `npm run video`: `sound` synthesizes the music and effects (`sound.py`, needs Python with numpy, scipy and pyloudnorm), `render` animates the scenes with Remotion, `export` joins them into `out/keel-demo.mp4` with FFmpeg. `npm run capture` retakes the app screenshots with Playwright |
 | `scripts/` | `verify.mjs` (`npm run verify`), `deploy-factory-testnet.sh`, `new-agent-key.mjs`, `rotate-agent-key.sh` and `setup-demo-testnet.sh`; see [scripts/README.md](../scripts/README.md) |
 | `.github/workflows/agent.yml` | The hosted agent |
 | `docs/` | This guide, how Keel works, the contract, security and what was verified |
