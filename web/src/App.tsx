@@ -188,6 +188,8 @@ export default function App() {
           onNewPayment: () => setPanel("pay"),
           onAddBill: () => setPanel("bill"),
           onAddPayee: () => setPanel("payee"),
+          accountId: accountId ?? "",
+          onSignOut: readOnly ? undefined : signOut,
           onPauseToggle: togglePause,
         }
       : null;

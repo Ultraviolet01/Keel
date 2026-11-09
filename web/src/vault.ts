@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { keyMethods, spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
+import { FACTORY_ID, keyMethods, spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
 import { billDues, type VaultBill, type VaultPayee } from "./bills";
 
 export interface VaultData {
@@ -18,6 +18,35 @@ export interface VaultData {
   savings: { market: string; name: string; units: string; apr: number } | null;
   /** What Keel's key may call on this vault (newer vaults add recall_from_yield). */
   agentMethods: string[];
+  /** The vault's token transfers, newest first (ms, signed amount), or null if the indexer is unreachable. */
+  history: { at: number; delta: bigint }[] | null;
+}
+
+/**
+ * Every transfer of the vault's token in and out of the vault, from
+ * nearblocks' public index (newest first, up to 200). The chart walks back
+ * from today's balance with these, so it shows the balance the vault really had.
+ */
+async function loadHistory(vaultId: string, tokenId: string): Promise<VaultData["history"]> {
+  const base = FACTORY_ID.endsWith(".near") ? "https://api.nearblocks.io" : "https://api-testnet.nearblocks.io";
+  const out: { at: number; delta: bigint }[] = [];
+  let cursor: string | undefined;
+  try {
+    for (let page = 0; page < 2; page++) {
+      const url = `${base}/v3/accounts/${vaultId}/ft-txns?per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return out.length ? out : null;
+      const body = (await res.json()) as { data?: { contract_account_id: string; delta_amount: string; block_timestamp: string }[]; meta?: { cursor?: string | null } };
+      for (const t of body.data ?? []) {
+        if (t.contract_account_id === tokenId) out.push({ at: Number(BigInt(t.block_timestamp) / 1_000_000n), delta: BigInt(t.delta_amount) });
+      }
+      cursor = body.meta?.cursor ?? undefined;
+      if (!cursor || (body.data ?? []).length < 100) break;
+    }
+    return out.sort((a, b) => b.at - a.at);
+  } catch {
+    return out.length ? out : null;
+  }
 }
 
 /** The vault's supply at its lending market, in the vault token's units. */
@@ -67,11 +96,12 @@ export function useVault(vaultId: string | null) {
         loadBills(vaultId),
         view<VaultPayee[]>(vaultId, "get_payees").catch(() => null),
       ]);
-      const [savings, agentMethods] = await Promise.all([
+      const [savings, agentMethods, history] = await Promise.all([
         loadSavings(vaultId, policy.token_id, payees),
         policy.agent_key ? keyMethods(vaultId, policy.agent_key) : Promise.resolve([]),
+        loadHistory(vaultId, policy.token_id),
       ]);
-      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods });
+      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods, history });
       setError(null);
     } catch (e) {
       setError(String(e));

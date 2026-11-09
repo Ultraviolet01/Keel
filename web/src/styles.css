@@ -276,7 +276,16 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
 .l-hero { padding: 40px 120px 56px; }
 .l-hero h1 { font-size: 96px; line-height: 0.96; letter-spacing: -0.045em; }
 .l-hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 48px; margin-top: 36px; }
-.l-hero-row p { max-width: 520px; font-size: 18px; line-height: 1.6; color: var(--ink-2); }
+.l-hero-row p { max-width: 560px; font-size: 18px; line-height: 1.6; color: var(--ink-2); margin: 0; }
+.l-pitch { max-width: 620px; }
+.l-does { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+.l-does li { position: relative; padding-left: 18px; font-size: 14px; line-height: 1.5; color: var(--ink-2); animation: keel-rise 520ms var(--spring) both; }
+.l-does li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 8px; height: 2px; border-radius: 1px; background: var(--brass); }
+.l-does li:nth-child(2) { animation-delay: 60ms; }
+.l-does li:nth-child(3) { animation-delay: 120ms; }
+.l-does li:nth-child(4) { animation-delay: 180ms; }
+.l-does li:nth-child(5) { animation-delay: 240ms; }
+.l-does li:nth-child(6) { animation-delay: 300ms; }
 .l-actions { display: flex; gap: 12px; }
 .l-actions .btn { height: 44px; padding: 0 22px; border-radius: 22px; font-size: 15px; }
 
@@ -672,3 +681,14 @@ input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover
 
 /* Behind the sign-in and first-company panels: the page itself, no figures. */
 .backdrop { position: fixed; inset: 0; z-index: 0; background: var(--page); background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 120px 120px; background-position: center; opacity: 0.6; }
+
+/* Wallets: the connected wallet, with Disconnect. */
+.connected { display: flex; flex-direction: column; gap: 8px; }
+.connected .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Balance chart: the past line draws in, the forecast follows. */
+.chart-line { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: keel-draw 1100ms var(--spring) forwards; }
+.chart-line.future { stroke-dasharray: 6 5; stroke-dashoffset: 0; animation: keel-fade 600ms 700ms var(--ease) both; }
+.chart-area { animation: keel-fade 900ms 200ms var(--ease) both; }
+@keyframes keel-draw { to { stroke-dashoffset: 0; } }
+@media (max-width: 900px) { .l-does { grid-template-columns: 1fr; } }

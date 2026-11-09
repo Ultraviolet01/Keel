@@ -171,15 +171,25 @@ export default function Landing() {
           Never past the line
         </h1>
         <div className="l-hero-row">
-          <p>
-            Keel is an AI agent that forecasts your company's cash, pays its bills and keeps its wallets topped up. Your limits are painted into a
-            NEAR contract, so it can't spend past them.
-          </p>
+          <div className="l-pitch">
+            <p>
+              Keel is an AI treasury agent for your company. It watches your cash every 15 minutes and acts inside limits written into a NEAR
+              contract you own, so it can't spend past them.
+            </p>
+            <ul className="l-does">
+              <li>Forecasts your balance and pays bills inside your limits</li>
+              <li>Asks you about anything else, with its reason</li>
+              <li>Holds back what can wait to protect your cash buffer</li>
+              <li>Keeps your company card and wallets topped up</li>
+              <li>Invests idle cash for yield and withdraws it when bills come due</li>
+              <li>Pays on Base, Ethereum, Arbitrum and Optimism from your vault's own address</li>
+            </ul>
+          </div>
           <div className="l-actions">
             <a className="btn primary" href={APP}>
               Open app
             </a>
-            <a className="btn" href={`${REPO}#try-it-in-10-minutes`}>
+            <a className="btn" href={`${REPO}#try-it`}>
               Watch the demo
             </a>
           </div>

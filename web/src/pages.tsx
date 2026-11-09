@@ -10,7 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, billDues } from "./bills";
+import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSeries, billDues } from "./bills";
 
 export interface PageProps {
   vaultId: string;
@@ -24,6 +24,10 @@ export interface PageProps {
   onNewPayment: () => void;
   onAddBill: () => void;
   onAddPayee: () => void;
+  /** The signed-in wallet, or the account being viewed read-only. */
+  accountId: string;
+  /** Disconnects the wallet; missing in read-only view. */
+  onSignOut?: () => void;
   onPauseToggle: () => void;
 }
 
@@ -393,61 +397,68 @@ function Step(props: { done: boolean; title: string; note: string; mono?: boolea
 
 /** The 14-day chart. With no bills on file the balance runs flat, labelled honestly. */
 function Forecast({ d }: { d: VaultData }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const dayMs = 86_400_000;
-  const days = Array.from({ length: 5 }, (_, i) => {
-    const t = new Date();
-    t.setDate(t.getDate() + Math.round((i * 13) / 4));
-    return t.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
-  });
+  const day = 86_400_000;
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const end = new Date(now + 14 * day).toISOString().slice(0, 10);
   // Unpaid NEAR bills in the next 14 days draw the balance down on their due day.
   // Bills on other chains are paid from the vault's EVM address, not this balance.
-  const end = new Date(Date.parse(`${today}T00:00:00Z`) + 14 * dayMs).toISOString().slice(0, 10);
-  const dues = (d.bills ? billDues(d.bills, today) : []).filter((x) => !x.bill.chain && !d.paid[x.ref] && x.due <= end);
-  const start = BigInt(d.balance);
-  const steps: { day: number; bal: bigint }[] = [{ day: 0, bal: start }];
-  let bal = start;
-  for (const x of dues) {
-    bal -= BigInt(x.bill.amount);
-    steps.push({ day: Math.max(0, (Date.parse(`${x.due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / dayMs), bal });
-  }
-  const max = start > 0n ? start : 1n;
-  const xAt = (day: number) => 40 + (820 * day) / 14;
-  const yAt = (v: bigint) => (v <= 0n ? 180 : 180 - Number((v * 120n) / max));
-  let path = `M40 ${yAt(start)}`;
-  for (const st of steps.slice(1)) path += ` H${xAt(st.day).toFixed(1)} V${yAt(st.bal)}`;
-  path += " H860";
-  const short = bal < 0n;
-  const top = d.balance === "0" ? "" : usd(d.balance, d).split(".")[0];
+  const dues = (d.bills ? billDues(d.bills, today) : [])
+    .filter((x) => !x.bill.chain && !d.paid[x.ref] && x.due <= end)
+    .map((x) => ({ due: x.due, amount: BigInt(x.bill.amount) }));
+  const { past, future } = balanceSeries(BigInt(d.balance), d.history, dues, now);
+  // A balance cannot go below zero: the forecast stops at 0 and the caption says how short it falls.
+  const all = [...past, ...future].map((p) => p.v);
+  const max = all.reduce((m, v) => (v > m ? v : m), 0n) || 1n;
+  const W = 860, top = 24, bottom = 180, left = 40;
+  const xAt = (t: number) => left + ((t - (now - 14 * day)) / (28 * day)) * (W - left);
+  const yAt = (v: bigint) => bottom - Number(((v > 0n ? v : 0n) * BigInt(bottom - top)) / max);
+  const line = (pts: { t: number; v: bigint }[]) => pts.map((p, i) => `${i ? "L" : "M"}${xAt(p.t).toFixed(1)} ${yAt(p.v).toFixed(1)}`).join(" ");
+  const pastPath = line(past);
+  const futurePath = line(future);
+  const zeroY = yAt(0n);
+  const xNow = xAt(now);
+  const labels = [-14, -7, 0, 7, 14].map((k) => ({ x: xAt(now + k * day), text: k === 0 ? "Today" : new Date(now + k * day).toLocaleDateString("en-GB", { month: "short", day: "numeric" }) }));
+  const ended = future[future.length - 1].v;
+  const short = ended < 0n;
+  const moved = past.length > 2;
   return (
     <div className="forecast">
-      <span className="muted small">Vault balance, next 14 days</span>
-      <svg viewBox="0 0 860 220" preserveAspectRatio="none" aria-hidden="true">
+      <span className="muted small">Vault balance, last 14 days and next 14 days</span>
+      <svg viewBox={`0 0 ${W} 220`} preserveAspectRatio="none" aria-label="Vault balance over time">
         <g stroke="#e8eded">
-          <line x1="40" x2="860" y1="30" y2="30" />
-          <line x1="40" x2="860" y1="105" y2="105" />
-          <line x1="40" x2="860" y1="180" y2="180" />
+          <line x1={left} x2={W} y1={top} y2={top} />
+          <line x1={left} x2={W} y1={(top + bottom) / 2} y2={(top + bottom) / 2} />
+          <line x1={left} x2={W} y1={zeroY} y2={zeroY} />
         </g>
-        {start > 0n && <path d={`${path} V180 H40 Z`} fill="#eef3f3" opacity="0.7" />}
-        <path d={path} stroke="#0b5c55" strokeWidth="2.5" fill="none" />
+        <path className="chart-area" d={`${pastPath} L${xNow.toFixed(1)} ${zeroY} L${left} ${zeroY} Z`} fill="#eef3f3" opacity="0.8" />
+        <path className="chart-line" d={pastPath} stroke="#0b5c55" strokeWidth="2.5" fill="none" />
+        <path className="chart-line future" d={futurePath} stroke={short ? "#b4683c" : "#0b5c55"} strokeWidth="2" strokeDasharray="6 5" fill="none" />
+        <line x1={xNow} x2={xNow} y1={top - 8} y2={bottom} stroke="#c9d6d9" strokeDasharray="2 4" />
+        <circle cx={xNow} cy={yAt(BigInt(d.balance))} r="4.5" fill="#0b5c55" />
       </svg>
       <div className="axis-y">
-        <span className="mono">{top}</span>
+        <span className="mono">{usd(max, d).split(".")[0]}</span>
         <span className="mono">0</span>
       </div>
       <div className="axis-x">
-        {days.map((x) => (
-          <span key={x}>{x}</span>
+        {labels.map((l) => (
+          <span key={l.text}>{l.text}</span>
         ))}
       </div>
       <p className="muted tiny">
+        {d.history === null
+          ? "Past balance unavailable right now (the transfer index did not answer); "
+          : moved
+            ? "Solid: the balance after every deposit and payment in the last 14 days. "
+            : "No deposits or payments in the last 14 days. "}
         {d.bills === null
-          ? "This vault's contract cannot hold bills; the chart shows its balance only."
+          ? "This vault's contract cannot hold bills, so the dashed forecast stays flat."
           : dues.length === 0
-            ? "No unpaid bills in the next 14 days, so the balance stays flat."
+            ? "Dashed: no unpaid bills in the next 14 days."
             : short
-              ? `${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} in the next 14 days ${dues.length === 1 ? "comes" : "come"} to ${usd(start - bal, d)} ${d.token.symbol}, ${usd(-bal, d)} more than the vault holds. Deposit before they fall due.`
-              : `${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} in the next 14 days ${dues.length === 1 ? "comes" : "come"} to ${usd(start - bal, d)} ${d.token.symbol}; ${usd(bal, d)} stays in the vault.`}
+              ? `Dashed: ${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} take ${usd(BigInt(d.balance) - ended, d)} ${d.token.symbol}, ${usd(-ended, d)} more than the vault holds. Deposit before they fall due.`
+              : `Dashed: ${dues.length} unpaid ${dues.length === 1 ? "bill" : "bills"} take ${usd(BigInt(d.balance) - ended, d)} ${d.token.symbol}; ${usd(ended, d)} stays in the vault.`}
       </p>
     </div>
   );
@@ -993,6 +1004,35 @@ export function Rules(p: PageProps) {
 
 // ------------------------------------------------------------------ wallets
 
+function ConnectedWallet({ p }: { p: PageProps }) {
+  const owner = p.data.policy.owner_id;
+  return (
+    <section className="card card-pad connected">
+      <div className="w-top">
+        <b>{p.onSignOut ? "Connected wallet" : "Viewing read-only"}</b>
+        <span className={`pill ${p.onSignOut ? "ok" : "muted"}`}>{p.onSignOut ? "Connected" : "No wallet"}</span>
+      </div>
+      <span className="mono">{p.accountId}</span>
+      <span className="muted small">
+        {p.onSignOut
+          ? p.accountId === owner
+            ? "You own this vault: your wallet signs limits, payees, bills and approvals."
+            : `This vault's owner is ${owner}; your wallet cannot change it.`
+          : "Nothing on these pages can sign."}
+      </span>
+      {p.onSignOut ? (
+        <button className="btn danger sm" style={{ alignSelf: "flex-start" }} onClick={p.onSignOut}>
+          Disconnect wallet
+        </button>
+      ) : (
+        <a className="btn sm" style={{ alignSelf: "flex-start" }} href="/app">
+          Connect your own wallet
+        </a>
+      )}
+    </section>
+  );
+}
+
 export function Wallets(p: PageProps) {
   const d = p.data;
   // Bills paid from the vault's Base address do not draw on the NEAR balance.
@@ -1009,12 +1049,17 @@ export function Wallets(p: PageProps) {
       <Head title="Wallets" sub="Keel keeps each wallet above its minimum" />
       <section className="card stat-strip">
         <div><span className="muted">Total across wallets</span><Amount raw={d.balance} d={d} size="mid" /><span className="muted small">1 vault on NEAR</span></div>
-        <div><span className="muted">Above minimums</span><Amount raw={d.balance} d={d} size="mid" /><span className="muted small">No minimum set yet</span></div>
+        <div>
+          <span className="muted">Above the cash buffer</span>
+          <Amount raw={(() => { const x = BigInt(d.balance) - BigInt(d.policy.min_balance ?? "0"); return (x > 0n ? x : 0n).toString(); })()} d={d} size="mid" />
+          <span className="muted small">{d.policy.min_balance && d.policy.min_balance !== "0" ? `Buffer ${amt(d.policy.min_balance, d)}` : "No cash buffer set"}</span>
+        </div>
         <div><span className="muted">Shortfalls ahead</span><div className="mid serif num">{firstShort ? 1 : 0}</div><span className={`small ${firstShort ? "brass" : "muted"}`}>{firstShort ? `Proposal #${firstShort.x.id}` : "None in pending payments"}</span></div>
         <div><span className="muted">Gas left for Keel</span><div className="mid serif num">{formatNear(d.gas)}<small>NEAR</small></div><span className="muted small">Paid from this vault</span></div>
       </section>
       <div className="wallets-grid">
         <div className="stack">
+          <ConnectedWallet p={p} />
           <VaultCard p={p} selected />
           <EvmWalletCard vaultId={p.vaultId} />
         </div>

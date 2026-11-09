@@ -109,3 +109,37 @@ export function billId(label: string): string {
 }
 
 export const isEvmAddress = (s: string) => /^0x[0-9a-f]{40}$/.test(s);
+
+/** Balance points for the chart: the last 14 days from real transfers, the next 14 from unpaid bills. */
+export function balanceSeries(
+  balance: bigint,
+  history: { at: number; delta: bigint }[] | null,
+  dues: { due: string; amount: bigint }[],
+  now: number,
+): { past: { t: number; v: bigint }[]; future: { t: number; v: bigint }[] } {
+  const day = 86_400_000;
+  const from = now - 14 * day;
+  // Walk back from today's balance: before each transfer the vault held balance - delta.
+  const past: { t: number; v: bigint }[] = [{ t: now, v: balance }];
+  let v = balance;
+  for (const h of history ?? []) {
+    if (h.at > now) continue;
+    if (h.at < from) break;
+    past.push({ t: h.at, v }); // just after the transfer
+    v -= h.delta;
+    past.push({ t: h.at - 1, v }); // just before it
+  }
+  past.push({ t: from, v });
+  past.reverse();
+  const future: { t: number; v: bigint }[] = [{ t: now, v: balance }];
+  let f = balance;
+  for (const x of [...dues].sort((a, b) => a.due.localeCompare(b.due))) {
+    const t = Math.max(now, Date.parse(`${x.due}T12:00:00Z`));
+    if (t > now + 14 * day) continue;
+    future.push({ t, v: f });
+    f -= x.amount;
+    future.push({ t: t + 1, v: f });
+  }
+  future.push({ t: now + 14 * day, v: f });
+  return { past, future };
+}
