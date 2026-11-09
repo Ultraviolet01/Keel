@@ -33,6 +33,16 @@ export interface PageProps {
   onPauseToggle: () => void;
   /** Lists a multisig's companies in this browser (after handing a vault to it). */
   onTeam: (team: string) => void;
+  /** Signs a plain message with the wallet (NEP-413), no transaction; missing in read-only view. */
+  signMessage?: (message: string) => Promise<SignedNote>;
+}
+
+export interface SignedNote {
+  accountId: string;
+  publicKey: string;
+  signature: string;
+  message: string;
+  nonce: string;
 }
 
 const ACCOUNT_URL = "https://testnet.nearblocks.io/address/";
@@ -1296,6 +1306,101 @@ function ConnectedWallet({ p }: { p: PageProps }) {
   );
 }
 
+/** Email notifications for the connected account: sign up with a signed message, confirm by email, send a test. */
+function NotificationsCard({ p }: { p: PageProps }) {
+  type Status = { ready: boolean; subscribed: boolean; confirmed: boolean; email: string | null };
+  const [status, setStatus] = useState<Status | null | "none">(null);
+  const [email, setEmail] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const account = p.accountId;
+
+  const load = async () => {
+    try {
+      const res = await fetch(`/api/notify?action=status&account=${encodeURIComponent(account)}`);
+      setStatus(res.ok ? ((await res.json()) as Status) : "none");
+    } catch {
+      setStatus("none");
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, [account]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const call = async (key: string, action: string, lines: string[]) => {
+    if (!p.signMessage) return;
+    setBusy(key);
+    setNote(null);
+    try {
+      const signed = await p.signMessage(["Keel notifications", `Account: ${account}`, ...lines, `Time: ${new Date().toISOString()}`].join("\n"));
+      const res = await fetch(`/api/notify?action=${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(signed) });
+      const out = (await res.json().catch(() => ({}))) as { error?: string; email?: string };
+      if (!res.ok) throw new Error(out.error ?? `Request failed (${res.status})`);
+      setNote({ ok: true, text: action === "subscribe" ? `Check ${out.email} for the confirmation link. Nothing is sent until you click it.` : "Test email sent. Check your inbox." });
+      setEditing(false);
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/reject|cancel|closed/i.test(msg)) setNote({ ok: false, text: msg.slice(0, 200) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const s = status && status !== "none" ? status : null;
+  const form = (
+    <form
+      className="team-form"
+      style={{ padding: 0 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void call("sub", "subscribe", ["Action: subscribe", `Email: ${email.trim().toLowerCase()}`]);
+      }}
+    >
+      <input type="email" required placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Email address" />
+      <button className="btn dark" type="submit" disabled={busy !== null || !email.trim()}>{busy === "sub" ? "Sign in wallet" : "Turn on"}</button>
+    </form>
+  );
+
+  return (
+    <section className="card card-pad connected">
+      <div className="w-top">
+        <b>Email notifications</b>
+        <span className={`pill ${s?.confirmed ? "ok" : "muted"}`}>{s?.confirmed ? "On" : s?.subscribed ? "Confirm your email" : "Off"}</span>
+      </div>
+      <span className="muted small">
+        An email when a payment or a multisig vote waits for you, when Keel refuses a bill or cash runs low, and a daily digest when money moved.
+        For every company this account owns or votes on.
+      </span>
+      {status === null ? (
+        <span className="muted small">Checking…</span>
+      ) : status === "none" ? (
+        <span className="muted small">Notifications run on the hosted app only.</span>
+      ) : !p.signMessage ? (
+        <span className="muted small">Connect your own wallet to turn them on.</span>
+      ) : !status.ready ? (
+        <span className="muted small">Email is not set up on this deployment yet.</span>
+      ) : s?.confirmed && !editing ? (
+        <>
+          <span className="small">Emails go to <span className="mono">{s.email}</span>.</span>
+          <span className="agent-actions">
+            <button className="btn sm" onClick={() => void call("test", "test", ["Action: test"])} disabled={busy !== null}>{busy === "test" ? "Sign in wallet" : "Send a test email"}</button>
+            <button className="link-btn" onClick={() => setEditing(true)}>Change address</button>
+          </span>
+        </>
+      ) : (
+        <>
+          {s?.subscribed && !editing && <span className="small">Waiting for you to click the link sent to <span className="mono">{s.email}</span>. Sign up again to resend it.</span>}
+          {form}
+          <span className="muted tiny">Your wallet signs a message to prove the account is yours: no transaction, no fee. The address is kept private, never on chain; every email has a link to stop them and delete it.</span>
+        </>
+      )}
+      {note && <span className={`small ${note.ok ? "" : "bad-t"}`}>{note.text}</span>}
+    </section>
+  );
+}
+
 export function Wallets(p: PageProps) {
   const d = p.data;
   // Bills paid from the vault's Base address do not draw on the NEAR balance.
@@ -1323,6 +1428,7 @@ export function Wallets(p: PageProps) {
       <div className="wallets-grid">
         <div className="stack">
           <ConnectedWallet p={p} />
+          <NotificationsCard p={p} />
           <VaultCard p={p} selected />
           <EvmWalletCard vaultId={p.vaultId} />
         </div>

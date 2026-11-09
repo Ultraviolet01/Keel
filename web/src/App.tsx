@@ -3,7 +3,7 @@ import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
 import { BillPanel, ImportPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send, type SendBatch } from "./panels";
-import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
+import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps, type SignedNote } from "./pages";
 import { keelState, useVault } from "./vault";
 import { describeCall, proposalCall, rightsOf, savedTeams, saveTeams, teamsOf } from "./multisig";
 
@@ -180,6 +180,14 @@ export default function App() {
       : walletSend(receiverId, methodName, args, opts);
 
   // On a multisig-owned vault only members whose role may file proposals get the editing controls.
+  /** A NEP-413 signed message for Keel's notification server: proves the wallet is yours, no transaction. */
+  const signNote = async (message: string): Promise<SignedNote> => {
+    if (!wallet || !accountId) throw new Error("Connect your wallet first");
+    const nonce = crypto.getRandomValues(new Uint8Array(32));
+    const signed = await wallet.signMessage({ message, recipient: "keel-notifications", nonce, signerId: accountId });
+    return { accountId: signed.accountId, publicKey: signed.publicKey, signature: signed.signature, message, nonce: btoa(String.fromCharCode(...nonce)) };
+  };
+
   const canAct = Boolean(wallet) && !readOnly && (!multisig || (accountId !== null && rightsOf(multisig, accountId).propose));
 
   // 0. Read-only link to an invalid account, or to one with no companies.
@@ -255,6 +263,7 @@ export default function App() {
           onImport: () => setPanel("import"),
           accountId: accountId ?? "",
           onSignOut: readOnly ? undefined : signOut,
+          signMessage: readOnly || !wallet ? undefined : signNote,
           onPauseToggle: togglePause,
           onTeam: (team: string) => {
             addTeam(team);

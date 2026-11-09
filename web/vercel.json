@@ -9,5 +9,10 @@
       "source": "/((?!assets/|api/).*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "functions": {
+    "api/notify.ts": {
+      "maxDuration": 60
+    }
+  }
 }

@@ -50,6 +50,18 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 3. To start it on a timer: send `POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/agent.yml/dispatches` with headers `Authorization: Bearer <token>` (a fine-grained token with **Actions: Read and write** on that repository only) and `Accept: application/vnd.github+json`, and body `{"ref":"main"}`. GitHub answers `204`.
 4. To stop it: **Actions**, **agent**, **…**, **Disable workflow**, and turn off the timer.
 
+## Email notifications
+
+1. Open **Wallets** with your own wallet connected, enter an email under **Email notifications** and click **Turn on**. Your wallet signs a message (no transaction, no fee). You get an email with a confirmation link; nothing else is sent until you click it.
+2. From then on, for every company your account owns or votes on as a multisig member, you get:
+   - **Right away**, at most one email per agent round: a payment waiting for approval, a multisig vote waiting for you (only if your role may vote and you have not voted), a bill Keel refused, a forecast that runs short, a payment the vault declined, payments paused or resumed, an ownership offer, cash below the buffer. Each is sent once.
+   - **A daily digest** after 07:00 UTC, only when money moved: what was paid and received, and how many payments still wait.
+3. **Send a test email** on the same card checks it works. Every email has a link that stops them and deletes the address.
+
+How it works: after each round, the hosted agent posts what it saw but did not sign to `/api/notify?action=run`, signed with Keel's agent key; the server checks that signature against the factory's record, reads each followed vault from the chain itself, and sends mail through Gmail. Email addresses live in a private Vercel Blob store, never on chain.
+
+To host your own copy, the Vercel project needs `BLOB_READ_WRITE_TOKEN` (a private Blob store connected to the project), `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a [Google app password](https://myaccount.google.com/apppasswords), which needs 2-Step Verification). The agent reports to `KEEL_NOTIFY_URL` (default: the hosted app); set it to `off` to stop.
+
 ## Repo layout and configuration
 
 | Path | What it holds |
@@ -91,6 +103,7 @@ The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, 
 - **Agent key allowance:** 0.25 NEAR of gas per vault. NEAR checks each transaction against it at a worst-case gas price, so Keel asks for at most 200 Tgas per call. The owner renews it with `set_agent_key`.
 - **Hosted agent:** a GitHub outage can skip a run (seen once as `502 Bad Gateway` from GitHub's API); the next run catches up.
 - **Invoice reading** needs `ANTHROPIC_API_KEY` in Vercel. Its limit of 10 invoices per visitor per hour is kept per running server, so it is best effort.
+- **Email notifications** depend on the hosted agent's 15-minute rounds, so an alert can arrive up to about 15 minutes late. Gmail allows about 500 emails a day per account. The daily digest lists the latest 50 transfers per vault from nearblocks' index.
 - **Excel report:** the Ledger lists the latest 200 token transfers from nearblocks' index; tokens it does not index (Rhea's test USDC.e) leave the Ledger empty. A row whose transaction the archive node cannot return is labelled by direction only, with "Unknown" as who made it.
 - **Bills are entered by the founder** (or drafted from an uploaded invoice), not imported from an accounting system or an inbox.
 - **Learning is rule-based,** and the counterparty check uses on-chain signals and the vault's lists only, with no external risk scoring.

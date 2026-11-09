@@ -7,6 +7,7 @@
 
 import { Chain, loadConfig } from "./chain";
 import { loadState, runVault, saveState, type Event } from "./loop";
+import { report } from "./notify";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -23,13 +24,18 @@ const onlyVault = value("vault");
 const intervalSec = Number(value("interval") ?? 300);
 const lookaheadDays = Number(value("lookahead") ?? 3);
 
-const say = (e: Event) => {
+const log = (e: Event) => {
   const link = e.tx ? `  ${cfg.explorerTx}${e.tx}` : "";
   console.log(`${new Date().toISOString().slice(11, 19)}  ${e.vault.padEnd(26)} ${e.step.padEnd(9)} ${e.text}${link}`);
 };
 
 async function round() {
   const state = loadState();
+  const seen: Event[] = [];
+  const say = (e: Event) => {
+    seen.push(e);
+    log(e);
+  };
   const vaults = onlyVault ? [onlyVault] : await chain.vaults();
   const today = value("today") ?? new Date().toISOString().slice(0, 10);
   for (const v of vaults) {
@@ -40,6 +46,8 @@ async function round() {
     }
   }
   saveState(state);
+  // Email notifications: only real rounds report; a dry run signs nothing.
+  if (!dryRun && !onlyVault) console.log(`${new Date().toISOString().slice(11, 19)}  ${await report(cfg, chain, seen)}`);
 }
 
 if (!dryRun && !chain.canSign()) {

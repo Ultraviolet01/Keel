@@ -21,6 +21,8 @@ export interface Config {
   nearAiModel: string;
   anthropicKey?: string;
   anthropicModel: string;
+  /** Where to report each round for email notifications; empty turns it off. */
+  notifyUrl: string;
 }
 
 /** Reads ../.env (if present) and the environment. */
@@ -46,6 +48,7 @@ export function loadConfig(): Config {
     anthropicKey: e.ANTHROPIC_API_KEY || undefined,
     anthropicModel: e.ANTHROPIC_MODEL || "claude-haiku-5-5",
     agentPrivateKey: e.KEEL_AGENT_PRIVATE_KEY || undefined,
+    notifyUrl: e.KEEL_NOTIFY_URL === "off" ? "" : e.KEEL_NOTIFY_URL || "https://keel-treasury.vercel.app/api/notify?action=run",
   };
 }
 
@@ -175,7 +178,12 @@ export class Chain {
     return this.agentKey!;
   }
 
-  /** Signs a call as the vault with the agent key. Returns the transaction hash and the decoded return value. */
+  /** Signs bytes with Keel's agent key (base64), so Keel's server can tell a round report really came from Keel. */
+  signReport(body: string): string {
+    const kp = KeyPair.fromString(this.key().private_key as `ed25519:${string}`);
+    return Buffer.from(kp.sign(new TextEncoder().encode(body)).signature).toString("base64");
+  }
+
   /**
    * The vault's supply at a lending market (Rhea lending, formerly Burrow), in the vault token's
    * units, and the market's supply APR. Rhea lending counts with extra decimals.

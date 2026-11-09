@@ -11,6 +11,7 @@ const SECTIONS = [
   ["vendors", "Paying ordinary vendors"],
   ["chains", "Other chains"],
   ["approvals", "Approvals"],
+  ["email", "Email notifications"],
   ["teams", "Teams and multisig"],
   ["safety", "Safety"],
   ["faq", "Questions"],
@@ -199,6 +200,17 @@ export default function Docs() {
       <p>
         <b>Activity</b> lists every payment and proposal. <b>Export</b> on the Overview page downloads an Excel workbook for your accountant: a summary,
         every decision with who made it and why, the bill schedule, a ledger of every transfer with its transaction link, and your wallets.
+      </p>
+
+      <h2 id="email">Email notifications</h2>
+      <p>
+        Open <b>Wallets</b>, enter your email under <b>Email notifications</b> and click <b>Turn on</b>. Your wallet signs a message to prove the
+        account is yours (no transaction, no fee), and you confirm the address from the email Keel sends.
+      </p>
+      <p>
+        You then get an email right away when something needs you: a payment or a multisig vote waiting, a bill Keel refused, cash running short or
+        below your buffer, payments paused, an ownership offer. Once a day you get a short digest of what was paid and received, only if money
+        moved. Every email has a link to stop them.
       </p>
 
       <h2 id="teams">Teams and multisig</h2>
