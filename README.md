@@ -11,9 +11,9 @@ A company holds stablecoins in wallets on several chains, and running that treas
 ## What NEAR does here
 
 - **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps (the daily one a rolling 24 hours), cash buffer, payees and blocklist. Every payment Keel makes must name a bill the founder listed, and match its payee and amount ([`check_agent_ref`](contract/src/lib.rs#L1520)), so even a stolen agent key can only pay the founder's own bills. A vault's code can never be changed after it is created: there is no upgrade path, for Keel or anyone.
-- **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
+- **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, bring the earning cash back from Rhea lending to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address: routine bills inside the founder's per-chain auto cap on their own, the rest after the founder approves.
-- **Rhea Finance** NEAR's lending protocol, holds the yield investment in the vault's own account.
+- **Keel earns on idle cash.** It moves cash above the buffer and the next 14 days of bills into Rhea lending (NEAR's lending protocol, about 10% a year on testnet), held in the vault's own account there, and pulls it back before bills are due ([docs/VERIFIED.md](docs/VERIFIED.md), item 10).
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** reviews each payment before Keel makes it alone, and can only make Keel more careful: it turns a payment into a proposal or a refusal (a lookalike payee, an odd amount, a suspicious invoice), never the reverse. It also writes the reason on each proposal. **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
