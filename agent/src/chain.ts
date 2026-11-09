@@ -42,7 +42,7 @@ export function loadConfig(): Config {
     explorerTx: network === "mainnet" ? "https://nearblocks.io/txns/" : "https://testnet.nearblocks.io/txns/",
     nearAiKey: e.NEARAI_API_KEY || undefined,
     nearAiUrl: e.NEARAI_BASE_URL || "https://cloud-api.near.ai/v1",
-    nearAiModel: e.NEARAI_MODEL || "deepseek-ai/DeepSeek-V3.1",
+    nearAiModel: e.NEARAI_MODEL || "deepseek/deepseek-v3.2",
     anthropicKey: e.ANTHROPIC_API_KEY || undefined,
     anthropicModel: e.ANTHROPIC_MODEL || "claude-haiku-5-5",
     agentPrivateKey: e.KEEL_AGENT_PRIVATE_KEY || undefined,
