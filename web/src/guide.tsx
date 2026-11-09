@@ -423,13 +423,13 @@ export function Security() {
         </tbody>
       </table>
       <p>
-        The contract has 92 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite tried 53 attacks against
-        a testnet vault. Details and the commands to run them are in the <a href={`${REPO}#security`}>repository</a>.
+        The contract has 118 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite tried 53 attacks against
+        a testnet vault. Details and the commands to run them are in the <a href={`${REPO}/blob/main/docs/SECURITY.md`}>repository</a>.
       </p>
 
       <h2 id="limits">What this does not cover</h2>
       <ul>
-        <li>One owner wallet approves everything; multisig approval is not built yet. Keep that wallet safe.</li>
+        <li>Until you hand the vault to a multisig, one owner wallet approves everything. Keep that wallet safe.</li>
         <li>Within your caps, an approved payee can be paid without asking you. Set caps you are comfortable losing in a bad week.</li>
         <li>Keel cannot tell if a vendor you approved is itself compromised. Verify payment details with vendors directly.</li>
         <li>Keel runs on NEAR testnet with test USDC today; the contracts have not had an external audit.</li>

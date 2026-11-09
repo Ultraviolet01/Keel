@@ -13,6 +13,14 @@
 
 **Export for your accountant:** click **Export** on the Overview page. You get a CSV with one row per proposal: id, time (UTC), receiver, amount, token, status and reason.
 
+## Hand a company to a multisig (optional)
+
+1. Create the company from one member's wallet, as above.
+2. Make sure that wallet is a member of the team's multisig (a Sputnik DAO, such as a Trezu treasury, for example `team.sputnikv2.testnet`).
+3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Hand over**. You see **Multisig owner** with the members and the votes needed.
+4. Other members open the app, pick **Add a team's companies (multisig)** in the company card and enter the same account. You see the company in the list.
+5. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
+
 ## Get testnet tokens
 
 | What | Where |
@@ -75,4 +83,4 @@ The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, 
 - **Invoice reading** needs `ANTHROPIC_API_KEY` in Vercel. Its limit of 10 invoices per visitor per hour is kept per running server, so it is best effort.
 - **Bills are entered by the founder** (or drafted from an uploaded invoice), not imported from an accounting system or an inbox.
 - **Learning is rule-based,** and the counterparty check uses on-chain signals and the vault's lists only, with no external risk scoring.
-- **Single owner.** One wallet approves everything; multisig approval is not built.
+- **Multisig ownership** is optional and works with Sputnik DAO multisigs (the contracts behind Trezu) only. A company is created from one wallet and then handed over; going back needs the multisig to vote for it.

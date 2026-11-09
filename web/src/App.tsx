@@ -5,6 +5,7 @@ import { Sidebar, type Page } from "./Sidebar";
 import { BillPanel, ImportPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send, type SendBatch } from "./panels";
 import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
+import { describeCall, proposalCall, savedTeams, saveTeams } from "./multisig";
 
 // `?view=<account>` shows a founder's companies read-only, without a wallet.
 const viewAs = new URLSearchParams(window.location.search).get("view");
@@ -21,6 +22,9 @@ export default function App() {
   const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | "bill" | "payee" | "import" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Multisig accounts (Sputnik DAOs / Trezu treasuries) whose companies this browser lists too.
+  const [teams, setTeams] = useState<string[]>(savedTeams);
   const readOnly = Boolean(viewAs);
   const vault = useVault(selected);
   // Vault names are first come, first served, so the app always shows who owns
@@ -66,10 +70,20 @@ export default function App() {
   }, []);
 
   const loadVaults = useCallback(async (owner: string, select?: string) => {
-    const list = await view<string[]>(FACTORY_ID, "get_vaults_for_owner", { owner_id: owner });
+    const owners = [owner, ...(readOnly ? [] : teams.filter((t) => t !== owner))];
+    const lists = await Promise.all(
+      owners.map((o) => view<string[]>(FACTORY_ID, "get_vaults_for_owner", { owner_id: o }).catch(() => [] as string[])),
+    );
+    const list = [...new Set(lists.flat())];
     setVaults(list);
     setSelected((cur) => select ?? (cur && list.includes(cur) ? cur : list.at(-1) ?? null));
-  }, []);
+  }, [readOnly, teams]);
+
+  const addTeam = (team: string) => {
+    const next = [...new Set([...teams, team])];
+    saveTeams(next);
+    setTeams(next);
+  };
 
   useEffect(() => {
     if (!accountId) {
@@ -100,7 +114,7 @@ export default function App() {
     setPage("overview");
   };
 
-  const sendBatch: SendBatch = async (receiverId, calls) => {
+  const walletBatch: SendBatch = async (receiverId, calls) => {
     if (!wallet || !accountId) throw new Error("Connect your wallet first");
     const outcome = await wallet.signAndSendTransaction({
       signerId: accountId,
@@ -110,7 +124,7 @@ export default function App() {
     return outcome as unknown as { transaction: { hash: string }; status: unknown };
   };
 
-  const send: Send = async (receiverId, methodName, args, opts = {}) => {
+  const walletSend: Send = async (receiverId, methodName, args, opts = {}) => {
     if (!wallet || !accountId) throw new Error("Connect your wallet first");
     const outcome = await wallet.signAndSendTransaction({
       signerId: accountId,
@@ -125,7 +139,27 @@ export default function App() {
     return outcome as unknown as { transaction: { hash: string }; status: unknown };
   };
 
-  const canAct = Boolean(wallet) && !readOnly;
+  const d = vault.data;
+  const multisig = d?.multisig ?? null;
+  // A multisig-owned vault: the signed-in member files a DAO proposal instead
+  // of calling the vault, and the members vote on it under Rules.
+  const sendBatch: SendBatch = async (receiverId, calls) => {
+    if (!multisig || receiverId !== selected) return walletBatch(receiverId, calls);
+    const what = [...new Set(calls.map((c) => describeCall(c.methodName)))].join(", ");
+    const outcome = await walletBatch(multisig.dao, [
+      { methodName: "add_proposal", args: proposalCall(receiverId, calls, `Keel: ${what} on ${receiverId}`), gas: "50000000000000", deposit: multisig.bond },
+    ]);
+    const sv = (outcome.status as { SuccessValue?: string } | undefined)?.SuccessValue;
+    const id = sv ? atob(sv) : null;
+    setNotice(`Filed as ${id ? `proposal #${id}` : "a proposal"} in ${multisig.dao}: ${what}. It runs once enough members approve it under Rules.`);
+    return outcome;
+  };
+  const send: Send = (receiverId, methodName, args, opts = {}) =>
+    multisig && receiverId === selected
+      ? sendBatch(receiverId, [{ methodName, args, gas: opts.gas ?? "30000000000000", deposit: opts.deposit ?? "0" }])
+      : walletSend(receiverId, methodName, args, opts);
+
+  const canAct = Boolean(wallet) && !readOnly && (!multisig || (accountId !== null && multisig.members.includes(accountId)));
 
   // 0. Read-only link to an invalid account, or to one with no companies.
   if (readOnly && accountId && (!isAccountId(accountId) || (vaults !== null && vaults.length === 0))) {
@@ -167,7 +201,6 @@ export default function App() {
     );
   }
 
-  const d = vault.data;
   const status = d ? keelState(d.policy) : null;
   const pending = d ? d.proposals.filter((x) => x.status === "pending").length : 0;
 
@@ -202,6 +235,9 @@ export default function App() {
           accountId: accountId ?? "",
           onSignOut: readOnly ? undefined : signOut,
           onPauseToggle: togglePause,
+          onTeam: (team: string) => {
+            addTeam(team);
+          },
         }
       : null;
   const PageView = { overview: Overview, approvals: Approvals, activity: Activity, payees: Payees, rules: Rules, wallets: Wallets }[page];
@@ -225,6 +261,9 @@ export default function App() {
             setPage("overview");
           }}
           onAdd={() => setPanel("add")}
+          onAddTeam={readOnly ? undefined : async (team) => {
+            addTeam(team);
+          }}
           onPage={setPage}
           onPauseToggle={togglePause}
         />
@@ -241,7 +280,19 @@ export default function App() {
               <span className="mono">{vault.data.policy.owner_id}</span>. Do not deposit until this is explained.
             </div>
           ) : null}
-          {vault.data && !readOnly && accountId && vault.data.policy.owner_id !== accountId ? (
+          {multisig && !readOnly ? (
+            <div className="banner">
+              This vault belongs to the multisig <span className="mono">{multisig.dao}</span>
+              {canAct ? ". Your changes are filed as proposals; they run once enough members approve them under Rules." : `. You are not one of its members, so you can only look.`}
+            </div>
+          ) : null}
+          {notice && (
+            <div className="banner ok-banner" role="status">
+              {notice}{" "}
+              <button className="link-btn" onClick={() => setNotice(null)}>Dismiss</button>
+            </div>
+          )}
+          {vault.data && !multisig && !readOnly && accountId && vault.data.policy.owner_id !== accountId ? (
             <div className="banner bad-banner">
               You are signed in as <span className="mono">{accountId}</span>, but this vault belongs to{" "}
               <span className="mono">{vault.data.policy.owner_id}</span>. A similar name does not make it yours.

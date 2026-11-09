@@ -1460,3 +1460,50 @@ fn a_plain_yield_destination_is_not_a_market() {
     as_agent(DAY);
     let _ = v.recall_from_yield(acc("savings.kora.testnet"), None);
 }
+
+// ------------------------------------------------------------ owner transfer
+
+#[test]
+fn owner_hands_the_vault_to_a_multisig_once_the_factory_records_it() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
+    assert_eq!(v.get_policy().owner_id, acc("kora.testnet"), "nothing changes before the factory answers");
+    as_callback(PromiseResult::Successful(vec![]));
+    assert!(v.on_owner_recorded(acc("team.sputnikv2.testnet")));
+    assert_eq!(v.get_policy().owner_id, acc("team.sputnikv2.testnet"));
+    // The multisig can act now.
+    set_ctx("team.sputnikv2.testnet", DAY, 1);
+    v.pause();
+    assert!(v.get_policy().paused);
+}
+
+#[test]
+fn owner_stays_if_the_factory_refuses() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
+    as_callback(PromiseResult::Failed);
+    assert!(!v.on_owner_recorded(acc("team.sputnikv2.testnet")));
+    assert_eq!(v.get_policy().owner_id, acc("kora.testnet"));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn agent_cannot_transfer_ownership() {
+    let mut v = vault();
+    set_ctx(VAULT, DAY, 1);
+    let _ = v.transfer_owner(acc("evil.testnet"));
+}
+
+#[test]
+#[should_panic(expected = "only the owner can call this")]
+fn the_old_owner_loses_control_after_the_transfer() {
+    let mut v = vault();
+    as_owner(DAY);
+    let _ = v.transfer_owner(acc("team.sputnikv2.testnet"));
+    as_callback(PromiseResult::Successful(vec![]));
+    v.on_owner_recorded(acc("team.sputnikv2.testnet"));
+    as_owner(DAY);
+    v.pause();
+}

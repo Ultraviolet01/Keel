@@ -10,6 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
+import { describeCall, multisigOf } from "./multisig";
 import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSamples, billDues } from "./bills";
 
 export interface PageProps {
@@ -30,6 +31,8 @@ export interface PageProps {
   /** Disconnects the wallet; missing in read-only view. */
   onSignOut?: () => void;
   onPauseToggle: () => void;
+  /** Lists a multisig's companies in this browser (after handing a vault to it). */
+  onTeam: (team: string) => void;
 }
 
 const ACCOUNT_URL = "https://testnet.nearblocks.io/address/";
@@ -981,7 +984,7 @@ export function Rules(p: PageProps) {
 
   return (
     <>
-      <Head title="Rules" sub="Enforced by the Keel Vault contract. Only your key can change them.">
+      <Head title="Rules" sub={d.multisig ? "Enforced by the Keel Vault contract. Only your team's multisig can change them." : "Enforced by the Keel Vault contract. Only your key can change them."}>
         <a className="btn" href={ACCOUNT_URL + p.vaultId} target="_blank" rel="noreferrer">View contract</a>
       </Head>
       <div className="rules-grid">
@@ -1052,8 +1055,117 @@ export function Rules(p: PageProps) {
           </div>
         )}
       </section>
+      <MultisigCard p={p} />
       {error && <p className="error">{error}</p>}
     </>
+  );
+}
+
+const TGAS = (n: number) => `${n}000000000000`;
+
+/** Optional multisig ownership: open votes for a DAO-owned vault, or the hand-over form for a single owner. */
+function MultisigCard({ p }: { p: PageProps }) {
+  const d = p.data;
+  const ms = d.multisig;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [team, setTeam] = useState("");
+
+  const act = async (key: string, run: () => Promise<unknown>) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await run();
+      await p.reload();
+    } catch (e) {
+      setError(/transfer_owner|MethodNotFound|MethodResolveError/.test(String(e)) && key === "hand"
+        ? "This vault was created before hand-over existed. Create a new company to get it."
+        : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (ms) {
+    const need = ms.threshold ? Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1 : null;
+    const member = ms.members.includes(p.accountId);
+    return (
+      <section className="card card-pad gap-top">
+        <div className="card-head">
+          <div>
+            <h2>Multisig owner</h2>
+            <p className="sub">
+              <span className="mono">{ms.dao}</span> owns this vault. Changes run once {need ? `${Math.min(need, ms.members.length)} of ${ms.members.length}` : "enough"} members approve them.
+            </p>
+          </div>
+          <a className="btn" href={ACCOUNT_URL + ms.dao} target="_blank" rel="noreferrer">View multisig</a>
+        </div>
+        <div className="ms-members">
+          {ms.members.map((m) => <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`}>{m}</span>)}
+        </div>
+        {d.multisigProposals.length === 0 && <p className="muted small">No open proposals for this vault.</p>}
+        {d.multisigProposals.map((x) => {
+          const yes = Object.values(x.votes).filter((v) => v === "Approve").length;
+          const no = Object.values(x.votes).filter((v) => v === "Reject").length;
+          const voted = p.accountId in x.votes;
+          const what = (x.kind.FunctionCall?.actions ?? []).map((a) => describeCall(a.method_name));
+          const vote = (action: "VoteApprove" | "VoteReject") =>
+            act(`${x.id}:${action}`, () => p.send(ms.dao, "act_proposal", { id: x.id, action, proposal: x.kind }, { gas: TGAS(250) }));
+          return (
+            <div className="ms-prop" key={x.id}>
+              <span>
+                <b>#{x.id} {[...new Set(what)].join(", ") || x.description}</b>
+                <span className="muted small">Filed by <span className="mono">{x.proposer}</span>. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}.</span>
+              </span>
+              {p.canAct && member && !voted ? (
+                <span className="agent-actions">
+                  <button className="btn sm" onClick={() => vote("VoteReject")} disabled={busy !== null}>Reject</button>
+                  <button className="btn dark sm" onClick={() => vote("VoteApprove")} disabled={busy !== null}>
+                    {busy === `${x.id}:VoteApprove` ? "Approve in wallet" : "Approve"}
+                  </button>
+                </span>
+              ) : (
+                <span className="pill muted">{voted ? `You voted ${x.votes[p.accountId].toLowerCase()}` : "Members vote"}</span>
+              )}
+            </div>
+          );
+        })}
+        {error && <p className="error">{error}</p>}
+      </section>
+    );
+  }
+
+  if (!p.canAct || d.policy.owner_id !== p.accountId) return null;
+
+  const handOver = () =>
+    act("hand", async () => {
+      const dao = team.trim().toLowerCase();
+      const found = await multisigOf(dao);
+      if (!found) throw new Error(`${dao} is not a multisig (Sputnik DAO) account on testnet.`);
+      if (!found.members.includes(p.accountId)) throw new Error(`You are not a member of ${dao}, so you would lose access to this vault.`);
+      await p.send(p.vaultId, "transfer_owner", { new_owner_id: dao }, { deposit: "1", gas: TGAS(60) });
+      p.onTeam(dao);
+    });
+
+  return (
+    <section className="card card-pad gap-top">
+      <div className="card-head">
+        <div>
+          <h2>Hand ownership to a multisig</h2>
+          <p className="sub">
+            Optional. Give this vault to your team's multisig (a Sputnik DAO, like a Trezu treasury). Every change after that, from limits to
+            approvals, becomes a proposal the members vote on. Keel keeps running as before. You cannot undo it alone.
+          </p>
+        </div>
+      </div>
+      <div className="team-form" style={{ padding: 0 }}>
+        <input className="input" placeholder="team.sputnikv2.testnet" value={team} onChange={(e) => setTeam(e.target.value)} />
+        <button className="btn dark" onClick={handOver} disabled={!team.trim() || busy !== null}>
+          {busy === "hand" ? "Approve in wallet" : "Hand over"}
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </section>
   );
 }
 

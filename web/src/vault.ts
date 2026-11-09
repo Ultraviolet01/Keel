@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FACTORY_ID, keyMethods, spendableNear, view, type Policy, type Proposal, type TokenMetadata } from "./near";
 import { billDues, type VaultBill, type VaultPayee } from "./bills";
+import { multisigOf, openProposalsFor, type DaoProposal, type Multisig } from "./multisig";
 
 export interface VaultData {
   policy: Policy;
@@ -20,6 +21,10 @@ export interface VaultData {
   agentMethods: string[];
   /** The vault's token transfers, newest first (ms, signed amount), or null if the indexer is unreachable. */
   history: { at: number; delta: bigint }[] | null;
+  /** Set when the owner is a multisig (a Sputnik DAO such as a Trezu treasury). */
+  multisig: Multisig | null;
+  /** That multisig's open proposals for this vault. */
+  multisigProposals: DaoProposal[];
 }
 
 /**
@@ -96,12 +101,14 @@ export function useVault(vaultId: string | null) {
         loadBills(vaultId),
         view<VaultPayee[]>(vaultId, "get_payees").catch(() => null),
       ]);
-      const [savings, agentMethods, history] = await Promise.all([
+      const [savings, agentMethods, history, multisig] = await Promise.all([
         loadSavings(vaultId, policy.token_id, payees),
         policy.agent_key ? keyMethods(vaultId, policy.agent_key) : Promise.resolve([]),
         loadHistory(vaultId, policy.token_id),
+        multisigOf(policy.owner_id),
       ]);
-      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods, history });
+      const multisigProposals = multisig ? await openProposalsFor(multisig.dao, vaultId).catch(() => []) : [];
+      setData({ policy, token, balance, gas, proposals, ...listed, payees, savings, agentMethods, history, multisig, multisigProposals });
       setError(null);
     } catch (e) {
       setError(String(e));

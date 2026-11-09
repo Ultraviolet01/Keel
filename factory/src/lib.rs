@@ -278,6 +278,27 @@ impl KeelFactory {
         self.vaults_by_owner.get(&owner_id).cloned().unwrap_or_default()
     }
 
+    /// Called by a vault when its owner hands it to a new owner, for example a
+    /// team's multisig. Only a vault this factory created can call it, and only
+    /// for itself. Refuses if the new owner already has the most vaults allowed.
+    pub fn record_owner_change(&mut self, new_owner_id: AccountId) {
+        let vault_id = env::predecessor_account_id();
+        let old = self
+            .vault_owner
+            .get(&vault_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("only a vault this factory created can call this"));
+        require!(old != new_owner_id, "that account already owns this vault");
+        let owned = self.vaults_by_owner.get(&new_owner_id).map_or(0, Vec::len);
+        require!(owned < MAX_VAULTS_PER_OWNER, format!("the new owner already owns {MAX_VAULTS_PER_OWNER} vaults"));
+        if let Some(list) = self.vaults_by_owner.get_mut(&old) {
+            list.retain(|v| v != &vault_id);
+        }
+        self.vaults_by_owner.entry(new_owner_id.clone()).or_default().push(vault_id.clone());
+        self.vault_owner.insert(vault_id.clone(), new_owner_id.clone());
+        emit("vault_owner_changed", json!({ "vault_id": vault_id, "old_owner_id": old, "new_owner_id": new_owner_id }));
+    }
+
     pub fn get_owner(&self, vault_id: AccountId) -> Option<AccountId> {
         self.vault_owner.get(&vault_id).cloned()
     }
@@ -598,5 +619,42 @@ mod tests {
         let mut f = KeelFactory::new(acc("admin.testnet"), agent_key(), acc("usdc.testnet"));
         ctx("founder.testnet", NearToken::from_near(3));
         let _ = f.create_vault("kora".into());
+    }
+}
+
+#[cfg(test)]
+mod owner_change_tests {
+    use super::*;
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::testing_env;
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn with_vault() -> KeelFactory {
+        testing_env!(VMContextBuilder::new().current_account_id(acc("keel.testnet")).predecessor_account_id(acc("keel.testnet")).build());
+        let mut f = KeelFactory::new(acc("keel.testnet"), "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(), acc("usdc.testnet"));
+        f.vault_owner.insert(acc("acme.keel.testnet"), acc("alice.testnet"));
+        f.vaults_by_owner.insert(acc("alice.testnet"), vec![acc("acme.keel.testnet")]);
+        f
+    }
+
+    #[test]
+    fn a_vault_records_its_new_owner() {
+        let mut f = with_vault();
+        testing_env!(VMContextBuilder::new().current_account_id(acc("keel.testnet")).predecessor_account_id(acc("acme.keel.testnet")).build());
+        f.record_owner_change(acc("team.sputnikv2.testnet"));
+        assert_eq!(f.get_owner(acc("acme.keel.testnet")), Some(acc("team.sputnikv2.testnet")));
+        assert!(f.get_vaults_for_owner(acc("alice.testnet")).is_empty());
+        assert_eq!(f.get_vaults_for_owner(acc("team.sputnikv2.testnet")), vec![acc("acme.keel.testnet")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "only a vault this factory created can call this")]
+    fn strangers_cannot_rewrite_ownership() {
+        let mut f = with_vault();
+        testing_env!(VMContextBuilder::new().current_account_id(acc("keel.testnet")).predecessor_account_id(acc("mallory.testnet")).build());
+        f.record_owner_change(acc("mallory.testnet"));
     }
 }

@@ -14,6 +14,7 @@ A small company holds stablecoins in wallets on several chains and has no one to
 - **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
 - **Burrow**, NEAR's lending protocol, holds the yield investment in the vault's own account.
+- **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** writes the reason on each proposal when its key is set (Claude otherwise), and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
 ## Built during NEAR HACKATHON
@@ -55,7 +56,7 @@ Test tokens have no money value. Nothing here has moved real money.
 | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) | The agent's loop, every decision it makes, and how bills on other chains are paid |
 | [docs/CONTRACT.md](docs/CONTRACT.md) | The vault's methods, who can call each, and the payment bands |
 | [docs/SECURITY.md](docs/SECURITY.md) | What protects the money: Keel's key, the cash buffer, owner-only bills and payees, the counterparty check |
-| [docs/VERIFIED.md](docs/VERIFIED.md) | 13 checks run on testnet, each with transaction links |
+| [docs/VERIFIED.md](docs/VERIFIED.md) | 14 checks run on testnet, each with transaction links |
 | [docs/SETUP.md](docs/SETUP.md) | Creating a company, testnet tokens, the hosted agent, repository layout, configuration and the full list of known issues |
 
 ## Known issues
@@ -65,7 +66,7 @@ Test tokens have no money value. Nothing here has moved real money.
 - A vault's address on another chain must be funded by hand (USDC and a little ETH); every payment there needs the owner's approval.
 - A vault keeps the contract it was created with; a company created before a feature shipped gets it by creating a new company.
 - On testnet, Burrow lends USDC.e only, so only a vault holding USDC.e can invest there.
-- One owner wallet approves everything; multisig is not built.
+- Multisig ownership works with Sputnik DAO multisigs only, and a handed-over vault cannot go back to one wallet without the multisig voting for it.
 
 The full list is in [docs/SETUP.md](docs/SETUP.md#known-issues).
 

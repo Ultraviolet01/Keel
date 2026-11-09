@@ -547,6 +547,13 @@ select:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px r
 .deposit-box.ok { background: var(--teal-tint); }
 .deposit-box.bad { background: var(--bad-tint); }
 .bad-banner { background: var(--bad-tint); color: var(--bad); }
+.ok-banner { background: var(--teal-tint); }
+.ms-members { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.ms-prop { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.ms-prop > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ms-prop .agent-actions { display: flex; gap: 8px; }
+.team-form { display: flex; gap: 6px; padding: 6px 8px; }
+.team-form input { flex: 1; min-width: 0; }
 .name-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .name-suggest .chip { font: inherit; font-size: 12px; font-family: var(--mono, monospace); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--teal-tint); color: var(--ink, inherit); cursor: pointer; }
 .name-suggest .chip:hover { border-color: currentColor; }

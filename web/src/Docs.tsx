@@ -11,6 +11,7 @@ const SECTIONS = [
   ["vendors", "Paying ordinary vendors"],
   ["chains", "Other chains"],
   ["approvals", "Approvals"],
+  ["teams", "Teams and multisig"],
   ["safety", "Safety"],
   ["faq", "Questions"],
 ] as const;
@@ -199,9 +200,21 @@ export default function Docs() {
         <b>Activity</b> lists every payment and proposal. <b>Export</b> on the Overview page downloads them as a CSV for your accountant.
       </p>
 
+      <h2 id="teams">Teams and multisig</h2>
+      <p>
+        Optional. If several people should approve, hand the company to your team's multisig: a Sputnik DAO, such as a Trezu treasury. Create the
+        company from one member's wallet as usual, then open <b>Rules</b>, enter the multisig account under <b>Hand ownership to a multisig</b> and
+        click <b>Hand over</b>.
+      </p>
+      <p>
+        From then on, every change (limits, payees, bills, approvals, pause) is filed as a proposal on the multisig, with its bond attached. Members
+        approve or reject it under <b>Rules</b>, and it runs once enough of them have approved. Other members see the company by choosing{" "}
+        <b>Add a team's companies</b> in the company card. Keel keeps paying inside your limits as before.
+      </p>
+
       <h2 id="safety">Safety</h2>
       <ul>
-        <li>Only your wallet can change limits, payees, bills or the blocklist, approve proposals, pause, or withdraw.</li>
+        <li>Only the owner, your wallet or your team's multisig, can change limits, payees, bills or the blocklist, approve proposals, pause, or withdraw.</li>
         <li>Keel's key can only call the vault's pay and propose methods, with a small gas allowance. If it leaked, it still could not pay past your limits.</li>
         <li>
           <b>Rules</b> lets you remove Keel's key at any time. Your money stays in the vault and you can still withdraw it, even while paused.

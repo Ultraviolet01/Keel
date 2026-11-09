@@ -56,6 +56,7 @@ const GAS_BALANCE_CHECKED_LENDING: Gas = Gas::from_tgas(130);
 const GAS_LENDING_REGISTER: Gas = Gas::from_tgas(10);
 const GAS_FT_TRANSFER_CALL: Gas = Gas::from_tgas(80);
 const GAS_RECALL: Gas = Gas::from_tgas(120);
+const GAS_OWNER_RECORD: Gas = Gas::from_tgas(15);
 /// Burrow's storage_balance_bounds minimum (0.1 NEAR), paid once per market.
 const LENDING_STORAGE: NearToken = NearToken::from_millinear(100);
 const MAX_TEXT: usize = 280;
@@ -749,6 +750,24 @@ impl KeelVault {
         self.bills.insert(bill.id.clone(), bill);
     }
 
+    /// Hands the vault to a new owner, for example the team's multisig
+    /// (a Trezu or Sputnik DAO treasury). The factory records the change first;
+    /// only if it accepts does the vault switch owner. From then on every
+    /// owner action needs the new owner, and Keel keeps working as before.
+    #[payable]
+    pub fn transfer_owner(&mut self, new_owner_id: AccountId) -> Promise {
+        self.assert_owner();
+        require!(new_owner_id != self.owner_id, "that account already owns this vault");
+        let factory: AccountId = env::current_account_id()
+            .as_str()
+            .split_once('.')
+            .map(|(_, rest)| rest.parse::<AccountId>().unwrap())
+            .unwrap_or_else(|| env::panic_str("vault has no factory"));
+        Promise::new(factory)
+            .function_call("record_owner_change", json!({ "new_owner_id": new_owner_id }).to_string().into_bytes(), NearToken::from_yoctonear(0), GAS_OWNER_RECORD)
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_owner_recorded(new_owner_id))
+    }
+
     /// Approves a payee with a name, for example "Company card". Also puts the
     /// account on the allowlist, so Keel may pay it within the caps.
     #[payable]
@@ -915,6 +934,20 @@ impl KeelVault {
             emit("yield_deposited", json!({ "market": market, "amount": U128(used), "proposal_id": proposal_id }));
         }
         self.settle(used > 0, proposal_id, market, amount, agent_day, bill_ref, reserved)
+    }
+
+    /// Switches owner only if the factory recorded the change.
+    #[private]
+    pub fn on_owner_recorded(&mut self, new_owner_id: AccountId) -> bool {
+        #[allow(deprecated)]
+        let ok = matches!(env::promise_result(0), PromiseResult::Successful(_));
+        if ok {
+            emit("owner_changed", json!({ "old_owner_id": self.owner_id, "new_owner_id": new_owner_id }));
+            self.owner_id = new_owner_id;
+        } else {
+            emit("owner_change_refused", json!({ "new_owner_id": new_owner_id }));
+        }
+        ok
     }
 
     #[private]

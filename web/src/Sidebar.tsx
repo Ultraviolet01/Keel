@@ -33,6 +33,8 @@ export function Sidebar(props: {
   busy: boolean;
   onSelect: (vaultId: string) => void;
   onAdd: () => void;
+  /** Lists a multisig's companies too; missing in read-only view. */
+  onAddTeam?: (team: string) => Promise<void>;
   onPage: (page: Page) => void;
   onPauseToggle: () => void;
   accountId: string;
@@ -58,6 +60,8 @@ export function Sidebar(props: {
   }, [props.page, props.selected, props.pendingCount]);
 
   const [open, setOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [team, setTeam] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -137,6 +141,31 @@ export function Sidebar(props: {
                   Add company
                 </button>
               </>
+            )}
+            {props.onAddTeam && (
+              teamOpen ? (
+                <form
+                  className="team-form"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const t = team.trim().toLowerCase();
+                    if (!t) return;
+                    await props.onAddTeam!(t);
+                    setTeam("");
+                    setTeamOpen(false);
+                  }}
+                >
+                  <input autoFocus placeholder="team.sputnikv2.testnet" value={team} onChange={(e) => setTeam(e.target.value)} aria-label="Multisig account" />
+                  <button className="btn sm" type="submit">Add</button>
+                </form>
+              ) : (
+                <button className="opt add" onClick={() => setTeamOpen(true)}>
+                  <span className="mark">
+                    <Users size={16} />
+                  </span>
+                  Add a team's companies (multisig)
+                </button>
+              )
             )}
             <div className="divider" />
             <div className="account-row">
