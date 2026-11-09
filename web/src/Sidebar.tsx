@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { companyName } from "./near";
 import { Check, ChevronsUpDown, Grid, Inbox, List, Pause, Play, Plus, Sliders, Users, Wallet } from "./icons";
 import type { KeelState } from "./vault";
+import { ThemeToggle } from "./guide";
 
 export type Page = "overview" | "approvals" | "activity" | "payees" | "rules" | "wallets";
 
@@ -183,6 +184,10 @@ export function Sidebar(props: {
           )}
         </div>
       )}
+      <div className="theme-row">
+        <span className="muted tiny">Appearance</span>
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

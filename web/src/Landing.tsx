@@ -23,7 +23,7 @@ function Ship() {
     <g className="ship">
       <g className="ship-bob">
       {/* reflection under the hull */}
-      <path d="M268 506 H1150 Q1170 506 1166 530 L1160 560 Q1155 572 1135 572 H300 Q275 572 270 548 Z" fill="#9cb8c0" />
+      <path d="M268 506 H1150 Q1170 506 1166 530 L1160 560 Q1155 572 1135 572 H300 Q275 572 270 548 Z" className="reflection" fill="#9cb8c0" />
       {/* bridge and funnel */}
       <rect x="282" y="208" width="96" height="146" fill="#e7eded" />
       <rect x="270" y="196" width="122" height="12" fill="#d5dfe0" />
@@ -76,10 +76,12 @@ function Ship() {
 
 function Compass() {
   return (
-    <g transform="translate(1290 120)" stroke="#a7b4b7" fill="none">
-      <text x="0" y="-52" textAnchor="middle" fill="#5f7378" stroke="none" fontFamily="Fraunces, serif" fontWeight="600" fontSize="14">
+    <g transform="translate(1290 120)" className="compass-rose" stroke="#a7b4b7" fill="none">
+      <text className="compass-n" x="0" y="-52" textAnchor="middle" fill="#5f7378" stroke="none" fontFamily="Fraunces, serif" fontWeight="600" fontSize="14">
         N
       </text>
+      {/* The card swings with the swell, like a ship's compass. */}
+      <g className="compass-swing">
       <circle r="40" />
       <circle r="32" />
       {Array.from({ length: 24 }, (_, i) => {
@@ -89,6 +91,7 @@ function Compass() {
       <path d="M-46 0 H46 M0 -46 V46" />
       <path d="M0 -34 L6 0 L0 6 L-6 0 Z" fill="#c4922e" stroke="none" />
       <path d="M0 34 L6 0 L0 -6 L-6 0 Z" fill="#8fa7ad" stroke="none" />
+      </g>
     </g>
   );
 }
@@ -136,7 +139,7 @@ function Scene() {
         </div>
       </div>
       <svg viewBox={narrow ? "200 96 1060 544" : "0 0 1440 640"} preserveAspectRatio={narrow ? "xMidYMid meet" : "xMidYMax slice"} aria-hidden="true">
-        <g stroke="#e3e9e9" strokeWidth="1">
+        <g className="sky" stroke="#e3e9e9" strokeWidth="1">
           {[120, 330, 540, 750, 960, 1170, 1380].map((x) => (
             <line key={x} x1={x} x2={x} y1="0" y2="430" />
           ))}
@@ -144,8 +147,8 @@ function Scene() {
           <line x1="0" x2="1440" y1="300" y2="300" />
         </g>
         <Compass />
-        <rect x="0" y="430" width="1440" height="210" fill="#b3cfd6" />
-        <line x1="0" x2="1440" y1="430" y2="430" stroke="#93b3bc" strokeWidth="2" />
+        <rect className="sea" x="0" y="430" width="1440" height="210" fill="#b3cfd6" />
+        <line className="sea-edge" x1="0" x2="1440" y1="430" y2="430" stroke="#93b3bc" strokeWidth="2" />
         <Waves y={452} offset={20} speed="fast" />
         <Ship />
         {/* water in front of the hull, so the ship sinks into it */}
@@ -193,18 +196,18 @@ export default function Landing() {
         <ol>
           <li>
             <span className="serif n">1</span>
-            <h3>Paint the line</h3>
-            <p>Set caps, payees and bills in your own Keel Vault contract. Only your key can change them.</p>
+            <h3>Set the line</h3>
+            <p>Choose your caps, a cash buffer, the payees Keel may pay and your bills, in a NEAR contract you own. Only your wallet can change them.</p>
           </li>
           <li>
             <span className="serif n">2</span>
-            <h3>Keel keeps watch</h3>
-            <p>Every 15 minutes it forecasts your cash, pays what is due inside your limits and keeps your card wallet topped up.</p>
+            <h3>Keel runs the treasury</h3>
+            <p>Every 15 minutes it forecasts your cash, pays what is due, keeps your wallets topped up, and invests idle cash for yield until bills need it.</p>
           </li>
           <li>
             <span className="serif n">3</span>
-            <h3>You sign the big ones</h3>
-            <p>Anything over your line waits for your approval, with Keel's reasons attached.</p>
+            <h3>You decide the rest</h3>
+            <p>Anything past your line, from a new payee to a payment on another chain, waits for your approval with Keel's reason.</p>
           </li>
         </ol>
         <a className="l-more" href="/how-it-works">

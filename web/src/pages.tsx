@@ -170,7 +170,7 @@ export function Overview(p: PageProps) {
           </div>
           <div className="checklist">
             <Step done title="Vault created" note={`${p.vaultId} · owned by ${d.policy.owner_id}`} mono />
-            <Step done={agentOn} title={agentOn ? "Keel's agent connected" : "Keel's agent is off"} note={agentOn ? "Can call execute_payment and propose_payment only" : "Add its key back from Rules"} />
+            <Step done={agentOn} title={agentOn ? "Keel's agent connected" : "Keel's agent is off"} note={agentOn ? `Can call ${(d.agentMethods.length ? d.agentMethods : ["execute_payment", "propose_payment"]).join(", ")} only` : "Add its key back from Rules"} />
             <Step done={limits} title="Set your limits" note="Per payment, per day, and when Keel must ask you">
               {p.canAct && <button className="btn primary sm" onClick={p.onSetLimits}>Set limits</button>}
             </Step>
