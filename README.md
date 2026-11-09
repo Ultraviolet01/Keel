@@ -15,7 +15,7 @@ A small company holds stablecoins in wallets on several chains and has no one to
 - **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
 - **Rhea Finance** NEAR's lending protocol, holds the yield investment in the vault's own account.
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
-- **NEAR AI Cloud** writes the reason on each proposal when its key is set (Claude otherwise), and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
+- **NEAR AI Cloud** writes the reason on each proposal and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
 
 ## Built during NEAR HACKATHON
 
