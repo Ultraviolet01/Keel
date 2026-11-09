@@ -24,6 +24,7 @@ export interface PageProps {
   onNewPayment: () => void;
   onAddBill: () => void;
   onAddPayee: () => void;
+  onImport: () => void;
   /** The signed-in wallet, or the account being viewed read-only. */
   accountId: string;
   /** Disconnects the wallet; missing in read-only view. */
@@ -181,7 +182,12 @@ export function Overview(p: PageProps) {
             </Step>
             {d.bills !== null && (
               <Step done={hasBills} title="Add the bills Keel should pay" note="Hosting, payroll, suppliers: what, to whom, how much and when">
-                {p.canAct && <button className="btn sm" onClick={p.onAddBill}>Add bill</button>}
+                {p.canAct && (
+                  <span className="tools">
+                    <button className="btn sm" onClick={p.onImport}>Import invoices</button>
+                    <button className="btn sm" onClick={p.onAddBill}>Add bill</button>
+                  </span>
+                )}
               </Step>
             )}
           </div>
@@ -301,9 +307,14 @@ function UpcomingBills({ p }: { p: PageProps }) {
           <p className="sub">Bills Keel pays inside your limits</p>
         </div>
         {p.canAct && d.bills !== null && (
-          <button className="link-btn lg" onClick={p.onAddBill}>
-            Add bill
-          </button>
+<span className="tools">
+            <button className="link-btn lg" onClick={p.onImport}>
+              Import invoices
+            </button>
+            <button className="link-btn lg" onClick={p.onAddBill}>
+              Add bill
+            </button>
+          </span>
         )}
       </div>
       {d.bills === null ? (

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { NearWalletBase } from "@hot-labs/near-connect";
 import { connector, FACTORY_ID, view, type FactoryConfig } from "./near";
 import { Sidebar, type Page } from "./Sidebar";
-import { BillPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send } from "./panels";
+import { BillPanel, ImportPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send, type SendBatch } from "./panels";
 import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
 
@@ -18,7 +18,7 @@ export default function App() {
   const [vaults, setVaults] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("overview");
-  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | "bill" | "payee" | null>(null);
+  const [panel, setPanel] = useState<"add" | "limits" | "deposit" | "pay" | "bill" | "payee" | "import" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readOnly = Boolean(viewAs);
@@ -98,6 +98,16 @@ export default function App() {
     setWallet(null);
     setAccountId(null);
     setPage("overview");
+  };
+
+  const sendBatch: SendBatch = async (receiverId, calls) => {
+    if (!wallet || !accountId) throw new Error("Connect your wallet first");
+    const outcome = await wallet.signAndSendTransaction({
+      signerId: accountId,
+      receiverId,
+      actions: calls.map((c) => ({ type: "FunctionCall" as const, params: { methodName: c.methodName, args: c.args, gas: c.gas, deposit: c.deposit } })),
+    });
+    return outcome as unknown as { transaction: { hash: string }; status: unknown };
   };
 
   const send: Send = async (receiverId, methodName, args, opts = {}) => {
@@ -188,6 +198,7 @@ export default function App() {
           onNewPayment: () => setPanel("pay"),
           onAddBill: () => setPanel("bill"),
           onAddPayee: () => setPanel("payee"),
+          onImport: () => setPanel("import"),
           accountId: accountId ?? "",
           onSignOut: readOnly ? undefined : signOut,
           onPauseToggle: togglePause,
@@ -272,6 +283,9 @@ export default function App() {
       )}
       {panel === "bill" && selected && d && (
         <BillPanel vaultId={selected} token={d.token} policy={d.policy} payees={d.payees} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />
+      )}
+      {panel === "import" && selected && d && (
+        <ImportPanel vaultId={selected} token={d.token} policy={d.policy} payees={d.payees} sendBatch={sendBatch} onClose={() => setPanel(null)} onSaved={vault.reload} />
       )}
       {panel === "payee" && selected && d && (
         <PayeePanel vaultId={selected} token={d.token} policy={d.policy} agentMethods={d.agentMethods} send={send} onClose={() => setPanel(null)} onSaved={vault.reload} />

@@ -176,12 +176,17 @@ const PROOFS = [
   ["Optimism Sepolia", "https://sepolia.optimism.io", "0xa7312eb69bde5c12aade691af65f96e293fa291a0c3524eb2cd2b272f33b468f"],
   ["Arbitrum Sepolia", "https://sepolia-rollup.arbitrum.io/rpc", "0x4864319fc6f117023ba00a343641c6f2eae02e573ef756dca5aa2ca16d9417d2"],
   ["Base Sepolia", "https://sepolia.base.org", "0x4df6011a6fcc8f5896c29f5cb3e773d5f8cfcda6effc02d893c051123b3fd674"],
-  ["Ethereum Sepolia", "https://ethereum-sepolia-rpc.publicnode.com", "0x044b25a1517da47944215cf34177ed7c3b746a7db783799c0e9f15598c63d66e"],
+  // publicnode no longer serves this older receipt; 1rpc does. Each chain's RPCs are tried in order.
+  ["Ethereum Sepolia", "https://ethereum-sepolia-rpc.publicnode.com https://1rpc.io/sepolia", "0x044b25a1517da47944215cf34177ed7c3b746a7db783799c0e9f15598c63d66e"],
 ];
 for (const [chain, rpc, hash] of PROOFS) {
   await check(`${chain}: vault-signed USDC payment landed`, async () => {
-    const r = (await json(rpc, { jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [hash] })).result;
-    if (!r) throw new Error("receipt not found");
+    let r = null;
+    for (const url of rpc.split(" ")) {
+      r = (await json(url, { jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [hash] }).catch(() => ({}))).result;
+      if (r) break;
+    }
+    if (!r) throw new Error("receipt not found on any of the chain's RPCs");
     if (r.status !== "0x1") throw new Error(`status ${r.status}`);
     if (r.from.toLowerCase() !== VAULT_EVM) throw new Error(`sent from ${r.from}, not the vault`);
     const transfer = r.logs.find((l) => l.topics[0]?.startsWith("0xddf252ad"));

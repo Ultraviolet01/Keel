@@ -25,6 +25,12 @@ export type Send = (
   opts?: { deposit?: string; gas?: string },
 ) => Promise<{ transaction: { hash: string }; status: unknown }>;
 
+/** Signs several function calls to one contract in a single transaction. */
+export type SendBatch = (
+  receiverId: string,
+  calls: { methodName: string; args: object; gas: string; deposit: string }[],
+) => Promise<{ transaction: { hash: string }; status: unknown }>;
+
 export function Overlay({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   useEffect(() => {
     if (!onClose) return;
@@ -927,6 +933,260 @@ export function PayeePanel(props: {
         <button className="btn primary lg block" onClick={save} disabled={busy || Boolean(problem)}>
           {busy ? "Approve in your wallet" : "Approve payee"}
         </button>
+      </section>
+    </Overlay>
+  );
+}
+
+// ------------------------------------------------------------- import invoices
+
+type ImportRow = {
+  key: string;
+  file: string;
+  state: "reading" | "ready" | "failed";
+  error?: string;
+  label: string;
+  chain: string;
+  to: string;
+  amount: string;
+  due: string;
+  category: string;
+  repeat: "once" | "monthly" | "yearly";
+  critical: boolean;
+  memo: string;
+  fromInvoiceAddress: boolean;
+  currency: string | null;
+};
+
+const MAX_IMPORT = 10;
+
+/** Up to 10 invoices at once: Claude drafts each, the owner checks the rows and signs them all in one transaction. */
+export function ImportPanel(props: {
+  vaultId: string;
+  token: TokenMetadata;
+  policy: Policy;
+  payees: VaultPayee[] | null;
+  sendBatch: SendBatch;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reading = rows.some((r) => r.state === "reading");
+  const hasBuffer = props.policy.min_balance !== undefined;
+  const set = (key: string, patch: Partial<ImportRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  const onFiles = async (list: FileList | null) => {
+    if (!list || !list.length) return;
+    setError(null);
+    const files = [...list].slice(0, MAX_IMPORT - rows.length);
+    if (list.length > files.length) setError(`At most ${MAX_IMPORT} invoices at once; the first ${files.length} were added.`);
+    const fresh: ImportRow[] = files.map((f, i) => ({
+      key: `${Date.now()}-${i}-${f.name}`,
+      file: f.name,
+      state: "reading",
+      label: "",
+      chain: "",
+      to: "",
+      amount: "",
+      due: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10),
+      category: "other",
+      repeat: "once",
+      critical: false,
+      memo: "",
+      fromInvoiceAddress: false,
+      currency: null,
+    }));
+    setRows((rs) => [...rs, ...fresh]);
+    // One at a time: each file is one call to Claude, and the server allows a few per minute.
+    for (let i = 0; i < files.length; i++) {
+      const row = fresh[i];
+      try {
+        const d = await readInvoice(files[i]);
+        const patch: Partial<ImportRow> = { state: "ready", currency: d.currency ?? null };
+        if (d.vendor) patch.label = [d.vendor, d.invoice_number && `invoice ${d.invoice_number}`].filter(Boolean).join(", ").slice(0, 80);
+        if (d.amount) patch.amount = d.amount;
+        if (d.due && /^\d{4}-\d{2}-\d{2}$/.test(d.due)) patch.due = d.due;
+        if (d.category && CATEGORIES[d.category]) patch.category = d.category;
+        if (d.repeats) patch.repeat = d.repeats;
+        if (d.invoice_number) patch.memo = `Invoice ${d.invoice_number}`.slice(0, 140);
+        // A payee you already named wins over anything the invoice says.
+        const match = (props.payees ?? []).find((x) => d.vendor && x.name.toLowerCase().includes(d.vendor.toLowerCase().split(" ")[0]));
+        if (match) {
+          patch.chain = "";
+          patch.to = match.account_id;
+        } else if (d.payment_address) {
+          const addr = d.payment_address.trim().toLowerCase();
+          if (isEvmAddress(addr)) {
+            patch.chain = d.chain && BILL_CHAINS[d.chain] ? d.chain : "base";
+            patch.to = addr;
+            patch.fromInvoiceAddress = true;
+          } else if (ACCOUNT.test(addr)) {
+            patch.to = addr;
+            patch.fromInvoiceAddress = true;
+          }
+        }
+        set(row.key, patch);
+      } catch (e) {
+        set(row.key, { state: "failed", error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  };
+
+  const problemOf = (r: ImportRow): string | null => {
+    if (r.state === "reading") return "Reading…";
+    const payee = r.to.trim().toLowerCase();
+    const raw = parseToken(r.amount || "0", props.token.decimals);
+    if (!r.label.trim()) return "Name the bill";
+    if (!payee) return "Enter who to pay";
+    if (r.chain && !isEvmAddress(payee)) return `Enter a 0x address on ${BILL_CHAINS[r.chain]}`;
+    if (!r.chain && !ACCOUNT.test(payee)) return "Not a NEAR account id";
+    if (raw === null || raw === "0") return `Enter an amount in ${props.token.symbol}`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.due)) return "Pick a due date";
+    return null;
+  };
+  const statusOf = (r: ImportRow): { cls: string; text: string } | null => {
+    const payee = r.to.trim().toLowerCase();
+    if (!payee) return null;
+    if (props.policy.blocklist.includes(payee)) return { cls: "invalid", text: "On your blocklist: Keel will refuse it" };
+    if (r.chain) return { cls: "", text: `Paid on ${BILL_CHAINS[r.chain]}: Keel asks you each time` };
+    const named = (props.payees ?? []).find((x) => x.account_id === payee);
+    if (props.policy.allowlist.includes(payee)) return { cls: "free", text: `${named ? named.name : "Approved payee"}: Keel pays it within your caps` };
+    return { cls: "taken", text: r.fromInvoiceAddress ? "New account from the invoice: confirm it with the vendor. Keel will ask you" : "Not an approved payee: Keel will ask you" };
+  };
+
+  const ready = rows.filter((r) => r.state !== "failed");
+  const allOk = ready.length > 0 && ready.every((r) => !problemOf(r));
+
+  const save = async () => {
+    if (!allOk) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const calls = ready.map((r) => ({
+        methodName: "add_bill",
+        args: {
+          bill: {
+            id: billId(r.label),
+            payee: r.to.trim().toLowerCase(),
+            amount: parseToken(r.amount, props.token.decimals)!,
+            due: r.due,
+            monthly: r.repeat === "monthly",
+            yearly: r.repeat === "yearly",
+            category: r.category,
+            ...(hasBuffer ? { critical: r.critical } : {}),
+            chain: r.chain || null,
+            label: r.label.trim(),
+            memo: r.memo.trim() || null,
+          },
+        },
+        gas: "25000000000000",
+        deposit: "1",
+      }));
+      await props.sendBatch(props.vaultId, calls);
+      await props.onSaved();
+      props.onClose();
+    } catch (e) {
+      setError(friendly(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={props.onClose}>
+      <section className="card panel form wide" role="dialog" aria-labelledby="import-title">
+        <div className="panel-top">
+          <span className="panel-icon">
+            <Wallet />
+          </span>
+          <CloseButton onClose={props.onClose} />
+        </div>
+        <h1 className="serif" id="import-title">Import invoices</h1>
+        <p className="lead">
+          Add up to {MAX_IMPORT} PDFs or photos. Claude reads each into a draft bill; you check every row, then sign them all at once. Files are not stored.
+        </p>
+        <label className={`drop ${reading ? "busy" : ""}`}>
+          <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp" disabled={reading || rows.length >= MAX_IMPORT} onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+          <b>{reading ? "Claude is reading your invoices…" : rows.length ? "Add more invoices" : "Choose invoices"}</b>
+          <span className="muted small">PDF or photo, up to 3 MB each</span>
+        </label>
+
+        {rows.length > 0 && (
+          <ul className="imp-rows">
+            {rows.map((r) => {
+              const st = statusOf(r);
+              const prob = problemOf(r);
+              return (
+                <li key={r.key} className={`imp-row ${r.state}`}>
+                  <div className="imp-top">
+                    <span className="mono small">{r.file}</span>
+                    {r.state === "reading" && <span className="pill warn">Reading</span>}
+                    {r.state === "failed" && <span className="pill bad">Could not read</span>}
+                    <button className="link-btn" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}>
+                      Remove
+                    </button>
+                  </div>
+                  {r.state === "failed" ? (
+                    <p className="hint invalid">{r.error} Add this one with Add bill instead.</p>
+                  ) : (
+                    <>
+                      <div className="imp-grid">
+                        <input value={r.label} onChange={(e) => set(r.key, { label: e.target.value })} placeholder="What the bill is for" maxLength={80} disabled={r.state === "reading"} />
+                        <span className="input-group">
+                          <input className="num" inputMode="decimal" value={r.amount} onChange={(e) => set(r.key, { amount: e.target.value })} placeholder="0.00" disabled={r.state === "reading"} />
+                          <span className="suffix">{props.token.symbol}</span>
+                        </span>
+                        <input type="date" value={r.due} onChange={(e) => set(r.key, { due: e.target.value })} disabled={r.state === "reading"} />
+                      </div>
+                      <div className="imp-grid">
+                        <select value={r.chain} onChange={(e) => set(r.key, { chain: e.target.value })} disabled={r.state === "reading"}>
+                          <option value="">NEAR</option>
+                          {Object.entries(BILL_CHAINS).map(([k, n]) => (
+                            <option key={k} value={k}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                        <input className="mono-input" value={r.to} onChange={(e) => set(r.key, { to: e.target.value, fromInvoiceAddress: false })} placeholder={r.chain ? "0x…" : "account.testnet"} disabled={r.state === "reading"} />
+                        <select value={r.category} onChange={(e) => set(r.key, { category: e.target.value })} disabled={r.state === "reading"}>
+                          {Object.entries(CATEGORIES).map(([k, n]) => (
+                            <option key={k} value={k}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="imp-foot">
+                        <select value={r.repeat} onChange={(e) => set(r.key, { repeat: e.target.value as ImportRow["repeat"] })} disabled={r.state === "reading"}>
+                          <option value="once">Once</option>
+                          <option value="monthly">Every month</option>
+                          <option value="yearly">Every year</option>
+                        </select>
+                        {hasBuffer && (
+                          <label className="check">
+                            <input type="checkbox" checked={r.critical} onChange={(e) => set(r.key, { critical: e.target.checked })} /> Critical
+                          </label>
+                        )}
+                        {r.state === "ready" && (prob ? <span className="hint invalid">{prob}</span> : st && <span className={`hint ${st.cls}`}>{st.text}</span>)}
+                      </div>
+                      {r.currency && r.currency.toUpperCase() !== props.token.symbol.toUpperCase() && r.state === "ready" && (
+                        <p className="hint">The invoice is in {r.currency}; the vault pays {props.token.symbol}. Check the amount.</p>
+                      )}
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {error && <p className="error">{error}</p>}
+        <button className="btn primary lg block" onClick={save} disabled={busy || reading || !allOk}>
+          {busy ? "Approve in your wallet" : ready.length ? `Add ${ready.length} ${ready.length === 1 ? "bill" : "bills"} with one signature` : "Add bills"}
+        </button>
+        <p className="muted tiny centered">Saved on the vault with your signature. Keel still pays each one only inside your limits.</p>
       </section>
     </Overlay>
   );

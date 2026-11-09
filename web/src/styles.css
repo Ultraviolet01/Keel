@@ -703,3 +703,23 @@ input:hover:not(:focus):not(:disabled), textarea:hover:not(:focus), select:hover
 .pchart-tip span { color: #a9bcc1; font-size: 11px; }
 .pchart-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
 .pchart-foot span:nth-child(2) { text-align: center; }
+
+/* Import invoices */
+.panel.wide { max-width: 760px; }
+.drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 22px; border: 1.5px dashed #b9c7c7; border-radius: 12px; background: var(--page); cursor: pointer; text-align: center; transition: border-color 180ms var(--ease), background-color 180ms var(--ease); }
+.drop:hover { border-color: var(--teal); background: var(--teal-tint); }
+.drop.busy { cursor: progress; animation: keel-pulse 1.4s ease-in-out infinite; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: inherit; height: 100%; }
+@keyframes keel-pulse { 50% { background: var(--teal-tint); } }
+.imp-rows { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 10px; }
+.imp-row { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); display: grid; gap: 8px; animation: keel-row 360ms var(--spring) both; }
+.imp-row.reading { opacity: 0.7; }
+.imp-row.failed { border-color: #e8c4bf; }
+.imp-top { display: flex; align-items: center; gap: 8px; }
+.imp-top .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
+.imp-grid input, .imp-grid select, .imp-foot select { height: 38px; font-size: 14px; }
+.imp-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.imp-foot select { width: auto; }
+.imp-foot .check { margin: 0; }
+@media (max-width: 900px) { .imp-grid { grid-template-columns: 1fr; } }

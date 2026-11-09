@@ -134,7 +134,9 @@ export default function Docs() {
       <p>
         <b>From an invoice:</b> upload a PDF or photo (up to 3 MB) in the Add bill form. Claude reads the vendor, amount, due date, invoice number
         and category and fills in the form. You check every field before you sign. The file is not stored. If the invoice asks you to pay an
-        address that is not one of your payees, the form says so, and Keel will propose that payment to you instead of paying it alone.
+        address that is not one of your payees, the form says so, and Keel will propose that payment to you instead of paying it alone. To
+        add several at once, click <b>Import invoices</b>: drop up to 10 files, check the rows Claude drafts, and sign them all in one
+        transaction.
       </p>
       <p>
         <b>Upcoming payments</b> on the Overview page lists your bills with their status: Scheduled, Needs approval or Paid. The balance chart
