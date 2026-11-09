@@ -423,8 +423,8 @@ export function Security() {
         </tbody>
       </table>
       <p>
-        The contract has 129 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite tried 53 attacks against
-        a testnet vault. Details and the commands to run them are in the <a href={`${REPO}/blob/main/docs/SECURITY.md`}>repository</a>.
+        The contract has 161 tests, one per rule, and the agent suite checks about 37,000 generated cases. A live attack suite ran 68 checks against
+        a testnet vault, all passing. Details and the commands to run them are in the <a href={`${REPO}/blob/main/docs/SECURITY.md`}>repository</a>.
       </p>
 
       <h2 id="limits">What this does not cover</h2>
