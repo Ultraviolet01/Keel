@@ -20,7 +20,7 @@ export interface VaultData {
   /** What Keel's key may call on this vault (newer vaults add recall_from_yield). */
   agentMethods: string[];
   /** The vault's token transfers, newest first (ms, signed amount), or null if the indexer is unreachable. */
-  history: { at: number; delta: bigint }[] | null;
+  history: { at: number; delta: bigint; hash?: string; counterparty?: string }[] | null;
   /** Set when the owner is a multisig (a Sputnik DAO such as a Trezu treasury). */
   multisig: Multisig | null;
   /** That multisig's open proposals for this vault. */
@@ -38,16 +38,20 @@ export interface VaultData {
  */
 async function loadHistory(vaultId: string, tokenId: string): Promise<VaultData["history"]> {
   const base = FACTORY_ID.endsWith(".near") ? "https://api.nearblocks.io" : "https://api-testnet.nearblocks.io";
-  const out: { at: number; delta: bigint }[] = [];
+  const out: NonNullable<VaultData["history"]> = [];
   let cursor: string | undefined;
   try {
     for (let page = 0; page < 2; page++) {
       const url = `${base}/v3/accounts/${vaultId}/ft-txns?per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!res.ok) return out.length ? out : null;
-      const body = (await res.json()) as { data?: { contract_account_id: string; delta_amount: string; block_timestamp: string }[]; meta?: { cursor?: string | null } };
+      const body = (await res.json()) as {
+        data?: { contract_account_id: string; delta_amount: string; block_timestamp: string; transaction_hash?: string; involved_account_id?: string | null }[];
+        meta?: { cursor?: string | null };
+      };
       for (const t of body.data ?? []) {
-        if (t.contract_account_id === tokenId) out.push({ at: Number(BigInt(t.block_timestamp) / 1_000_000n), delta: BigInt(t.delta_amount) });
+        if (t.contract_account_id !== tokenId) continue;
+        out.push({ at: Number(BigInt(t.block_timestamp) / 1_000_000n), delta: BigInt(t.delta_amount), hash: t.transaction_hash, counterparty: t.involved_account_id ?? undefined });
       }
       cursor = body.meta?.cursor ?? undefined;
       if (!cursor || (body.data ?? []).length < 100) break;

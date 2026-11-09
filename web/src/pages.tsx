@@ -94,17 +94,28 @@ function when(ms: number) {
   return new Date(ms).toLocaleString("en-GB", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function exportCsv(vaultId: string, d: VaultData) {
-  const rows = [["proposal_id", "created_utc", "receiver", "amount", "token", "status", "reason"]];
-  for (const x of d.proposals) {
-    rows.push([String(x.id), new Date(x.created_at_ms).toISOString(), x.receiver_id, usd(x.amount, d).replace(/,/g, ""), d.token.symbol, x.status, x.reason]);
-  }
-  const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = `${vaultId}-ledger.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+/** Downloads the Excel treasury report: Summary, Activity, Payments, Ledger and Wallets. */
+function ExportButton({ vaultId, d, label = "Export" }: { vaultId: string; d: VaultData; label?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const { downloadReport } = await import("./exportReport");
+      await downloadReport(vaultId, d);
+    } catch (e) {
+      console.error(e);
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button className="btn" onClick={run} disabled={busy} title="Excel workbook: summary, activity, payments, ledger and wallets">
+      {busy ? "Preparing…" : failed ? "Export failed, retry" : label}
+    </button>
+  );
 }
 
 function Head({ title, sub, children }: { title: string; sub: string; children?: React.ReactNode }) {
@@ -148,9 +159,7 @@ export function Overview(p: PageProps) {
   return (
     <>
       <Head title="Overview" sub={sub}>
-        <button className="btn" onClick={() => exportCsv(p.vaultId, d)}>
-          Export
-        </button>
+        <ExportButton vaultId={p.vaultId} d={d} />
         <button className="btn" onClick={p.onDeposit}>
           Deposit
         </button>
@@ -840,7 +849,7 @@ export function Activity(p: PageProps) {
   return (
     <>
       <Head title="Activity" sub="Every move, the rule it checked, and its proof">
-        <button className="btn" onClick={() => exportCsv(p.vaultId, d)}>Export CSV</button>
+        <ExportButton vaultId={p.vaultId} d={d} label="Export to Excel" />
       </Head>
       <div className="stat4">
         <section className="card card-pad"><span className="muted">Moved through approvals</span><Amount raw={moved} d={d} size="mid" /></section>

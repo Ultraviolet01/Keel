@@ -11,7 +11,15 @@
 5. **Add bills.** Click **Add bill**: what it is for, the payee, amount, due date, category, once, monthly or yearly, and whether it is critical. Optionally upload the invoice (PDF or photo) and Claude fills in the form for you to check. To add several at once, click **Import invoices**: drop up to 10 PDFs or photos, check the rows Claude drafts, and sign them all in one transaction. You see the bill under **Upcoming payments** as **Scheduled**; from three days before it is due, the next agent run shows it as **Paid**, **Needs approval** or **Deferred: cash buffer**.
 6. **Approve.** Open **Approvals**. Each proposal shows the full payee address, the amount, the rule that sent it to you and Keel's reason; invoice text is marked unverified. Approving signs the payment with your wallet.
 
-**Export for your accountant:** click **Export** on the Overview page. You get a CSV with one row per proposal: id, time (UTC), receiver, amount, token, status and reason.
+**Export for your accountant:** click **Export** on the Overview page (or **Export to Excel** on Activity). You get an Excel workbook, `keel-<company>-<date>.xlsx`, with five sheets:
+
+- **Summary:** balances (vault cash, yield investment, other chains, total), counts (paid by Keel alone, approved, waiting, refused, deposits) and the rules.
+- **Activity:** every decision in time order: what happened, amount, outcome, who decided (Keel alone, you or the multisig), the rule checked, Keel's explanation and a reference.
+- **Payments:** the bill schedule: due date, payee, category, amount, repeat, chain, status (Paid, Needs approval, Deferred, Blocked, Overdue, Scheduled), critical, memo and the bill reference the vault pays only once.
+- **Ledger:** every token movement in and out of the vault, signed, labelled from the method its transaction called (Keel's payment, your approval, a withdrawal, a deposit, the yield investment), with a link to the transaction.
+- **Wallets:** the vault on NEAR (balance, buffer, above the buffer), the yield investment and its rate, and the vault's address and balance on each other chain.
+
+The file is built in your browser from live chain data: the Ledger comes from nearblocks' public index and each transaction's details from FastNEAR's archive node. Burrow's test token (USDC.e) is not indexed there, so a USDC.e vault's Ledger is empty and the Summary says so.
 
 ## Hand a company to a multisig (optional)
 
@@ -82,6 +90,7 @@ The hosted app reads one variable from its Vercel project: `ANTHROPIC_API_KEY`, 
 - **Agent key allowance:** 0.25 NEAR of gas per vault. NEAR checks each transaction against it at a worst-case gas price, so Keel asks for at most 200 Tgas per call. The owner renews it with `set_agent_key`.
 - **Hosted agent:** a GitHub outage can skip a run (seen once as `502 Bad Gateway` from GitHub's API); the next run catches up.
 - **Invoice reading** needs `ANTHROPIC_API_KEY` in Vercel. Its limit of 10 invoices per visitor per hour is kept per running server, so it is best effort.
+- **Excel report:** the Ledger lists the latest 200 token transfers from nearblocks' index; tokens it does not index (Burrow's test USDC.e) leave the Ledger empty. A row whose transaction the archive node cannot return is labelled by direction only, with "Unknown" as who made it.
 - **Bills are entered by the founder** (or drafted from an uploaded invoice), not imported from an accounting system or an inbox.
 - **Learning is rule-based,** and the counterparty check uses on-chain signals and the vault's lists only, with no external risk scoring.
 - **Multisig ownership** is optional and works with Sputnik DAO multisigs (the contracts behind Trezu) only. A company is created from one wallet and then handed over; going back needs the multisig to vote for it.
