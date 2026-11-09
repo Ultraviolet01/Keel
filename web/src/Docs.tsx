@@ -210,7 +210,7 @@ export default function Docs() {
       <p>
         From then on, every change (limits, payees, bills, approvals, pause) is filed as a proposal on the multisig, with its bond attached. Members
         approve or reject it under <b>Rules</b>, and it runs once enough of them have approved. Other members just connect their own wallet: Keel finds the
-        multisigs they belong to and lists those companies. Members are added and removed in the multisig itself, for example in Trezu. Keel keeps paying inside your limits as before.
+        multisigs they belong to and lists those companies. Members are added and removed in the multisig itself, for example in Trezu. What each member can do follows their role there: proposing, voting or both. Keel keeps paying inside your limits as before.
       </p>
 
       <h2 id="safety">Safety</h2>

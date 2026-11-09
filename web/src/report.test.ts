@@ -69,7 +69,7 @@ test("activity: Keel's own payments and every proposal, in time order, with who 
 });
 
 test("activity: a multisig owner is named as the decider", () => {
-  const rows = sheet("Activity", { multisig: { dao: "team.sputnikv2.testnet", bond: "1", members: ["a", "b"], threshold: [1, 2] } }).rows;
+  const rows = sheet("Activity", { multisig: { dao: "team.sputnikv2.testnet", bond: "1", members: ["a", "b"], threshold: [1, 2], roles: [] } }).rows;
   assert.equal(rows[0][7], "The multisig");
 });
 

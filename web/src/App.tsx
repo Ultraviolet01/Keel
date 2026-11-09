@@ -5,7 +5,7 @@ import { Sidebar, type Page } from "./Sidebar";
 import { BillPanel, ImportPanel, PayeePanel, ConnectPanel, CreatePanel, ViewNotice, DepositPanel, LimitsPanel, PayPanel, type Send, type SendBatch } from "./panels";
 import { Activity, Approvals, Overview, Payees, Rules, Wallets, type PageProps } from "./pages";
 import { keelState, useVault } from "./vault";
-import { describeCall, proposalCall, savedTeams, saveTeams, teamsOf } from "./multisig";
+import { describeCall, proposalCall, rightsOf, savedTeams, saveTeams, teamsOf } from "./multisig";
 
 // `?view=<account>` shows a founder's companies read-only, without a wallet.
 const viewAs = new URLSearchParams(window.location.search).get("view");
@@ -179,7 +179,8 @@ export default function App() {
       ? sendBatch(receiverId, [{ methodName, args, gas: opts.gas ?? "30000000000000", deposit: opts.deposit ?? "0" }])
       : walletSend(receiverId, methodName, args, opts);
 
-  const canAct = Boolean(wallet) && !readOnly && (!multisig || (accountId !== null && multisig.members.includes(accountId)));
+  // On a multisig-owned vault only members whose role may file proposals get the editing controls.
+  const canAct = Boolean(wallet) && !readOnly && (!multisig || (accountId !== null && rightsOf(multisig, accountId).propose));
 
   // 0. Read-only link to an invalid account, or to one with no companies.
   if (readOnly && accountId && (!isAccountId(accountId) || (vaults !== null && vaults.length === 0))) {
@@ -303,7 +304,11 @@ export default function App() {
           {multisig && !readOnly ? (
             <div className="banner">
               This vault belongs to the multisig <span className="mono">{multisig.dao}</span>
-              {canAct ? ". Your changes are filed as proposals; they run once enough members approve them under Rules." : `. You are not one of its members, so you can only look.`}
+              {canAct
+                ? ". Your changes are filed as proposals; they run once enough members approve them under Rules."
+                : accountId && rightsOf(multisig, accountId).member
+                  ? ". Your role in it cannot file proposals, so you can vote under Rules but not change anything here."
+                  : ". You are not one of its members, so you can only look."}
             </div>
           ) : null}
           {notice && (

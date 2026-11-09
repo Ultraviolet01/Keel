@@ -10,7 +10,7 @@ import type { Page } from "./Sidebar";
 import type { VaultData } from "./vault";
 import { EVM_CHAINS, evmWallet, short, type EvmWallet } from "./evm";
 import { checkDeposit, type DepositCheck } from "./intents";
-import { describeCall, multisigOf, proposalCall, readArgs, type DaoProposal, type Multisig } from "./multisig";
+import { describeCall, multisigOf, proposalCall, readArgs, rightsOf, type DaoProposal, type Multisig } from "./multisig";
 import { BILL_CHAINS, CATEGORIES, PAYEE_KINDS, balanceSamples, billDues } from "./bills";
 
 export interface PageProps {
@@ -1074,8 +1074,10 @@ const TGAS = (n: number) => `${n}000000000000`;
 
 /** Open proposals on a multisig for this vault, with the exact calls and arguments, and vote buttons for members. */
 function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list: DaoProposal[]; busy: string | null; act: (key: string, run: () => Promise<unknown>) => void }) {
-  const need = ms.threshold ? Math.min(Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1, ms.members.length) : null;
-  const member = ms.members.includes(p.accountId);
+  const voters = ms.members.filter((m) => rightsOf(ms, m).approve);
+  const need = ms.threshold ? Math.min(Math.floor((voters.length * ms.threshold[0]) / ms.threshold[1]) + 1, voters.length) : null;
+  const me = rightsOf(ms, p.accountId);
+  const connected = !!p.onSignOut;
   if (list.length === 0) return <p className="muted small">No open proposals for this vault.</p>;
   return (
     <>
@@ -1096,19 +1098,22 @@ function DaoVotes({ p, ms, list, busy, act }: { p: PageProps; ms: Multisig; list
                 </span>
               ))}
               <span className="muted small">
-                Filed by <span className="mono">{x.proposer}</span>. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}. Check the
+                Filed by <span className="mono">{x.proposer}</span>
+                {ms.members.includes(x.proposer) ? "" : <b className="bad-t"> (not a member of this multisig: anyone may file here, so check it carefully)</b>}. {yes} approved, {no} rejected{need ? `, ${need} needed` : ""}. Check the
                 arguments above, not the description.
               </span>
             </span>
-            {p.canAct && member && !voted ? (
+            {connected && (me.approve || me.reject) && !voted ? (
               <span className="agent-actions">
-                <button className="btn sm" onClick={() => vote("VoteReject")} disabled={busy !== null}>Reject</button>
-                <button className="btn dark sm" onClick={() => vote("VoteApprove")} disabled={busy !== null}>
-                  {busy === `${x.id}:VoteApprove` ? "Approve in wallet" : "Approve"}
-                </button>
+                {me.reject && <button className="btn sm" onClick={() => vote("VoteReject")} disabled={busy !== null}>Reject</button>}
+                {me.approve && (
+                  <button className="btn dark sm" onClick={() => vote("VoteApprove")} disabled={busy !== null}>
+                    {busy === `${x.id}:VoteApprove` ? "Approve in wallet" : "Approve"}
+                  </button>
+                )}
               </span>
             ) : (
-              <span className="pill muted">{voted ? `You voted ${x.votes[p.accountId].toLowerCase()}` : "Members vote"}</span>
+              <span className="pill muted">{voted ? `You voted ${x.votes[p.accountId].toLowerCase()}` : me.member ? "Your role cannot vote" : "Members vote"}</span>
             )}
           </div>
         );
@@ -1143,20 +1148,25 @@ function MultisigCard({ p }: { p: PageProps }) {
   const errorLine = error && <p className="error">{error}</p>;
 
   if (ms) {
-    const need = ms.threshold ? Math.min(Math.floor((ms.members.length * ms.threshold[0]) / ms.threshold[1]) + 1, ms.members.length) : null;
+    const voters = ms.members.filter((m) => rightsOf(ms, m).approve).length;
+    const need = ms.threshold ? Math.min(Math.floor((voters * ms.threshold[0]) / ms.threshold[1]) + 1, voters) : null;
     return (
       <section className="card card-pad gap-top">
         <div className="card-head">
           <div>
             <h2>Multisig owner</h2>
             <p className="sub">
-              <span className="mono">{ms.dao}</span> owns this vault. Changes run once {need ? `${need} of ${ms.members.length}` : "enough"} members approve them.
+              <span className="mono">{ms.dao}</span> owns this vault. Changes run once {need ? `${need} of ${voters}` : "enough"} voting members approve them.
             </p>
           </div>
           <a className="btn" href={ACCOUNT_URL + ms.dao} target="_blank" rel="noreferrer">View multisig</a>
         </div>
         <div className="ms-members">
-          {ms.members.map((m) => <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`}>{m}</span>)}
+          {ms.members.map((m) => {
+            const r = rightsOf(ms, m);
+            const what = r.propose && r.approve ? "proposes and votes" : r.approve ? "votes" : r.propose ? "proposes" : "no rights here";
+            return <span key={m} className={`pill ${m === p.accountId ? "ok" : "muted"}`} title={what}>{m}{m === p.accountId ? " (you)" : ""} · {what}</span>;
+          })}
         </div>
         {pending && <p className="small brass">This vault is offered to <span className="mono">{pending}</span>; it has not accepted.</p>}
         <DaoVotes p={p} ms={ms} list={d.multisigProposals} busy={busy} act={act} />
@@ -1168,7 +1178,7 @@ function MultisigCard({ p }: { p: PageProps }) {
   // An open offer: the owner can withdraw it; the offered account (or its members) accept.
   if (pending) {
     const team = d.offeredTo;
-    const member = !!team && team.members.includes(p.accountId);
+    const member = !!team && rightsOf(team, p.accountId).propose;
     const fileAccept = () =>
       act("accept", () =>
         p.send(team!.dao, "add_proposal", proposalCall(p.vaultId, [{ methodName: "accept_owner", args: {}, gas: TGAS(60), deposit: "1" }], `Keel: accept ownership of ${p.vaultId}`), {

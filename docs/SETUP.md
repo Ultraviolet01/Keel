@@ -28,7 +28,8 @@ The file is built in your browser from live chain data: the Ledger comes from ne
 3. Open **Rules**, enter the multisig account under **Hand ownership to a multisig** and click **Offer**. You see **Ownership offered**; nothing has changed yet.
 4. Click **File acceptance on** the multisig, and have enough members approve it under **Rules**. You see **Multisig owner** with the members and the votes needed.
 5. Other members open the app and connect their own wallet. You see the team's companies in the list: Keel finds every multisig that owns a Keel vault and lists their wallet as a member. Members are added and removed in the multisig itself (in Trezu, by a vote), and Keel follows. To list a team by hand, pick **Add a team's companies (multisig)** in the company card.
-6. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
+6. What each member can do follows their role in the multisig. Keel reads the roles: a member whose role may file proposals gets the editing controls, one whose role may vote gets **Approve** and **Reject** under **Rules**, and the Rules page shows each member's rights. Everyone, members or not, can see all of the company's data: it is on chain.
+7. From then on, every owner action (limits, payees, bills, approvals, pause) files a proposal on the multisig with its bond attached (1 NEAR by default on `sputnikv2.testnet`). Members approve or reject it under **Rules**; it runs once enough have approved. Keel keeps paying inside the limits as before.
 
 ## Get testnet tokens
 

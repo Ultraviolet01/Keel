@@ -11,6 +11,21 @@ export interface Multisig {
   members: string[];
   /** Share of members' votes a proposal needs, e.g. [1, 2] = more than half. */
   threshold: [number, number] | null;
+  /** The multisig's roles: who is in each ("everyone" for the open role) and what it may do. */
+  roles: { name: string; members: string[] | "everyone"; permissions: string[] }[];
+}
+
+/** What one account may do on a multisig, from its roles' permissions ("<kind>:<action>", "call" = function calls). */
+export function rightsOf(ms: Multisig, accountId: string) {
+  const mine = ms.roles.filter((r) => r.members !== "everyone" && r.members.includes(accountId));
+  const can = (action: string) =>
+    mine.some((r) =>
+      r.permissions.some((p) => {
+        const [kind, act] = p.split(":");
+        return (kind === "*" || kind === "call") && (act === "*" || act === action);
+      }),
+    );
+  return { member: mine.length > 0, propose: can("AddProposal"), approve: can("VoteApprove"), reject: can("VoteReject") };
 }
 
 export interface DaoProposal {
@@ -24,7 +39,7 @@ export interface DaoProposal {
 
 type DaoPolicy = {
   proposal_bond?: string;
-  roles?: { name: string; kind: string | { Group?: string[] } }[];
+  roles?: { name: string; kind: string | { Group?: string[] }; permissions?: string[] }[];
   default_vote_policy?: { threshold?: [number, number] | string };
 };
 
@@ -39,7 +54,12 @@ export async function multisigOf(owner: string): Promise<Multisig | null> {
   if (!p || typeof p.proposal_bond !== "string" || !Array.isArray(p.roles)) return null;
   const members = [...new Set(p.roles.flatMap((r) => (typeof r.kind === "object" && r.kind.Group ? r.kind.Group : [])))];
   const t = p.default_vote_policy?.threshold;
-  return { dao: owner, bond: p.proposal_bond, members, threshold: Array.isArray(t) ? t : null };
+  const roles = p.roles.map((r) => ({
+    name: r.name,
+    members: typeof r.kind === "object" && r.kind.Group ? r.kind.Group : ("everyone" as const),
+    permissions: r.permissions ?? [],
+  }));
+  return { dao: owner, bond: p.proposal_bond, members, threshold: Array.isArray(t) ? t : null, roles };
 }
 
 /** Open proposals in the DAO that call this vault. */
