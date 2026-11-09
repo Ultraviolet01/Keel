@@ -7,8 +7,9 @@
     "capture": "node capture.mjs",
     "sound": "python3 sound.py",
     "studio": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts KeelDemo out/keel-raw.mp4 --browser-executable=/opt/pw-browsers/chromium --concurrency=4",
-    "export": "ffmpeg -y -i out/keel-raw.mp4 -i public/audio/score.wav -map 0:v -map 1:a -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -profile:v high -c:a aac -b:a 192k -shortest -movflags +faststart out/keel-demo.mp4"
+    "render": "remotion render src/index.ts KeelDemo out/keel-raw.mp4 --concurrency=4",
+    "export": "node export.mjs",
+    "video": "npm run sound && npm run render && npm run export"
   },
   "dependencies": {
     "@remotion/cli": "4.0.538",
