@@ -30,6 +30,6 @@
 
 Every agent `bill_ref` is one of `<bill id>`, `<bill id>:<YYYY-MM>` (monthly), `<bill id>:<YYYY>` (yearly), `top:<account>:<YYYY-MM-DD>` or `idle:<account>:<YYYY-MM-DD>`; dates must be today (UTC). Why each rule exists, with the line that enforces it: [SECURITY.md](SECURITY.md).
 
-The vault has no upgrade or migrate method, and neither has the factory: a vault keeps the code it was created with.
+The vault has no upgrade or migrate method, and the factory has no way to redeploy a vault (its private `migrate` only converts the factory's own state): a vault keeps the code it was created with.
 
 Owner methods need exactly 1 yoctoNEAR attached. A function-call key cannot attach a deposit, so only the owner's own wallet can call them. Method details are in [contract/README.md](../contract/README.md).

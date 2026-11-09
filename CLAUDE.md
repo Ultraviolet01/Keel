@@ -8,7 +8,7 @@
 ## Rules for this repo
 
 - Never commit secrets. `.env` is ignored; the owner's full-access key never goes in it.
-- The agent signs only with a function-call key scoped to the Keel Vault (`execute_payment`, `propose_payment`).
+- The agent signs only with a function-call key scoped to the Keel Vault (`execute_payment`, `propose_payment`, `recall_from_yield`).
 - NEAR Intents has no testnet. Use testnet for everything else; the mainnet Intents leg runs on a separate vault with a 5 USDC budget and `dry: true` quotes while developing.
 - Never deploy to mainnet, sign mainnet transactions or spend tokens without Ultraviolet's explicit OK.
 - Keep README.md in "do X, see Y" steps with no marketing copy. AI judges (Claude Code, Codex) run it first. Update script names in the README whenever they change.
