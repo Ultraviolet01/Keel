@@ -4,6 +4,22 @@ Keel is an AI treasury agent for a small company. The company's money sits in a 
 
 Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
 
+## The problem
+
+A small company holds stablecoins in wallets on several chains and has no one to run its treasury. Bills get paid late or by hand, idle cash earns nothing, and giving an AI agent a wallet key lets it spend everything. Keel lets an agent do the treasury work while a contract the founder owns decides what it may do.
+
+## What NEAR does here
+
+- **The Keel Vault contract** holds the company's USDC and checks every payment against the founder's caps, cash buffer, payees and blocklist.
+- **A function-call access key** is Keel's only key: it reaches three vault methods (pay, propose, withdraw the yield investment back to the vault) and nothing else.
+- **NEAR Chain Signatures** let the vault sign USDC payments on Base, Ethereum, Arbitrum and Optimism from its own address, after the founder approves.
+- **Burrow**, NEAR's lending protocol, holds the yield investment in the vault's own account.
+- **NEAR AI Cloud** writes the reason on each proposal when its key is set (Claude otherwise), and **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
+
+## Built during NEAR HACKATHON
+
+All code in this repository was written during the hackathon: the first commit is 2026-11-02, and no earlier project of ours is reused. Outside libraries are listed under [Libraries and AI-generated code](#libraries-and-ai-generated-code). The hosted app stays up through judging, until at least 2026-11-25.
+
 ## Look at it
 
 1. Open https://keel-treasury.vercel.app. You see the landing page and the **How it works**, **Security** and **Docs** pages.
