@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
-import { digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
+import { alertSubject, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
 import { nep413Hash, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
@@ -108,4 +108,17 @@ test("NEP-413: a changed message, another account, another action or an old mess
   await assert.rejects(verifySigned({ ...VECTOR, accountId: "bob.testnet" }, "subscribe", at), /another account/);
   await assert.rejects(verifySigned(VECTOR, "test", at), /something else/);
   await assert.rejects(verifySigned(VECTOR, "subscribe", at + 3_600_000), /too old/);
+});
+
+test("emails name the company: in the subject and each section", () => {
+  assert.equal(companyTitle("compass.keel.testnet"), "Compass (compass.keel.testnet)");
+  assert.equal(alertSubject([{ vault: "compass.keel.testnet", title: "Payments paused" }]), "Keel · Compass: Payments paused");
+  assert.equal(
+    alertSubject([
+      { vault: "compass.keel.testnet", title: "a" },
+      { vault: "harvest.keel.testnet", title: "b" },
+      { vault: "compass.keel.testnet", title: "c" },
+    ]),
+    "Keel: 3 things need you in Compass, Harvest",
+  );
 });

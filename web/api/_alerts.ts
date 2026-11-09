@@ -176,6 +176,25 @@ export function digestLines(transfers: Transfer[], since: number, decimals: numb
   return lines;
 }
 
+/** The company a vault belongs to, as founders see it: "compass.keel.testnet" is Compass. */
+export const companyOf = (vault: string) => {
+  const name = vault.split(".")[0];
+  return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+/** A section heading naming the company and its vault, so founders with many companies know which one. */
+export const companyTitle = (vault: string) => `${companyOf(vault)} (${vault})`;
+
+/** The subject of an alert email: the company first, then what happened. */
+export function alertSubject(alerts: { vault: string; title: string }[]): string {
+  const companies = [...new Set(alerts.map((a) => companyOf(a.vault)))];
+  if (alerts.length === 1) return `Keel · ${companies[0]}: ${alerts[0].title}`;
+  return `Keel: ${alerts.length} things need you in ${companies.join(", ")}`;
+}
+
+/** Shown in the first emails: a new sender often lands in Spam. */
+export const SPAM_HINT = "If this email was in Spam or Promotions, mark it Not spam (or move it to your inbox) so Keel's alerts reach you.";
+
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 /** A plain email: a heading, sections of lines, a button and an unsubscribe link. */

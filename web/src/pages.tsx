@@ -1337,7 +1337,7 @@ function NotificationsCard({ p }: { p: PageProps }) {
       const res = await fetch(`/api/notify?action=${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(signed) });
       const out = (await res.json().catch(() => ({}))) as { error?: string; email?: string };
       if (!res.ok) throw new Error(out.error ?? `Request failed (${res.status})`);
-      setNote({ ok: true, text: action === "subscribe" ? `Check ${out.email} for the confirmation link. Nothing is sent until you click it.` : "Test email sent. Check your inbox." });
+      setNote({ ok: true, text: action === "subscribe" ? `Check ${out.email} for the confirmation link, and look in Spam if it is not in your inbox: mark it Not spam so later alerts arrive. Nothing is sent until you click it.` : "Test email sent. Check your inbox, and Spam if it is not there." });
       setEditing(false);
       await load();
     } catch (e) {
@@ -1391,7 +1391,7 @@ function NotificationsCard({ p }: { p: PageProps }) {
         </>
       ) : (
         <>
-          {s?.subscribed && !editing && <span className="small">Waiting for you to click the link sent to <span className="mono">{s.email}</span>. Sign up again to resend it.</span>}
+          {s?.subscribed && !editing && <span className="small">Waiting for you to click the link sent to <span className="mono">{s.email}</span>. Look in Spam if it is not in your inbox; sign up again to resend it.</span>}
           {form}
           <span className="muted tiny">Your wallet signs a message to prove the account is yours: no transaction, no fee. The address is kept private, never on chain; every email has a link to stop them and delete it.</span>
         </>

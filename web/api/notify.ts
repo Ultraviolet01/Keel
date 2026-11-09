@@ -11,7 +11,7 @@
 // Needs BLOB_STORE_ID (the private Blob store, reached with Vercel OIDC) or BLOB_READ_WRITE_TOKEN, GMAIL_USER and
 // GMAIL_APP_PASSWORD (a Gmail app password) in the Vercel project.
 
-import { digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
+import { SPAM_HINT, alertSubject, companyOf, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
 import {
   APP_URL,
   allSubs,
@@ -71,6 +71,7 @@ async function subscribe(req: SignedRequest & { email?: string }): Promise<Respo
             "You will get an email when a payment or a multisig vote waits for you, when Keel refuses a bill, and when cash runs low.",
             "Once a day, a short digest of what Keel paid and received, only if something happened.",
             "If you did not ask for this, ignore this email: nothing is sent until you confirm.",
+            SPAM_HINT,
           ],
         },
       ],
@@ -100,7 +101,7 @@ async function test(req: SignedRequest): Promise<Response> {
     "Keel test notification",
     renderEmail({
       heading: "This is a Keel test notification",
-      sections: [{ title: `For ${sub.account}`, lines: ["Notifications work. Real ones arrive when something needs you, and in a daily digest."] }],
+      sections: [{ title: `For ${sub.account}`, lines: ["Notifications work. Real ones arrive when something needs you, and in a daily digest, each naming the company it is about.", SPAM_HINT] }],
       link: `${APP_URL}/app`,
       linkText: "Open Keel",
       unsubscribe: `${APP_URL}/api/notify?action=unsubscribe&token=${sub.unsubToken}`,
@@ -151,14 +152,14 @@ async function run(events: AgentEvent[]): Promise<Response> {
     const s = byAccount.get(account)!;
     const byVault = new Map<string, Alert[]>();
     for (const al of alerts) byVault.set(al.vault, [...(byVault.get(al.vault) ?? []), al]);
-    const subject = alerts.length === 1 ? `Keel: ${alerts[0].title}` : `Keel: ${alerts.length} things need you`;
+    const subject = alertSubject(alerts);
     try {
       await sendMail(
         s.email,
         subject,
         renderEmail({
-          heading: alerts.length === 1 ? alerts[0].title : `${alerts.length} things need you`,
-          sections: [...byVault].map(([vault, list]) => ({ title: vault, lines: list.map((a) => `${a.title}. ${a.detail}`) })),
+          heading: alerts.length === 1 ? `${companyOf(alerts[0].vault)}: ${alerts[0].title}` : `${alerts.length} things need you`,
+          sections: [...byVault].map(([vault, list]) => ({ title: companyTitle(vault), lines: list.map((a) => `${a.title}. ${a.detail}`) })),
           link: `${APP_URL}/app`,
           linkText: "Open Keel",
           unsubscribe: unsub(s),
@@ -181,11 +182,11 @@ async function run(events: AgentEvent[]): Promise<Response> {
         const v = views.get(vault)!;
         const waiting = v.proposals.filter((p) => p.status === "pending").length;
         const lines = digestLines(await transfers(vault, v.policy.token_id), since, v.decimals, v.symbol, v.names, waiting);
-        if (lines.length) sections.push({ title: vault, lines });
+        if (lines.length) sections.push({ title: companyTitle(vault), lines });
       }
       if (sections.length) {
         try {
-          await sendMail(s.email, "Keel daily digest", renderEmail({ heading: "What moved in the last day", sections, link: `${APP_URL}/app`, linkText: "Open Keel", unsubscribe: unsub(s) }));
+          await sendMail(s.email, `Keel daily digest: ${sections.map((x) => x.title.split(" (")[0]).join(", ")}`, renderEmail({ heading: "What moved in the last day", sections, link: `${APP_URL}/app`, linkText: "Open Keel", unsubscribe: unsub(s) }));
           emails++;
         } catch {
           continue;
@@ -217,7 +218,10 @@ export default {
         if (!s) return page("Link not valid", "This confirmation link is old or was already replaced. Turn notifications on again from Keel.");
         s.confirmed = true;
         await saveSub(s);
-        return page("Notifications on", `Keel will email ${maskEmail(s.email)} about ${s.account}.`);
+        return page(
+          "Notifications on",
+          `Keel will email ${maskEmail(s.email)} about every company ${s.account} owns or votes on. If the confirmation email was in Spam, mark it Not spam so the alerts reach your inbox.`,
+        );
       }
       if (request.method === "GET" && action === "unsubscribe") {
         const s = await byToken(url.searchParams.get("token"), "unsubscribe");
