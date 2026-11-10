@@ -2,7 +2,25 @@
 
 Keel is an AI treasury agent for companies of any size, from a solo founder to a team run by a multisig. The company's money sits in a vault, a NEAR smart contract owned by the founder or, optionally, by the team's multisig. The owner sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
 
-Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`).
+Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`), Social Money (`social`).
+
+## For judges
+
+**[Live app](https://keel-treasury.vercel.app)** · **[Code](https://github.com/Ultraviolet01/Keel)** · **[What was verified on testnet](docs/VERIFIED.md)** · **[Security, each claim with its line of code](docs/SECURITY.md)**
+
+Run `npm run verify` from a fresh clone (Node.js 22). The last line is `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`: typechecks, agent and app tests, the app build, 161 contract tests, two testnet dry runs, and four cross-chain payments read back from their chains.
+
+| Claim | Check it |
+| --- | --- |
+| Keel's key can only pay bills the owner listed, to their own payee, for their exact amount, inside the caps | [docs/SECURITY.md](docs/SECURITY.md); VERIFIED item 16 |
+| A stolen agent key is refused: 68 live checks against a testnet vault, all passing | VERIFIED item 12 |
+| NEAR AI reviews a payment before Keel makes it alone and can only make Keel stricter; it held a lookalike payee | VERIFIED item 18 |
+| Routine bills on other chains are paid from the vault's own address through NEAR Chain Signatures, inside the owner's per-chain cap | VERIFIED item 17 (Base, Ethereum, Arbitrum, Optimism Sepolia) |
+| Idle cash earns at Rhea lending and comes back before bills are due | VERIFIED item 10 |
+| A NEAR Intents proposal can only pay a 1Click deposit address, at most 3% over the bill | VERIFIED items 12 and 19 |
+| A team's Sputnik DAO (the contracts behind Trezu) can own the vault; members vote once on limits, payees and bills, and Keel pays inside them | VERIFIED item 13 |
+
+Tracks: security, business, realworld, social.
 
 ## The problem
 
@@ -16,6 +34,16 @@ A company holds stablecoins in wallets on several chains, and running that treas
 - **Keel earns on idle cash.** It moves cash above the buffer and the next 14 days of bills into Rhea lending (NEAR's lending protocol, about 10% a year on testnet), held in the vault's own account there, and pulls it back before bills are due ([docs/VERIFIED.md](docs/VERIFIED.md), item 10).
 - **A Sputnik DAO multisig** (the contracts behind Trezu treasuries) can own a vault instead of one wallet, optionally; every owner action then becomes a proposal the members vote on.
 - **NEAR AI Cloud** reviews each payment before Keel makes it alone, and can only make Keel more careful: it turns a payment into a proposal or a refusal (a lookalike payee, an odd amount, a suspicious invoice), never the reverse. It also writes the reason on each proposal. **NEAR Intents** 1Click quotes cross-chain moves on mainnet.
+
+## For a team: Social Money
+
+A team or community keeps its shared budget in a Keel vault owned by its Sputnik DAO (the contracts behind Trezu treasuries). Members vote once on the rules: caps, the cash buffer, approved payees and the bills. Keel then pays each bill inside those rules without a vote on every payment, and anything outside them comes back to the members as a proposal.
+
+1. Open https://keel-treasury.vercel.app/app?view=keelteam85369.sputnikv2.testnet, pick **Deck85369**, open **Rules**. You see a company owned by a 2-member Sputnik DAO: each member's rights, the votes a change needs, and open proposals with their exact calls and arguments.
+2. Open [docs/VERIFIED.md](docs/VERIFIED.md), item 13. You see the hand-over on testnet: the owner's offer, the multisig's 2-of-2 vote to accept, the old owner's `pause` refused afterwards, a pause and resume that each ran only on the second vote, a 10-bill import run as one proposal, the multisig closed to outsiders' proposals (`ERR_PERMISSION_DENIED`), and the team's rules and a bill set in one vote, then paid by Keel alone.
+3. In the app, under **Rules**, open **No multisig yet? Create one for your team here**. You can create a Sputnik DAO for your team (about 6 NEAR) and hand the vault to it in two steps: **Offer**, then the members' vote to accept.
+
+Trezu's own app was not tested on testnet; Keel uses the Sputnik DAO contracts Trezu is built on.
 
 ## Lifecycle
 
