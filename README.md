@@ -2,7 +2,7 @@
 
 **Small and mid-size companies can't afford a treasury team. Bills get paid by hand, idle cash earns nothing, and fake "we changed our bank details" invoices took about $3 billion from US businesses in 2025 ([sources](#the-problem)).**
 
-**Keel is an AI agent that does that treasury work, but the money stays in the company's own NEAR vault, and the vault pays only bills the owner listed: that payee, that amount. A phishing invoice is never paid on its own: a blocklisted payee is refused, a new or lookalike payee waits for the owner's approval, and a stolen agent key cannot pay anyone the owner didn't list.**
+**Keel is an AI agent that does that treasury work, but the money stays in the company's own NEAR vault, and the vault pays only bills the owner listed: that payee, that amount. A phishing invoice is never paid on its own: a blocklisted payee is refused and a new or lookalike payee waits for the owner's approval.**
 
 https://github.com/user-attachments/assets/4672cb83-62ff-4dc5-a2f3-c7b9748cc1f7
 
