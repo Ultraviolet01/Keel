@@ -1,8 +1,10 @@
 # Keel
 
-**Spending limits stop an AI agent from spending too much. They don't stop it from paying the wrong account. Keel's vault does: every payment must match a bill the owner listed (its payee, its amount, its period), so a stolen agent key cannot pay anyone or anything new.**
+**Small and mid-size companies can't afford a treasury team. Bills get paid by hand, idle cash earns nothing, and fake "we changed our bank details" invoices took about $3 billion from US businesses in 2025 ([sources](#the-problem)).**
 
-Around that rule, one NEAR vault runs a company's whole treasury:
+**Keel does the treasury work with an AI agent, but the money stays in the company's own NEAR vault, and the vault pays only bills the owner listed: that payee, that amount. A phishing invoice, or a stolen agent key, still cannot send money anywhere new.**
+
+What the vault and Keel do together:
 
 - **Pays the listed bills** inside per-payment and rolling 24-hour caps, and the vault checks each one against its bill ([`check_agent_ref`](contract/src/internal.rs#L138)).
 - **Pays suppliers on Base, Ethereum, Arbitrum and Optimism** from the vault's own address through NEAR Chain Signatures.
