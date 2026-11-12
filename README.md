@@ -1,13 +1,13 @@
 # Keel
 
-**Keel's agent key can only pay bills the owner listed, to that payee, for that exact amount. A stolen key pays nothing new.**
+**Spending limits stop an AI agent from spending too much. They don't stop it from paying the wrong account. Keel's vault does: every payment must match a bill the owner listed (its payee, its amount, its period), so a stolen agent key cannot pay anyone or anything new.**
 
-Keel is an AI treasury agent, and the rule above is enforced by the company's own NEAR vault contract, not by the AI. One vault combines what treasury agents usually split up:
+Around that rule, one NEAR vault runs a company's whole treasury:
 
-- **Bill-bound payments:** every payment Keel makes names a bill the owner set, and the vault checks its payee and amount ([`check_agent_ref`](contract/src/internal.rs#L138)).
-- **Payouts on four other chains** from the vault's own address through NEAR Chain Signatures: Base, Ethereum, Arbitrum and Optimism.
-- **Idle cash that earns** at Rhea lending and comes back before bills are due.
-- **Team ownership:** a Sputnik DAO multisig (the contracts behind Trezu) can own the vault, so members vote once on the rules and Keel pays inside them.
+- **Pays the listed bills** inside per-payment and rolling 24-hour caps, and the vault checks each one against its bill ([`check_agent_ref`](contract/src/internal.rs#L138)).
+- **Pays suppliers on Base, Ethereum, Arbitrum and Optimism** from the vault's own address through NEAR Chain Signatures.
+- **Holds back bills that would break the cash buffer, and puts idle cash to work** at Rhea lending, bringing it back before bills are due.
+- **Can belong to a team:** a Sputnik DAO multisig (the contracts behind Trezu) owns the vault, members vote once on the rules, and Keel pays inside them.
 
 Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`), Social Money (`social`).
 
