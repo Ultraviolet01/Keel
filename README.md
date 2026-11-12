@@ -1,12 +1,24 @@
 # Keel
 
-Keel is an AI treasury agent for companies of any size, from a solo founder to a team run by a multisig. The company's money sits in a vault, a NEAR smart contract owned by the founder or, optionally, by the team's multisig. The owner sets the rules; Keel pays bills, protects the cash, tops up wallets and puts idle cash to work inside them, and the vault refuses anything outside them, whatever Keel decides.
+**Keel's agent key can only pay bills the owner listed, to that payee, for that exact amount. A stolen key pays nothing new.**
+
+Keel is an AI treasury agent, and the rule above is enforced by the company's own NEAR vault contract, not by the AI. One vault combines what treasury agents usually split up:
+
+- **Bill-bound payments:** every payment Keel makes names a bill the owner set, and the vault checks its payee and amount ([`check_agent_ref`](contract/src/internal.rs#L138)).
+- **Payouts on four other chains** from the vault's own address through NEAR Chain Signatures: Base, Ethereum, Arbitrum and Optimism.
+- **Idle cash that earns** at Rhea lending and comes back before bills are due.
+- **Team ownership:** a Sputnik DAO multisig (the contracts behind Trezu) can own the vault, so members vote once on the rules and Keel pays inside them.
 
 Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Real-World Money (`realworld`), Social Money (`social`).
 
 ## For judges
 
 **[Live app](https://keel-treasury.vercel.app)** · **[Code](https://github.com/Ultraviolet01/Keel)** · **[What was verified on testnet](docs/VERIFIED.md)** · **[Security, each claim with its line of code](docs/SECURITY.md)**
+
+| The dashboard | A phishing bill, refused twice | Paid on Sepolia by the vault itself |
+| --- | --- | --- |
+| [![Berth's dashboard: 28 USDC, items waiting for the founder, the balance chart](docs/images/dashboard.png)](https://keel-treasury.vercel.app/app?view=keel-founder5-39175.testnet) | ![Keel refuses the "supplier changed bank details" bill and signs nothing; forced to pay it, the vault refuses too](docs/images/scam-refused.gif) | [![Blockscout: 1 USDC transfer, Success, from the vault's own address 0xB123…B12b](docs/images/sepolia-payout.png)](https://eth-sepolia.blockscout.com/tx/0x044f8d61b3063a779150c8c047aa576df4279fefba2b532b51617e915236100b) |
+| `berth.keel.testnet`, read-only on the live app | Real output: Keel's round on `berth`, then the attack suite forcing Keel's key to pay | A routine bill Keel paid alone inside the owner's Ethereum Sepolia cap (VERIFIED item 17) |
 
 Run `npm run verify` from a fresh clone (Node.js 22). The last line is `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`: typechecks, agent and app tests, the app build, 161 contract tests, two testnet dry runs, and four cross-chain payments read back from their chains.
 
@@ -22,9 +34,33 @@ Run `npm run verify` from a fresh clone (Node.js 22). The last line is `VERIFY P
 
 Tracks: security, business, realworld, social.
 
+## If Keel's key is stolen
+
+The attack suite (`npm run stress` in `agent/`) signs as Keel's key, the owner and an outsider against a live testnet vault and runs 68 checks. Result on `berth.keel.testnet`: `68 passed, 0 failed` ([docs/VERIFIED.md](docs/VERIFIED.md), item 12).
+
+| With Keel's key, an attacker tries to | The vault answers |
+| --- | --- |
+| Pay a bill nobody listed, or a listed bill to another payee or for another amount | `no such bill` / `payment does not match the owner's bill` |
+| Swap a waiting proposal for another payee or a bigger amount | `payment does not match the owner's bill` |
+| Pay a blocklisted, new or over-cap payee, or past the 24-hour cap | `payee is on the blocklist` / `new payee` / `over the per-payment cap` / `daily cap reached` |
+| Fill a card that is already full, or send idle cash anywhere but the yield destination | refused after reading the card's balance / `idle cash only goes to a yield destination` |
+| Pay a cross-chain bill to an ordinary account or more than 3% over | `a cross-chain proposal must pay a 1Click deposit address` / `more than 3% over the bill` |
+| Change the rules, approve, withdraw, add keys or call the token directly | the key cannot call those methods at all |
+
+The owner can still pause, withdraw and remove Keel's key at any time.
+
 ## The problem
 
-A company holds stablecoins in wallets on several chains, and running that treasury by hand does not scale: someone has to pay every bill, watch every balance and move every idle dollar. So bills get paid late, idle cash earns nothing, and handing an AI agent a wallet key would let it spend everything. Keel lets an agent do the treasury work while a contract the company owns decides what it may do.
+Big companies have treasury teams. Small and mid-size companies run their money from a spreadsheet, and it costs them:
+
+| | Source |
+| --- | --- |
+| About **$3 billion** lost by US businesses in 2025 to business email compromise: fake invoices and "we changed our bank details" | [FBI IC3 data, via Insurance Business](https://www.insurancebusinessmag.com/us/news/cyber/business-email-fraud-drives-bulk-of-us-cybercrime-losses-analysis-590687.aspx) |
+| **76%** of US organisations faced attempted or actual payments fraud in 2025 | [AFP Payments Fraud and Control Survey](https://www.financialprofessionals.org/about/learn-more/press-releases/Details/over-75-percent-of-us-firms-experienced-payments-fraud-in-2025-while-ai-adoption-for-fraud-mitigation-lags) |
+| About **£8.6 billion** a year in interest lost by UK small businesses on cash in accounts paying almost nothing | [Allica Bank research, via Fintech Finance News](https://ffnews.com/newsarticle/fintech/the-message-is-clear-when-it-comes-to-savings-high-street-banks-still-take-small-business-customers-for-granted/) |
+| **85%** of companies in PwC's benchmark run treasury without a dedicated system, mostly by hand and in Excel | [PwC Benchmark of Liquidity 2024](https://www.pwc.dk/en/articles-publications/2024/benchmark-of-liquidity-survey.html) |
+
+An AI agent could do this work, but handing it a wallet key lets it spend everything, including on the next phishing invoice. Keel lets an agent do the treasury work while a contract the company owns decides what it may pay.
 
 ## What NEAR does here
 

@@ -42,7 +42,8 @@ test("asset ids map to chains", () => {
   assert.equal(chainOfAsset("nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"), "near");
 });
 
-test("live: the real 1Click API says it never issued a made-up address", async () => {
+// Calls the real 1Click API, so it runs only when asked: LIVE=1 npm test.
+test("live: the real 1Click API says it never issued a made-up address", { skip: process.env.LIVE !== "1" && "set LIVE=1 to call the live 1Click API" }, async () => {
   const d = await checkDeposit("0x0000000000000000000000000000000000000001", proposal, vault);
   assert.equal(d.kind, "unknown", JSON.stringify(d));
 });
