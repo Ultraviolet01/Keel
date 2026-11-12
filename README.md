@@ -81,7 +81,7 @@ A team or community keeps its shared budget in a Keel vault owned by its Sputnik
 2. Open [docs/VERIFIED.md](docs/VERIFIED.md), item 13. You see the hand-over on testnet: the owner's offer, the multisig's 2-of-2 vote to accept, the old owner's `pause` refused afterwards, a pause and resume that each ran only on the second vote, a 10-bill import run as one proposal, the multisig closed to outsiders' proposals (`ERR_PERMISSION_DENIED`), and the team's rules and a bill set in one vote, then paid by Keel alone.
 3. In the app, under **Rules**, open **No multisig yet? Create one for your team here**. You can create a Sputnik DAO for your team (about 6 NEAR) and hand the vault to it in two steps: **Offer**, then the members' vote to accept.
 
-Trezu's own app was not tested on testnet; Keel uses the Sputnik DAO contracts Trezu is built on.
+Keel integrates with Trezu at the contract level: every Trezu treasury is a Sputnik DAO, and Keel reads the DAO's members and roles, files its proposals and is paid inside the rules the DAO voted, directly on chain. Members vote in Keel's app.
 
 ## Lifecycle
 
@@ -171,7 +171,7 @@ To create your own company, set limits, approve payees, deposit and add or impor
 | Payments on other chains | Base, Ethereum, Arbitrum and Optimism Sepolia, signed by NEAR's testnet MPC network |
 | Yield investment | Rhea lending's testnet market, `contract.1638481328.burrow.testnet` (about 10% a year on Nov 4), in Rhea's test USDC (USDC.e) |
 | Invoice reading | Claude, called from the hosted app |
-| Multisig owner | A 2-member Sputnik DAO on testnet (`sputnikv2.testnet`), every change needing both votes; Trezu's own app was not tested on testnet |
+| Multisig owner | A 2-member Sputnik DAO on testnet (`sputnikv2.testnet`, the contracts behind Trezu treasuries), every change needing both votes; members vote in Keel's app |
 | Email notifications | Gmail, sent from a Vercel Function after each agent round; addresses in a private Vercel Blob store, sign-up proved by a NEAR wallet-signed message (NEP-413) |
 | Excel report | Built in the browser with ExcelJS from live chain data: nearblocks' index for transfers, FastNEAR's archive node for each transaction |
 | NEAR Intents | Live mainnet 1Click quotes in dry mode (`dry: true`), the method the hackathon approved because Intents has no testnet (`agent/src/loop.ts` `viaIntents`; deposit check before approval in `web/src/intents.ts`) |
