@@ -4,6 +4,8 @@
 
 **Keel is an AI agent that does that treasury work, but the money stays in the company's own NEAR vault, and the vault pays only bills the owner listed: that payee, that amount. A phishing invoice is never paid on its own: a blocklisted payee is refused, a new or lookalike payee waits for the owner's approval, and a stolen agent key cannot pay anyone the owner didn't list.**
 
+https://github.com/user-attachments/assets/4672cb83-62ff-4dc5-a2f3-c7b9748cc1f7
+
 What the vault and Keel do together:
 
 - **Pays the listed bills** inside per-payment and rolling 24-hour caps, and the vault checks each one against its bill ([`check_agent_ref`](contract/src/internal.rs#L138)).
