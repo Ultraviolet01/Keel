@@ -3,7 +3,7 @@
 - The user is Ultraviolet. Address them as Ultraviolet.
 - Keel is an entry for NEAR HACKATHON. Rules: https://nearhackathon.com/HACKATHON.md (re-read before submitting; rules can change).
 - Deadline: repo public and demo post on X by 2026-11-14 23:59 UTC. One submission per project; it cannot be edited.
-- Tracks: `business`, `security`, `realworld`.
+- Tracks: `business`, `security`, `realworld`, `social`.
 
 ## Rules for this repo
 
