@@ -23,7 +23,7 @@ import {
 } from "./brain";
 import type { Chain, Config } from "./chain";
 import { explain, template } from "./explain";
-import { review, stricter } from "./review";
+import { describe, review, stricter } from "./review";
 import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
 import { balances, broadcast, chainInfo, client, knownChain, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
 
@@ -227,7 +227,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     let aiCaught = false;
     if (action.kind === "pay" && !bill.id.startsWith("top:") && !bill.id.startsWith("idle:")) {
       const v = await review(cfg, reviewInput(company, bill, allPayees, bills, proposals, money));
-      if (v) say("check", `${v.by === "near-ai" ? "NEAR AI" : "Claude"} check: ${v.verdict}. ${v.reason}`);
+      if (v) say("check", describe(v));
       const next = stricter(action, v);
       aiCaught = next !== action;
       action = next as typeof action;
@@ -569,7 +569,7 @@ const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, pr
     // so a lookalike 0x address is caught on exactly the payments no human approves.
     const [payees, listed] = await Promise.all([chain.payees(vaultId), chain.bills(vaultId)]);
     const v = await review(cfg, reviewInput(vaultId.split(".")[0], { ...bill, payee: evm.to }, payees, vaultBills(listed, bill.due), proposals, (u) => fmt(u, 6, "USDC")));
-    if (v) say("check", `${v.by === "near-ai" ? "NEAR AI" : "Claude"} check: ${v.verdict}. ${v.reason}`);
+    if (v) say("check", describe(v));
     const decision = stricter({ kind: "pay", reason: "inside the auto cap" }, v);
     if (decision.kind === "refuse") {
       handled[bill.id] = { action: "refuse", at: new Date().toISOString() };

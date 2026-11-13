@@ -51,7 +51,8 @@ const input = { company: "acme", payee: "northwind-keels.testnet", payeeName: "N
 test("NEAR AI Cloud is asked first and its verdict is used", async () => {
   const ai = await fakeNearAi(() => ({ choices: [{ message: { content: '{"verdict":"propose","reason":"lookalike of northwind-keel.testnet"}' } }] }));
   try {
-    assert.deepEqual(await review(ai.cfg, input), { verdict: "propose", reason: "lookalike of northwind-keel.testnet", by: "near-ai" });
+    // This stand-in has no chat id or signature, so the answer is used but marked not verified (attest.test.ts covers the check).
+    assert.deepEqual(await review(ai.cfg, input), { verdict: "propose", reason: "lookalike of northwind-keel.testnet", by: "near-ai", attested: false, check: "no usable chat id" });
   } finally {
     ai.close();
   }

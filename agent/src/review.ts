@@ -5,8 +5,12 @@
 // pay -> propose (the owner decides) or pay -> refuse (nothing is signed).
 // It can never turn a proposal or a refusal into a payment. If it times out,
 // answers in the wrong shape or no key is set, Keel keeps its rules' decision.
+// A NEAR AI answer is checked against the key NEAR AI's attestation names
+// (attest.ts). One that fails the check can still only make Keel stricter,
+// but no more than a proposal: the owner decides instead of an unproven refusal.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { verifyChat, type Check } from "./attest";
 import type { Config } from "./chain";
 
 export interface ReviewInput {
@@ -24,7 +28,15 @@ export interface ReviewInput {
   memo?: string;
 }
 
-export type Verdict = { verdict: "ok" | "propose" | "refuse"; reason: string; by: "near-ai" | "claude" };
+export type Verdict = {
+  verdict: "ok" | "propose" | "refuse";
+  reason: string;
+  by: "near-ai" | "claude";
+  /** NEAR AI only: whether the answer passed the signature and attestation check. */
+  attested?: boolean;
+  /** NEAR AI only: why the check failed. */
+  check?: string;
+};
 
 const SYSTEM = `You check one outgoing payment for a company's treasury agent before it is paid without a human.
 The payment already passed the owner's limits. Your job is to catch what limits miss:
@@ -72,16 +84,29 @@ export type Decision = { kind: "pay" | "propose" | "refuse" | "wait" | "defer"; 
 export function stricter(action: Decision, v: Verdict | null): Decision {
   if (action.kind !== "pay" || !v || v.verdict === "ok") return action;
   const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
+  // An answer that failed the attestation check could have been altered on its
+  // way: it may still stop Keel paying alone, but only the owner can refuse.
+  if (v.attested === false) return { kind: "propose", reason: `${who} check (answer not verified): ${v.reason}` };
   if (v.verdict === "refuse") return { kind: "refuse", reason: `refused: ${who} check: ${v.reason}` };
   return { kind: "propose", reason: `${who} check: ${v.reason}` };
+}
+
+/** One log line for a verdict, saying whether NEAR AI's answer was verified. */
+export function describe(v: Verdict): string {
+  const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
+  const proof = v.attested === true ? " (signed by NEAR AI's attested key, for this request)" : v.attested === false ? ` (not verified: ${v.check})` : "";
+  return `${who} check${proof}: ${v.verdict}. ${v.reason}`;
 }
 
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000): Promise<Verdict | null> {
   const user = prompt(x);
   if (cfg.nearAiKey) {
-    const text = await nearAi(cfg, user, timeoutMs);
-    const v = text ? parseVerdict(text, "near-ai") : null;
-    if (v) return v;
+    const r = await nearAi(cfg, user, timeoutMs);
+    const v = r ? parseVerdict(r.text, "near-ai") : null;
+    if (v && r) {
+      const c = await r.verify();
+      return c.ok ? { ...v, attested: true } : { ...v, attested: false, check: c.reason };
+    }
   }
   if (cfg.anthropicKey) {
     const text = await claude(cfg, user, timeoutMs);
@@ -90,25 +115,35 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000): P
   return null;
 }
 
-async function nearAi(cfg: Config, user: string, timeoutMs: number): Promise<string | undefined> {
+/** The model's text, and a check of NEAR AI's signature over the exact bytes sent and received. */
+async function nearAi(cfg: Config, user: string, timeoutMs: number): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
   try {
+    // Kept as the exact string sent: NEAR AI signs its hash.
+    const body = JSON.stringify({
+      model: cfg.nearAiModel,
+      max_tokens: 200,
+      temperature: 0,
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: user },
+      ],
+    });
     const res = await fetch(`${cfg.nearAiUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.nearAiKey}` },
-      body: JSON.stringify({
-        model: cfg.nearAiModel,
-        max_tokens: 200,
-        temperature: 0,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: user },
-        ],
-      }),
+      body,
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return undefined;
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return body.choices?.[0]?.message?.content ?? undefined;
+    const raw = await res.text();
+    const parsed = JSON.parse(raw) as { id?: unknown; choices?: { message?: { content?: string } }[] };
+    const text = parsed.choices?.[0]?.message?.content;
+    if (!text) return undefined;
+    const chatId = typeof parsed.id === "string" ? parsed.id : "";
+    return {
+      text,
+      verify: () => verifyChat({ baseUrl: cfg.nearAiUrl, apiKey: cfg.nearAiKey ?? "", model: cfg.nearAiModel, chatId, requestBody: body, responseText: raw, timeoutMs }),
+    };
   } catch {
     return undefined;
   }
