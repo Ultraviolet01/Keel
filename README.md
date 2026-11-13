@@ -6,6 +6,10 @@
 
 https://github.com/user-attachments/assets/4672cb83-62ff-4dc5-a2f3-c7b9748cc1f7
 
+- **For AI Security:** Keel holds only a NEAR function-call key, scoped to the company's vault and three of its methods: pay a listed bill, propose a payment for the owner, and bring the yield investment back. It works like a sandboxed wallet: it cannot change the rules, approve its own proposals, add keys or move money any other way, and the owner can revoke it in one transaction ([VERIFIED item 3](docs/VERIFIED.md#the-checks)). Scam checks sit on top: a blocklist, and a NEAR AI review that held a lookalike payee ([item 18](docs/VERIFIED.md#the-checks)).
+- **For Social Money:** a team's treasury becomes a shared budget, collectively owned by its Sputnik DAO (the contracts behind Trezu treasuries). Members vote once on caps, payees and bills; Keel then spends inside that budget without another vote, and anything outside it comes back to the members as a proposal. On testnet a 2-member DAO voted its rules in one proposal and Keel paid its bill ([item 13](docs/VERIFIED.md#the-checks)).
+- **For Real-World Money:** Keel pays suppliers, payroll and recurring bills such as hosting, in USDC, on NEAR and from the vault's own address on Base, Ethereum, Arbitrum and Optimism. On testnet it paid a payroll bill alone ([transaction](https://testnet.nearblocks.io/txns/joxf4BKi75EuvHfJNDn3tCeTNb27AEn31dQ4zHWHerT)) and sent a payroll over the cap to the owner for approval ([transaction](https://testnet.nearblocks.io/txns/5pi9j2RtGvjn2vcUx712ytgJGkrSZyRRKeHCfosCpCS2)).
+
 What the vault and Keel do together:
 
 - **Pays the listed bills** inside per-payment and rolling 24-hour caps, and the vault checks each one against its bill ([`check_agent_ref`](contract/src/internal.rs#L138)).
