@@ -30,15 +30,15 @@ Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Re
 
 Run `npm run verify` from a fresh clone (Node.js 22). The last line is `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`: typechecks, agent and app tests, the app build, 161 contract tests, two testnet dry runs, and four cross-chain payments read back from their chains.
 
-| Claim | Check it |
-| --- | --- |
-| Keel's key can only pay bills the owner listed, to their own payee, for their exact amount, inside the caps | [docs/SECURITY.md](docs/SECURITY.md); VERIFIED item 16 |
-| A stolen agent key is refused: 68 live checks against a testnet vault, all passing | VERIFIED item 12 |
-| NEAR AI reviews a payment before Keel makes it alone and can only make Keel stricter; it held a lookalike payee | VERIFIED item 18 |
-| Routine bills on other chains are paid from the vault's own address through NEAR Chain Signatures, inside the owner's per-chain cap | VERIFIED item 17 (Base, Ethereum, Arbitrum, Optimism Sepolia) |
-| Idle cash earns at Rhea lending and comes back before bills are due | VERIFIED item 10 |
-| A NEAR Intents proposal can only pay a 1Click deposit address, at most 3% over the bill | VERIFIED items 12 and 19 |
-| A team's Sputnik DAO (the contracts behind Trezu) can own the vault; members vote once on limits, payees and bills, and Keel pays inside them | VERIFIED item 13 |
+| Claim | Do this | You see |
+| --- | --- | --- |
+| Keel's key can only pay bills the owner listed, to their own payee, for their exact amount, inside the caps | Run `cd contract && cargo test made_up` | `2 passed`: a payment and a proposal for a bill nobody listed, both refused by the vault. The rule is [`check_agent_ref`](contract/src/internal.rs#L138) |
+| A stolen agent key is refused | Open [docs/VERIFIED.md, item 12](docs/VERIFIED.md#the-checks) (running `npm run stress` needs Keel's agent key) | 68 attacks with Keel's key against `berth.keel.testnet` and the line `68 passed, 0 failed` |
+| NEAR AI reviews a payment before Keel makes it alone, and can only make Keel stricter | Open the [live app](https://keel-treasury.vercel.app/app?view=keel-founder5-39175.testnet), pick **Mooring**, open **Approvals**, click the `northwlnd-keel.testnet` payment | Proposal #10: "Needs you because NEAR AI check: Payee name and account differ slightly from known Northwind hosting…", held for the owner, not paid |
+| Routine bills on other chains are paid from the vault's own address through NEAR Chain Signatures, inside the owner's per-chain cap | Open [the Ethereum Sepolia transfer](https://eth-sepolia.blockscout.com/tx/0x044f8d61b3063a779150c8c047aa576df4279fefba2b532b51617e915236100b) | `Success`, 1 USDC, sent from `0xB123…B12b`, the vault's own address. The same on [Base](https://sepolia.basescan.org/tx/0xd0d5241d6b63e2a7a0db60b7bf2e50d7622269aeba4e90c187e4c19e2df28f98), [Arbitrum](https://sepolia.arbiscan.io/tx/0xcda5d0e7820d4f56753333c2fbabba3002c8bf88ee9c70430379e2c69150ec3e) and [Optimism](https://sepolia-optimism.etherscan.io/tx/0xf8231be37511af4d8da0bd19f8dfbf66cf9f133f6ec7df5743d5033d9e7008dc) Sepolia |
+| Idle cash earns at Rhea lending and comes back before bills are due | Open [the deposit](https://testnet.nearblocks.io/txns/2gji1tfJeQLBXNKpkjbcGbEcy6QKqmzCotDyHcZgVXs8) | Keel's key depositing 20 USDC.e into the vault's own Rhea lending account (`"event":"deposit"`); the withdrawals back are in [docs/VERIFIED.md, item 10](docs/VERIFIED.md#the-checks) |
+| A NEAR Intents proposal can only pay a 1Click deposit address, at most 3% over the bill | Run `cd contract && cargo test intents_proposal` | `5 passed`: an ordinary account and 5% over are refused, a deposit address within 3% is filed. A real 1Click address has that shape: [docs/VERIFIED.md, item 19](docs/VERIFIED.md#the-checks) |
+| A team's Sputnik DAO (the contracts behind Trezu) can own the vault; members vote once on limits, payees and bills, and Keel pays inside them | Open the [live app](https://keel-treasury.vercel.app/app?view=keelteam85369.sputnikv2.testnet), pick **Deck85369**, open **Rules** | The limits the team voted (2 USDC per payment, 5 per 24 hours) and the **Multisig owner** card with its members. Keel then paid the team's bill with no vote of its own: [transaction](https://testnet.nearblocks.io/txns/5XnUuVz89Eo3LHyLdJpD2dm2BcPvZCpSWsJAxTHrUcWn) |
 
 Tracks: security, business, realworld, social.
 
