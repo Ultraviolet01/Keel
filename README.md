@@ -29,7 +29,7 @@ Tracks: Autonomous Business (`business`), AI Security & Defense (`security`), Re
 
 | The dashboard, read-only on the live app | Paid on Ethereum Sepolia by the vault itself |
 | --- | --- |
-| [![Berth's dashboard: 28 USDC, items waiting for the founder, the balance chart](docs/images/dashboard.png)](https://keel-treasury.vercel.app/app?view=keel-founder5-39175.testnet) | [![Blockscout: Transfer 1 USDC, Success, block 12098666, from the vault's own address 0xB123…B12b](docs/images/sepolia-payout.png)](https://eth-sepolia.blockscout.com/tx/0x044f8d61b3063a779150c8c047aa576df4279fefba2b532b51617e915236100b) |
+| [![Berth's dashboard: 28 USDC, healthy, upcoming bills and the balance chart](docs/images/dashboard.png)](https://keel-treasury.vercel.app/app?view=keel-founder5-39175.testnet) | [![Blockscout: Transfer 1 USDC, Success, block 12098666, from the vault's own address 0xB123…B12b](docs/images/sepolia-payout.png)](https://eth-sepolia.blockscout.com/tx/0x044f8d61b3063a779150c8c047aa576df4279fefba2b532b51617e915236100b) |
 | `berth.keel.testnet`: balance, bills, Keel's decisions and what waits for the owner | A routine bill Keel paid alone inside the owner's Ethereum Sepolia cap, sent from the vault's own address (VERIFIED item 17) |
 
 Run `npm run verify` from a fresh clone (Node.js 22). The last line is `VERIFY PASSED: 17 passed, 0 failed, 0 skipped`: typechecks, agent and app tests, the app build, 161 contract tests, two testnet dry runs, and four cross-chain payments read back from their chains.
