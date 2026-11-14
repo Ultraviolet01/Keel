@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
 import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
-import { nep413Hash, RECIPIENT, verifySigned } from "./_notify.js";
+import { isDao, mapLimit, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({
@@ -149,4 +149,25 @@ test("web addresses a payee wrote are never clickable in a Keel email; NEAR acco
 test("defang covers any domain ending and lookalike dots", () => {
   for (const t of ["keel-login.finance", "keel-pay.rocks/verify", "keel\uff0elogin\uff0ecom", "keel-login\u3002com", "keel-verify.pw", "a.b.c.d.example"]) assert.doesNotMatch(defang(t), /[a-z0-9-]\.[a-z]/i, t);
   for (const t of ["northwind-keel.testnet", "keel.near", "berth.keel.testnet", "2.00 USDC", "Invoice 3107"]) assert.equal(defang(t), t, t);
+});
+
+test("a crowd of throwaway vault owners costs the email round no team lookups", () => {
+  const owners = [...Array.from({ length: 5000 }, (_, i) => `throwaway${i}.testnet`), "keelteam85369.sputnikv2.testnet", "keel-founder5-39175.testnet", "team.sputnik-dao.near"];
+  assert.deepEqual(ownersNeedingTeams(owners, (a) => a === "keel-founder5-39175.testnet"), ["keelteam85369.sputnikv2.testnet", "team.sputnik-dao.near"]);
+  assert.equal(isDao("evil.sputnikv2.testnet.attacker.testnet"), false);
+});
+
+test("lookups run a few at a time and stop at the deadline", async () => {
+  let running = 0;
+  let peak = 0;
+  const out = await mapLimit(Array.from({ length: 40 }, (_, i) => i), 10, async (i) => {
+    peak = Math.max(peak, ++running);
+    await new Promise((r) => setTimeout(r, 5));
+    running--;
+    return i * 2;
+  });
+  assert.equal(peak, 10);
+  assert.deepEqual(out, Array.from({ length: 40 }, (_, i) => i * 2));
+  const late = await mapLimit([1, 2, 3], 2, async (x) => x, Date.now() - 1);
+  assert.deepEqual(late, [undefined, undefined, undefined]);
 });

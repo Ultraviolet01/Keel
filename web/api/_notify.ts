@@ -230,6 +230,29 @@ export async function teamOf(account: string): Promise<Team | null> {
   return { members, voters };
 }
 
+/** f over xs, at most n at a time; items not started by `deadline` (epoch ms) are skipped. */
+export async function mapLimit<T, R>(xs: T[], n: number, f: (x: T) => Promise<R>, deadline = Infinity): Promise<(R | undefined)[]> {
+  const out: (R | undefined)[] = Array.from({ length: xs.length }, () => undefined);
+  let next = 0;
+  const worker = async () => {
+    while (next < xs.length && Date.now() < deadline) {
+      const i = next++;
+      out[i] = await f(xs[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, xs.length) }, worker));
+  return out;
+}
+
+/** A Sputnik DAO account: the only kind of owner that can be a team. */
+export const isDao = (account: string) => /\.(sputnikv2\.testnet|sputnik-dao\.near)$/.test(account);
+
+/**
+ * Owners whose team (multisig members) the round needs: DAOs only, and not subscribers themselves.
+ * Anyone can create vaults under throwaway accounts; none of those can be a team, so they cost nothing.
+ */
+export const ownersNeedingTeams = (owners: Iterable<string>, subscribed: (a: string) => boolean) => [...new Set(owners)].filter((o) => isDao(o) && !subscribed(o));
+
 /** Every vault the factory created, with its owner. */
 export async function vaultOwners(): Promise<Map<string, string>> {
   const vaults: string[] = [];
@@ -238,7 +261,8 @@ export async function vaultOwners(): Promise<Map<string, string>> {
     vaults.push(...page);
     if (page.length < 100) break;
   }
-  const owners = await Promise.all(vaults.map((v) => view<string | null>(FACTORY, "get_owner", { vault_id: v }).catch(() => null)));
+  // At most 16 at a time: thousands of vaults must not get the RPC to throttle and drop real owners.
+  const owners = await mapLimit(vaults, 16, (v) => view<string | null>(FACTORY, "get_owner", { vault_id: v }).catch(() => null));
   return new Map(vaults.map((v, i) => [v, owners[i] ?? ""]).filter(([, o]) => o) as [string, string][]);
 }
 

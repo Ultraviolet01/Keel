@@ -12,7 +12,7 @@
 // GMAIL_APP_PASSWORD (a Gmail app password) in the Vercel project.
 
 import { SPAM_HINT, alertSubject, companyOf, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
-import {
+import { mapLimit, ownersNeedingTeams,
   APP_URL,
   allSubs,
   getSub,
@@ -126,7 +126,9 @@ async function run(events: AgentEvent[]): Promise<Response> {
   // Who each vault belongs to: its owner, or the members of the multisig that owns it.
   const owners = await vaultOwners();
   const teams = new Map<string, Team | null>();
-  for (const o of new Set(owners.values())) teams.set(o, await teamOf(o));
+  // Teams only for DAO owners, 10 lookups at a time, within 25 s: a crowd of throwaway owners costs nothing.
+  const needed = ownersNeedingTeams(owners.values(), (a) => byAccount.has(a));
+  await mapLimit(needed, 10, async (o) => teams.set(o, await teamOf(o)), Date.now() + 25_000);
   const people = (owner: string) => teams.get(owner)?.members ?? [owner];
   const followed = [...owners].filter(([, o]) => people(o).some((a) => byAccount.has(a)));
 
