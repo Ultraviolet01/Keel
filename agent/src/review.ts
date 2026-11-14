@@ -157,7 +157,7 @@ const STEERING = [
   /\{\s*"/,
   /\b(ignore|disregard|forget|override|bypass)\b.{0,40}\b(instructions?|rules?|checks?|prompts?|above|previous|system|guidelines?)\b/i,
   /\b(system prompt|as an ai|language model|you are (an?|the) (ai|assistant|model|reviewer|agent))\b/i,
-  /(^|\s)(system|assistant|user)\s*:/i,
+  /(^|[^a-z0-9])(system|assistant|user)\s*:/i,
   /\b(say|answer|respond|reply|return|output|classify)\b.{0,25}\b(ok|okay|approve[ds]?|safe|legitimate|"ok")\b/i,
   /\b(do not|don't|never)\b.{0,25}\b(flag|propose|refuse|report|question|check|escalate)\b/i,
   /\b(treasury|payment) (agent|bot|ai|reviewer)\b/i,
@@ -198,6 +198,8 @@ export function steersReviewer(memo: string | undefined): boolean {
 
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
   if (steersReviewer(x.memo)) return { verdict: "propose", reason: "the invoice text tries to give instructions to Keel's reviewer", by: "keel" };
+  // Payee names can come from invoices too (the invoice reader fills the vendor name), and the model reads every one.
+  if ([x.payeeName, ...x.knownPayees].some((n) => steersReviewer(n))) return { verdict: "propose", reason: "a payee name tries to give instructions to Keel's reviewer", by: "keel" };
   // The payee's account name is chosen by whoever created it, and the model reads it too.
   if (steersReviewer(x.payee.replace(/[-_.]/g, " "))) return { verdict: "propose", reason: "the payee's account name tries to give instructions to Keel's reviewer", by: "keel" };
   // The review is a second look, never a reason to stop a round: any failure is "no verdict".
