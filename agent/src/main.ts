@@ -6,7 +6,7 @@
 //   npm run agent -- --vault berth.keel.testnet --once
 
 import { Chain, loadConfig } from "./chain";
-import { loadState, runVault, saveState, type Event } from "./loop";
+import { rotate, loadState, runVault, saveState, type Event } from "./loop";
 import { report } from "./notify";
 
 const args = process.argv.slice(2);
@@ -29,6 +29,10 @@ const log = (e: Event) => {
   console.log(`${new Date().toISOString().slice(11, 19)}  ${e.vault.padEnd(26)} ${e.step.padEnd(9)} ${e.text}${link}`);
 };
 
+const ROUND_MS = 7 * 60_000; // the hosted run stops at 10 minutes
+const VAULT_MS = 90_000;
+const ROUND_EVERY_MS = 15 * 60_000;
+
 async function round() {
   const state = loadState();
   const seen: Event[] = [];
@@ -38,12 +42,21 @@ async function round() {
   };
   const vaults = onlyVault ? [onlyVault] : await chain.vaults();
   const today = value("today") ?? new Date().toISOString().slice(0, 10);
-  for (const v of vaults) {
+  // A round must finish inside the hosted run's 10 minutes whatever any one vault holds (anyone can
+  // create one): each vault gets a time budget, the round stops starting vaults near its end, the
+  // order rotates every round so no vault is always last, and state is saved after each vault.
+  const started = Date.now();
+  for (const v of rotate(vaults, Math.floor(started / ROUND_EVERY_MS))) {
+    if (Date.now() - started > ROUND_MS) {
+      say({ vault: v, step: "check", text: "the round's time is used up; this vault is served in a later round" });
+      continue;
+    }
     try {
-      await runVault(cfg, chain, v, state, { dryRun, today, lookaheadDays, say });
+      await runVault(cfg, chain, v, state, { dryRun, today, lookaheadDays, say, deadline: Math.min(Date.now() + VAULT_MS, started + ROUND_MS) });
     } catch (e) {
       say({ vault: v, step: "error", text: String(e).slice(0, 200) });
     }
+    saveState(state);
   }
   saveState(state);
   // Email notifications: only real rounds report; a dry run signs nothing.

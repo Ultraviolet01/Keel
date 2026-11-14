@@ -23,7 +23,7 @@ import {
 } from "./brain";
 import type { Chain, Config } from "./chain";
 import { explain, template } from "./explain";
-import { describe, review, stricter } from "./review";
+import { describe, review, stricter, type ReviewInput, type Verdict } from "./review";
 import { deadlineFromNow, findToken, quote, status as swapStatus, FINAL, tokens as intentsTokens } from "./intents";
 import { balances, broadcast, chainInfo, client, knownChain, prepareTransfer, receipt, routeFor, toTokenUnits, usdc, vaultAddress, vaultRoute } from "./evm";
 
@@ -75,6 +75,28 @@ export interface RoundOptions {
   today: string;
   lookaheadDays: number;
   say: (e: Event) => void;
+  /** Epoch ms after which this vault stops for the round; its other bills wait for the next one. */
+  deadline?: number;
+}
+
+// Anyone can create a vault, so no single vault may use up a round that serves every company:
+// each gets a time budget and at most REVIEWS_PER_VAULT AI reviews per round. Bills past either
+// wait for the next round; nothing is paid without its review.
+export const REVIEWS_PER_VAULT = 5;
+export const budget = { reviews: 0, deadline: Infinity };
+
+/** The vaults starting at a different one each round. */
+export function rotate<T>(xs: T[], round: number): T[] {
+  if (!xs.length) return xs;
+  const k = ((round % xs.length) + xs.length) % xs.length;
+  return [...xs.slice(k), ...xs.slice(0, k)];
+}
+
+/** The AI review, or "later" when this vault's reviews or time for the round are used up. */
+export async function budgetedReview(cfg: Config, input: ReviewInput): Promise<Verdict | null | "later"> {
+  if (budget.reviews >= REVIEWS_PER_VAULT || Date.now() > budget.deadline) return "later";
+  budget.reviews++;
+  return review(cfg, input);
 }
 
 /** "2026-11-09" as "9 Nov". */
@@ -92,6 +114,8 @@ export function refusedNotice(vaultId: string, bill: Bill, money: (u: bigint) =>
 }
 
 export async function runVault(cfg: Config, chain: Chain, vaultId: string, state: State, o: RoundOptions) {
+  budget.reviews = 0;
+  budget.deadline = o.deadline ?? Infinity;
   const say = (step: string, text: string, tx?: string, notice?: Notice) => {
     const e: Event = { vault: vaultId, step, text, tx, notice };
     o.say(e);
@@ -190,7 +214,11 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   let available = balance;
   const ref = (bill: Bill) => (remembers ? { bill_ref: bill.id } : {});
 
-  for (const bill of due) {
+  for (const [i, bill] of due.entries()) {
+    if (Date.now() > budget.deadline) {
+      o.say({ vault: vaultId, step: "check", text: `this vault's time for the round is used up; ${due.length - i} bill(s) wait for the next round` });
+      break;
+    }
     if (remembers && (await recall(chain, vaultId, bill, proposals, handled, o.dryRun, say))) continue;
     if (isCrossChain(bill)) {
       // The vault sees only a 1Click deposit address on that route, so Keel checks the real payee itself.
@@ -226,11 +254,14 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
     // A second look by an LLM before paying alone. It can only make the decision stricter.
     let aiCaught = false;
     if (action.kind === "pay" && !bill.id.startsWith("top:") && !bill.id.startsWith("idle:")) {
-      const v = await review(cfg, reviewInput(company, bill, allPayees, bills, proposals, money));
-      if (v) say("check", describe(v));
-      const next = stricter(action, v);
-      aiCaught = next !== action;
-      action = next as typeof action;
+      const v = await budgetedReview(cfg, reviewInput(company, bill, allPayees, bills, proposals, money));
+      if (v === "later") action = { kind: "wait", reason: "this vault's AI reviews for the round are used up; it is reviewed next round" };
+      else {
+        if (v) say("check", describe(v));
+        const next = stricter(action, v);
+        aiCaught = next !== action;
+        action = next as typeof action;
+      }
     }
 
     if (action.kind === "wait") {
@@ -568,7 +599,11 @@ const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, pr
     // The same view as on NEAR: what this payee was paid or billed before and the owner's other payees,
     // so a lookalike 0x address is caught on exactly the payments no human approves.
     const [payees, listed] = await Promise.all([chain.payees(vaultId), chain.bills(vaultId)]);
-    const v = await review(cfg, reviewInput(vaultId.split(".")[0], { ...bill, payee: evm.to }, payees, vaultBills(listed, bill.due), proposals, (u) => fmt(u, 6, "USDC")));
+    const v = await budgetedReview(cfg, reviewInput(vaultId.split(".")[0], { ...bill, payee: evm.to }, payees, vaultBills(listed, bill.due), proposals, (u) => fmt(u, 6, "USDC")));
+    if (v === "later") {
+      say("decide", `${label}. Waits: this vault's AI reviews for the round are used up; it is reviewed next round`);
+      return true;
+    }
     if (v) say("check", describe(v));
     const decision = stricter({ kind: "pay", reason: "inside the auto cap" }, v);
     if (decision.kind === "refuse") {
