@@ -5,12 +5,12 @@
 // pay -> propose (the owner decides) or pay -> refuse (nothing is signed).
 // It can never turn a proposal or a refusal into a payment. If it times out,
 // answers in the wrong shape or no key is set, Keel keeps its rules' decision.
-// A NEAR AI answer is checked against the key NEAR AI's attestation names
-// (attest.ts). One that fails the check can still only make Keel stricter,
+// A NEAR AI answer is checked as NEAR AI's verification docs set out (attest.ts):
+// the gateway's attestation is verified before asking, then the answer's signature. One that fails the check can still only make Keel stricter,
 // but no more than a proposal: the owner decides instead of an unproven refusal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { verifyChat, type Check, type QuoteVerifierFn } from "./attest";
+import { preflight, verifyResponse, type Check, type QuoteVerifierFn } from "./attest";
 import type { Config } from "./chain";
 
 export interface ReviewInput {
@@ -94,14 +94,14 @@ export function stricter(action: Decision, v: Verdict | null): Decision {
 /** One log line for a verdict, saying whether NEAR AI's answer was verified. */
 export function describe(v: Verdict): string {
   const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
-  const proof = v.attested === true ? " (signed for this request by NEAR AI's key, in an Intel TDX enclave Intel's certificates verify)" : v.attested === false ? ` (not verified: ${v.check})` : "";
+  const proof = v.attested === true ? " (signed for this request by NEAR AI's gateway, attested in an Intel TDX enclave before Keel asked)" : v.attested === false ? ` (not verified: ${v.check})` : "";
   return `${who} check${proof}: ${v.verdict}. ${v.reason}`;
 }
 
-export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: { verifyQuote?: QuoteVerifierFn } = {}): Promise<Verdict | null> {
+export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
   const user = prompt(x);
   if (cfg.nearAiKey) {
-    const r = await nearAi(cfg, user, timeoutMs, opts.verifyQuote);
+    const r = await nearAi(cfg, user, timeoutMs, opts);
     const v = r ? parseVerdict(r.text, "near-ai") : null;
     if (v && r) {
       const c = await r.verify();
@@ -115,9 +115,15 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, op
   return null;
 }
 
-/** The model's text, and a check of NEAR AI's signature over the exact bytes sent and received. */
-async function nearAi(cfg: Config, user: string, timeoutMs: number, verifyQuote?: QuoteVerifierFn): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
+/** Tests only: verify quotes and wait for signatures without the network. */
+export type AttestOptions = { verifyQuote?: QuoteVerifierFn; retryMs?: number };
+
+/** The model's text, and a check of NEAR AI's signature against gateway evidence verified before asking. */
+async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: AttestOptions): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
   try {
+    const apiKey = cfg.nearAiKey ?? "";
+    // Preflight: the gateway's attestation, verified before the completion is sent.
+    const pre = await preflight({ baseUrl: cfg.nearAiUrl, apiKey, timeoutMs, verifyQuote: opts.verifyQuote });
     // Kept as the exact string sent: NEAR AI signs its hash.
     const body = JSON.stringify({
       model: cfg.nearAiModel,
@@ -142,7 +148,8 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, verifyQuote?
     const chatId = typeof parsed.id === "string" ? parsed.id : "";
     return {
       text,
-      verify: () => verifyChat({ baseUrl: cfg.nearAiUrl, apiKey: cfg.nearAiKey ?? "", model: cfg.nearAiModel, chatId, requestBody: body, responseText: raw, timeoutMs, verifyQuote }),
+      verify: async () =>
+        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseText: raw, preflightSigner: pre.signer, timeoutMs, retryMs: opts.retryMs }) : pre,
     };
   } catch {
     return undefined;

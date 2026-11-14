@@ -38,7 +38,7 @@ async function fakeNearAi(reply: (body: { messages: { content: string }[] }) => 
   const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
-    req.on("end", () => setTimeout(() => res.end(JSON.stringify(reply(JSON.parse(raw)))), delayMs));
+    req.on("end", () => setTimeout(() => res.end(JSON.stringify(reply(raw ? JSON.parse(raw) : { messages: [] }))), delayMs));
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
@@ -52,7 +52,7 @@ test("NEAR AI Cloud is asked first and its verdict is used", async () => {
   const ai = await fakeNearAi(() => ({ choices: [{ message: { content: '{"verdict":"propose","reason":"lookalike of northwind-keel.testnet"}' } }] }));
   try {
     // This stand-in has no chat id or signature, so the answer is used but marked not verified (attest.test.ts covers the check).
-    assert.deepEqual(await review(ai.cfg, input), { verdict: "propose", reason: "lookalike of northwind-keel.testnet", by: "near-ai", attested: false, check: "no usable chat id" });
+    assert.deepEqual(await review(ai.cfg, input), { verdict: "propose", reason: "lookalike of northwind-keel.testnet", by: "near-ai", attested: false, check: "no gateway attestation" });
   } finally {
     ai.close();
   }

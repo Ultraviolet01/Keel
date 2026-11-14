@@ -1,20 +1,24 @@
-// Checks that a NEAR AI Cloud answer is the one NEAR AI's attested gateway
-// signed, for this exact request, and that the gateway's key lives in a
-// genuine Intel TDX enclave. Follows NEAR AI's own verifier
-// (github.com/nearai/nearai-cloud-verifier, py/chat_verifier.py and
-// py/model_verifier.py):
-//   1. GET /v1/signature/{chat_id}: text "<sha256(request)>:<sha256(response)>"
-//      (optionally with a prefix part), an EIP-191 signature and the signer.
-//   2. The two hashes must be those of the request Keel sent and the response
-//      it got, and the signature must recover to the signer.
-//   3. GET /v1/attestation/report with a fresh nonce. The Intel TDX quote in it
-//      is verified against Intel's collateral (PCS) up to Intel's SGX root CA,
-//      pinned below: certificate chain and revocation lists, the quoting
-//      enclave's identity, the quote's signature, the platform's TCB level, and
-//      no debug enclave (Phala's dcap-qvl, the library NEAR AI's verifier uses).
-//      Only then does its report_data count: it must hold the signer and the nonce.
-// What this does not check: the model provider's own GPU attestation. NEAR AI's
-// gateway signs the answers; the model behind it is attested by its provider.
+// Checks a NEAR AI Cloud answer the way NEAR AI's verification docs set out
+// (docs.near.ai/cloud/verification: gateway attestation, response signatures,
+// quote/nonce/signer bindings, verification policy):
+//
+// Before the completion (preflight), Keel verifies the gateway's attestation:
+//   - GET /v1/attestation/report with a nonce Keel generated (32 random bytes),
+//   - the Intel TDX quote verified against Intel's collateral up to Intel's
+//     SGX root CA, pinned below (Phala's dcap-qvl, the verifier NEAR AI names),
+//     TCB status UpToDate, no debug enclave,
+//   - from the verified quote: report_data = signer (zero-padded) || nonce,
+//     MRCONFIGID = 01 || sha256(app_compose) || 15 zero bytes, and RTMR3 equal
+//     to the replayed event log; the echoed request_nonce and report_data match.
+// The verified signer is kept as evidence for at most 10 minutes.
+//
+// After the completion, Keel fetches the response signature and requires a
+// `gateway` signature whose text is exactly sha256(request):sha256(response)
+// over the bytes sent and received, recovering (EIP-191) to the preflight signer.
+//
+// What this does not establish: which model produced the answer. A gateway
+// signature binds the answer to NEAR AI's attested gateway, not to a model
+// enclave, and Keel keeps no list of accepted gateway builds (image provenance).
 // Nothing here throws: every failure is { ok: false, reason }.
 
 import { createHash, randomBytes } from "node:crypto";
@@ -25,32 +29,11 @@ export type Check = { ok: true; signer: string; tcb?: string } | { ok: false; re
 
 const MAX_BODY = 1_000_000; // the real report is about 180 kB
 const HEX = /^[0-9a-f]*$/i;
+const EVIDENCE_FOR_MS = 10 * 60_000; // maximum age of preflight evidence
 
 export const sha256Hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 const fail = (reason: string): Check => ({ ok: false, reason });
-
-/** Step 2: the signature covers this request and this response, and names its signer. */
-export async function checkSignature(requestBody: string, responseText: string, sig: unknown): Promise<Check> {
-  if (!sig || typeof sig !== "object") return fail("no signature");
-  const { text, signature, signing_address } = sig as Record<string, unknown>;
-  if (typeof text !== "string" || text.length > 300) return fail("signature text missing or malformed");
-  if (typeof signature !== "string" || !/^0x[0-9a-f]{130}$/i.test(signature)) return fail("signature malformed");
-  if (typeof signing_address !== "string" || !/^0x[0-9a-f]{40}$/i.test(signing_address)) return fail("signer malformed");
-  const parts = text.split(":");
-  if (parts.length !== 2 && parts.length !== 3) return fail("signature text malformed");
-  const [reqHash, resHash] = parts.slice(-2).map((p) => p.toLowerCase());
-  if (reqHash !== sha256Hex(requestBody)) return fail("signed request is not the one Keel sent");
-  if (resHash !== sha256Hex(responseText)) return fail("response changed after it was signed");
-  let recovered: string;
-  try {
-    recovered = await recoverMessageAddress({ message: text, signature: signature as Hex });
-  } catch {
-    return fail("signature does not recover");
-  }
-  if (recovered.toLowerCase() !== signing_address.toLowerCase()) return fail("signed by another key than the one named");
-  return { ok: true, signer: signing_address.toLowerCase() };
-}
 
 // Intel SGX Root CA, as published at
 // certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer.
@@ -69,11 +52,11 @@ const INTEL_ROOT_CA = Buffer.from(
 );
 export const INTEL_ROOT_SHA256 = "44a0196b2b99f889b8e149e95b807a350e7424964399e885a7cbb8ccfab674d3";
 
-/** TCB levels Keel accepts: the platform is patched (software hardening is the enclave's own business). */
-const GOOD_TCB = new Set(["UpToDate", "SWHardeningNeeded"]);
+/** Keel's TCB policy, as in NEAR AI's example: only a fully patched platform counts. */
+const GOOD_TCB = new Set(["UpToDate"]);
 
-/** What a verified quote proves: its report_data, and the platform's TCB level. */
-export type QuoteProof = { reportData: Buffer; tcb: string };
+/** What a verified quote proves, read from the quote Intel's chain verified. */
+export type QuoteProof = { reportData: Buffer; mrConfigId: Buffer; rtMr3: Buffer; debug: boolean; tcb: string };
 /** Verifies a TDX quote or throws. */
 export type QuoteVerifierFn = (quote: Buffer) => Promise<QuoteProof>;
 
@@ -82,10 +65,16 @@ export function verifyQuote(quote: Buffer, collateral: Collateral, nowSecs: numb
   if (createHash("sha256").update(INTEL_ROOT_CA).digest("hex") !== INTEL_ROOT_SHA256) throw new Error("pinned Intel root CA changed");
   const r = new QuoteVerifier(INTEL_ROOT_CA).verify(quote, collateral, nowSecs); // debug enclaves are refused by default
   const d = r.report.data;
-  // TD 1.0 holds report_data itself; TD 1.5 nests the 1.0 report as `base`, and 1.5ex nests 1.5.
-  const td10 = r.report.type === "td10" ? (d as TDReport10) : r.report.type === "td15" ? (d as TDReport15).base : r.report.type === "td15ex" ? (d as TDReport15Ex).base.base : null;
-  if (!td10) throw new Error("not a TDX quote");
-  return { reportData: Buffer.from(td10.reportData), tcb: r.status };
+  // TD 1.0 holds the measurements itself; TD 1.5 nests the 1.0 report as `base`, and 1.5ex nests 1.5.
+  const td = r.report.type === "td10" ? (d as TDReport10) : r.report.type === "td15" ? (d as TDReport15).base : r.report.type === "td15ex" ? (d as TDReport15Ex).base.base : null;
+  if (!td) throw new Error("not a TDX quote");
+  return {
+    reportData: Buffer.from(td.reportData),
+    mrConfigId: Buffer.from(td.mrConfigId),
+    rtMr3: Buffer.from(td.rtMr3),
+    debug: (td.tdAttributes[0] & 1) === 1,
+    tcb: r.status,
+  };
 }
 
 function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
@@ -102,42 +91,97 @@ export const intelVerifier =
     return verifyQuote(quote, collateral, Math.floor(Date.now() / 1000));
   };
 
-/** Step 3: an Intel-verified quote whose report_data names this signer and carries Keel's nonce. */
-export async function checkAttestation(report: unknown, signer: string, nonce: string, verify: QuoteVerifierFn): Promise<Check> {
-  if (!report || typeof report !== "object") return fail("no attestation report");
-  const r = report as { gateway_attestation?: unknown; model_attestations?: unknown };
-  const all = [r.gateway_attestation, ...(Array.isArray(r.model_attestations) ? r.model_attestations : [])];
-  const att = all.find((a): a is Record<string, unknown> => {
-    const addr = a && typeof a === "object" ? (a as { signing_address?: unknown }).signing_address : undefined;
-    return typeof addr === "string" && addr.toLowerCase() === signer.toLowerCase();
-  });
-  if (!att) return fail("attestation does not name the signer");
-  if ((att.signing_algo ?? "ecdsa") !== "ecdsa") return fail("attestation is for another signing algorithm");
-  const hex = att.intel_quote;
+const asJson = (v: unknown): unknown => (typeof v === "string" ? JSON.parse(v) : v);
+
+/** Replays the RTMR3 events of a dstack event log (NEAR AI docs, "Replay the RTMR3 event log"). Throws on a bad event. */
+export function replayRtmr3(eventLog: unknown): Buffer {
+  const events = asJson(eventLog);
+  if (!Array.isArray(events)) throw new Error("event log is not a list");
+  let rtmr3 = Buffer.alloc(48);
+  for (const e of events as Record<string, unknown>[]) {
+    if (e?.imr !== 3) continue;
+    if (typeof e.event_type !== "number" || typeof e.event !== "string") throw new Error("malformed event");
+    const payload = typeof e.event_payload === "string" ? e.event_payload : "";
+    if (!HEX.test(payload) || payload.length % 2) throw new Error("malformed event payload");
+    const type = Buffer.alloc(4);
+    type.writeUInt32LE(e.event_type >>> 0);
+    const digest = createHash("sha384").update(Buffer.concat([type, Buffer.from(":"), Buffer.from(e.event, "utf8"), Buffer.from(":"), Buffer.from(payload, "hex")])).digest();
+    if (typeof e.digest === "string" && e.digest && e.digest.toLowerCase() !== digest.toString("hex")) throw new Error(`event ${e.event} does not match its digest`);
+    rtmr3 = createHash("sha384").update(Buffer.concat([rtmr3, digest])).digest();
+  }
+  return rtmr3;
+}
+
+/** Checks a gateway_attestation against Keel's nonce. The quote is the source of truth; HTTP fields are only compared with it. */
+export async function checkGatewayReport(att: unknown, nonce: string, verify: QuoteVerifierFn): Promise<Check> {
+  if (!att || typeof att !== "object") return fail("no gateway attestation");
+  const a = att as Record<string, unknown>;
+  if (a.signing_algo !== "ecdsa") return fail("gateway attestation is not for ecdsa");
+  const signer = a.signing_address;
+  if (typeof signer !== "string" || !/^0x[0-9a-f]{40}$/i.test(signer)) return fail("gateway signer malformed");
+  if (typeof a.request_nonce !== "string" || a.request_nonce.toLowerCase() !== nonce) return fail("echoed nonce is not Keel's");
+  const hex = a.intel_quote;
   if (typeof hex !== "string" || !hex || hex.length % 2 || !HEX.test(hex)) return fail("attestation has no TDX quote");
-  let proof: QuoteProof;
+  let q: QuoteProof;
   try {
-    proof = await verify(Buffer.from(hex, "hex"));
+    q = await verify(Buffer.from(hex, "hex"));
   } catch (e) {
     return fail(`Intel check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
   }
-  if (!GOOD_TCB.has(proof.tcb)) return fail(`enclave platform TCB is ${proof.tcb}`);
-  const addr = Buffer.from(signer.slice(2), "hex");
-  const fp = att.tls_cert_fingerprint;
-  let expected: Buffer | null = Buffer.concat([addr, Buffer.alloc(12)]);
-  if (typeof fp === "string" && fp) {
-    // With a TLS fingerprint, report_data[0..32] = sha256(signer || fingerprint).
-    expected = HEX.test(fp) && fp.length % 2 === 0 ? createHash("sha256").update(Buffer.concat([addr, Buffer.from(fp, "hex")])).digest() : null;
+  if (!GOOD_TCB.has(q.tcb)) return fail(`enclave platform TCB is ${q.tcb}`);
+  if (q.debug) return fail("attestation is from a debug enclave");
+  // report_data = signer zero-padded to 32 bytes, then the nonce (no TLS binding requested).
+  const expected = Buffer.concat([Buffer.from(signer.slice(2), "hex"), Buffer.alloc(12), Buffer.from(nonce, "hex")]);
+  if (q.reportData.length !== 64 || !q.reportData.subarray(0, 32).equals(expected.subarray(0, 32))) return fail("TDX quote does not bind the signer");
+  if (!q.reportData.subarray(32).equals(expected.subarray(32))) return fail("TDX quote is not for Keel's nonce");
+  if (typeof a.report_data === "string" && a.report_data.toLowerCase().replace(/^0x/, "") !== q.reportData.toString("hex")) return fail("echoed report data differs from the quote");
+  try {
+    const info = asJson(a.info) as { tcb_info?: unknown } | undefined;
+    const appCompose = (asJson(info?.tcb_info) as { app_compose?: unknown } | undefined)?.app_compose;
+    if (typeof appCompose !== "string") return fail("attestation has no app_compose");
+    const config = Buffer.concat([Buffer.from([1]), createHash("sha256").update(appCompose, "utf8").digest(), Buffer.alloc(15)]);
+    if (!q.mrConfigId.equals(config)) return fail("MRCONFIGID does not match app_compose");
+    if (!replayRtmr3(a.event_log).equals(q.rtMr3)) return fail("event log does not match RTMR3");
+  } catch (e) {
+    return fail(`measurements unreadable: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
   }
-  if (proof.reportData.length !== 64) return fail("TDX quote has no report data");
-  if (!expected || !proof.reportData.subarray(0, 32).equals(expected)) return fail("TDX quote does not bind the signer");
-  if (!proof.reportData.subarray(32, 64).equals(Buffer.from(nonce, "hex"))) return fail("TDX quote is not for Keel's nonce");
-  return { ok: true, signer: signer.toLowerCase(), tcb: proof.tcb };
+  return { ok: true, signer: signer.toLowerCase(), tcb: q.tcb };
 }
 
-/** GET a JSON body, refusing anything over MAX_BODY. */
-async function getJson(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<unknown> {
-  const res = await fetch(url, { headers, signal });
+/** After the completion: a `gateway` signature over exactly these bytes, by the preflight signer. */
+export async function checkResponseSignature(requestBody: string, responseText: string, sig: unknown, preflightSigner: string): Promise<Check> {
+  if (!sig || typeof sig !== "object") return fail("no signature");
+  const s = sig as Record<string, unknown>;
+  if (s.error_code !== undefined) return fail(`signature unavailable: ${String(s.error_code).slice(0, 40)}`);
+  if (s.signature_kind !== "gateway") return fail(`signature kind ${typeof s.signature_kind === "string" ? s.signature_kind.slice(0, 30) : "missing"} is not one Keel accepts`);
+  if (s.signing_algo !== undefined && s.signing_algo !== "ecdsa") return fail("signature is not ecdsa");
+  const { text, signature, signing_address } = s;
+  if (typeof text !== "string" || text.length > 300) return fail("signature text missing or malformed");
+  if (typeof signature !== "string" || !/^0x[0-9a-f]{130}$/i.test(signature)) return fail("signature malformed");
+  if (typeof signing_address !== "string" || !/^0x[0-9a-f]{40}$/i.test(signing_address)) return fail("signer malformed");
+  const reqHash = sha256Hex(requestBody);
+  const resHash = sha256Hex(responseText);
+  if (text !== `${reqHash}:${resHash}`) {
+    const parts = text.split(":");
+    if (parts.length !== 2) return fail("signature text is not request_hash:response_hash");
+    if (parts[0] !== reqHash) return fail("signed request is not the one Keel sent");
+    return fail("response changed after it was signed");
+  }
+  let recovered: string;
+  try {
+    recovered = await recoverMessageAddress({ message: text, signature: signature as Hex });
+  } catch {
+    return fail("signature does not recover");
+  }
+  if (recovered.toLowerCase() !== signing_address.toLowerCase()) return fail("signed by another key than the one named");
+  if (recovered.toLowerCase() !== preflightSigner.toLowerCase()) return fail("signer is not the gateway Keel verified before asking");
+  return { ok: true, signer: recovered.toLowerCase() };
+}
+
+/** GET a JSON body, refusing anything over MAX_BODY. Returns the status too, for 404 retries. */
+async function getJson(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(url, { headers: { Accept: "application/json", ...headers }, signal });
+  if (res.status === 404) return { status: 404, body: null };
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -152,45 +196,73 @@ async function getJson(url: string, headers: Record<string, string>, signal: Abo
     }
     chunks.push(value);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return { status: res.status, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
 }
 
-// A signer whose quote checked out recently, so each bill does not refetch the report and collateral.
-const attested = new Map<string, { until: number; tcb: string }>();
-const ATTESTED_FOR_MS = 10 * 60_000;
-export const clearAttested = () => attested.clear();
+// Preflight evidence: the gateway signer Keel verified, kept for EVIDENCE_FOR_MS.
+let evidence: { signer: string; tcb: string; until: number } | null = null;
+export const clearAttested = () => {
+  evidence = null;
+};
 
-export interface VerifyInput {
+export interface PreflightInput {
   baseUrl: string; // e.g. https://cloud-api.near.ai/v1
   apiKey: string;
-  model: string;
-  chatId: string;
-  requestBody: string; // the exact bytes Keel sent
-  responseText: string; // the exact bytes Keel got
   timeoutMs: number;
   /** Tests only: verify quotes without the network. Defaults to Intel's PCS. */
   verifyQuote?: QuoteVerifierFn;
 }
 
-/** Steps 1 to 3. Never throws; a timeout, an error or junk is { ok: false }. */
-export async function verifyChat(x: VerifyInput): Promise<Check> {
+/** Before the completion: verified gateway evidence, fresh or at most 10 minutes old. Never throws. */
+export async function preflight(x: PreflightInput): Promise<Check> {
+  if (evidence && evidence.until > Date.now()) return { ok: true, signer: evidence.signer, tcb: evidence.tcb };
+  evidence = null;
+  try {
+    const deadline = Date.now() + x.timeoutMs;
+    const nonce = randomBytes(32).toString("hex");
+    // The key is optional here, and one that is sent must be valid: send it only when set.
+    const auth: Record<string, string> = x.apiKey ? { Authorization: `Bearer ${x.apiKey}` } : {};
+    const { body } = await getJson(`${x.baseUrl}/attestation/report?signing_algo=ecdsa&nonce=${nonce}`, auth, AbortSignal.timeout(x.timeoutMs));
+    const report = body as { gateway_attestation?: unknown } | null;
+    const verify = x.verifyQuote ?? intelVerifier(Math.max(1, deadline - Date.now()));
+    const c = await within(checkGatewayReport(report?.gateway_attestation, nonce, verify), Math.max(1, deadline - Date.now()), "attestation check");
+    if (c.ok) evidence = { signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
+    return c;
+  } catch (e) {
+    return fail(`check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
+  }
+}
+
+export interface ResponseInput {
+  baseUrl: string;
+  apiKey: string;
+  chatId: string;
+  requestBody: string; // the exact bytes Keel sent
+  responseText: string; // the exact bytes Keel got
+  preflightSigner: string;
+  timeoutMs: number;
+  /** Pause before retrying a signature not recorded yet. */
+  retryMs?: number;
+}
+
+/** After the completion: fetch the signature (a short, bounded retry while it is not recorded yet) and check it. Never throws. */
+export async function verifyResponse(x: ResponseInput): Promise<Check> {
   try {
     if (!/^[\w.:-]{1,128}$/.test(x.chatId)) return fail("no usable chat id");
-    const deadline = Date.now() + x.timeoutMs;
     const signal = AbortSignal.timeout(x.timeoutMs);
-    const auth = { Authorization: `Bearer ${x.apiKey}` };
-    const model = encodeURIComponent(x.model);
-    const sig = await getJson(`${x.baseUrl}/signature/${encodeURIComponent(x.chatId)}?model=${model}&signing_algo=ecdsa`, auth, signal);
-    const s = await checkSignature(x.requestBody, x.responseText, sig);
-    if (!s.ok) return s;
-    const known = attested.get(s.signer);
-    if (known && known.until > Date.now()) return { ...s, tcb: known.tcb };
-    const nonce = randomBytes(32).toString("hex");
-    const report = await getJson(`${x.baseUrl}/attestation/report?model=${model}&nonce=${nonce}&signing_algo=ecdsa&signing_address=${s.signer}`, auth, signal);
-    const verify = x.verifyQuote ?? intelVerifier(Math.max(1, deadline - Date.now()));
-    const a = await within(checkAttestation(report, s.signer, nonce, verify), Math.max(1, deadline - Date.now()), "attestation check");
-    if (a.ok) attested.set(s.signer, { until: Date.now() + ATTESTED_FOR_MS, tcb: a.tcb ?? "" });
-    return a;
+    const url = `${x.baseUrl}/signature/${encodeURIComponent(x.chatId)}?signing_algo=ecdsa`;
+    let last: Check = fail("signature not found");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, x.retryMs ?? 700));
+      const { status, body } = await getJson(url, { Authorization: `Bearer ${x.apiKey}` }, signal);
+      if (status === 404) {
+        last = fail("signature not found");
+        continue;
+      }
+      last = await checkResponseSignature(x.requestBody, x.responseText, body, x.preflightSigner);
+      if (last.ok || !last.reason.startsWith("signature unavailable")) return last;
+    }
+    return last;
   } catch (e) {
     return fail(`check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
   }
