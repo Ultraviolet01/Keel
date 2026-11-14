@@ -111,7 +111,14 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, op
     if (v && r) {
       const c = await r.verify();
       if (c.ok) return { ...v, attested: true };
-      return c.tampered ? { ...v, attested: false, check: c.reason, tampered: true } : { ...v, attested: false, check: c.reason };
+      if (c.tampered) return { ...v, attested: false, check: c.reason, tampered: true };
+      // An "ok" that cannot be verified is no answer at all: ask Claude, when Keel has a key for it.
+      if (v.verdict === "ok" && cfg.anthropicKey) {
+        const second = await claude(cfg, user, timeoutMs);
+        const w = second ? parseVerdict(second, "claude") : null;
+        if (w) return w;
+      }
+      return { ...v, attested: false, check: c.reason };
     }
   }
   if (cfg.anthropicKey) {
@@ -147,15 +154,15 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: Attest
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return undefined;
-    const raw = await readCapped(res, 200_000);
-    const parsed = JSON.parse(raw) as { id?: unknown; choices?: { message?: { content?: string } }[] };
+    const raw = await readCapped(res, 200_000); // exact bytes: NEAR AI signs their hash
+    const parsed = JSON.parse(raw.toString("utf8")) as { id?: unknown; choices?: { message?: { content?: string } }[] };
     const text = parsed.choices?.[0]?.message?.content;
     if (!text) return undefined;
     const chatId = typeof parsed.id === "string" ? parsed.id : "";
     return {
       text,
       verify: async () =>
-        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseText: raw, preflightSigner: pre.signer, timeoutMs, retryMs: opts.retryMs }) : pre,
+        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseBody: raw, preflightSigner: pre.signer, timeoutMs, retryMs: opts.retryMs }) : pre,
     };
   } catch {
     return undefined;

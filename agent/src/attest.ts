@@ -22,7 +22,7 @@
 // Nothing here throws: every failure is { ok: false, reason }.
 
 import { createHash, randomBytes } from "node:crypto";
-import { INTEL_PCS_URL, QuoteVerifier, getCollateral, type Collateral, type TDReport10, type TDReport15, type TDReport15Ex } from "@phala/dcap-qvl";
+import { INTEL_PCS_URL, QuoteVerifier, getCollateral, isBrowser, type Collateral, type TDReport10, type TDReport15, type TDReport15Ex } from "@phala/dcap-qvl";
 import { recoverMessageAddress, type Hex } from "viem";
 
 /** `tampered`: the answer came with a signature that does not match it, which is evidence of tampering, not an outage. */
@@ -32,7 +32,8 @@ const MAX_BODY = 1_000_000; // the real report is about 180 kB
 const HEX = /^[0-9a-f]*$/i;
 const EVIDENCE_FOR_MS = 10 * 60_000; // maximum age of preflight evidence
 
-export const sha256Hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+/** SHA-256 of exact bytes (a string is taken as its UTF-8 bytes). */
+export const sha256Hex = (s: string | Uint8Array) => createHash("sha256").update(s).digest("hex");
 
 const fail = (reason: string): Check => ({ ok: false, reason });
 const tampered = (reason: string): Check => ({ ok: false, reason, tampered: true });
@@ -67,6 +68,8 @@ export type QuoteVerifierFn = (quote: Buffer) => Promise<QuoteProof>;
 /** Verifies a quote against given collateral at a given time, up to the pinned Intel root. Throws on failure. */
 export function verifyQuote(quote: Buffer, collateral: Collateral, nowSecs: number): QuoteProof {
   if (createHash("sha256").update(INTEL_ROOT_CA).digest("hex") !== INTEL_ROOT_SHA256) throw new Error("pinned Intel root CA changed");
+  // In Node, dcap-qvl verifies with Node's own crypto; its pure-JS path uses elliptic (advisory GHSA-848j-6mx2-7j84).
+  if (isBrowser) throw new Error("dcap-qvl would use its pure-JS crypto path");
   const r = new QuoteVerifier(INTEL_ROOT_CA).verify(quote, collateral, nowSecs); // debug enclaves are refused by default
   const d = r.report.data;
   // TD 1.0 holds the measurements itself; TD 1.5 nests the 1.0 report as `base`, and 1.5ex nests 1.5.
@@ -104,11 +107,11 @@ export function replayRtmr3(eventLog: unknown): Buffer {
   let rtmr3 = Buffer.alloc(48);
   for (const e of events as Record<string, unknown>[]) {
     if (e?.imr !== 3) continue;
-    if (typeof e.event_type !== "number" || typeof e.event !== "string") throw new Error("malformed event");
+    if (!Number.isInteger(e.event_type) || (e.event_type as number) < 0 || (e.event_type as number) > 0xffffffff || typeof e.event !== "string") throw new Error("malformed event");
     const payload = typeof e.event_payload === "string" ? e.event_payload : "";
     if (!HEX.test(payload) || payload.length % 2) throw new Error("malformed event payload");
     const type = Buffer.alloc(4);
-    type.writeUInt32LE(e.event_type >>> 0);
+    type.writeUInt32LE(e.event_type as number);
     const digest = createHash("sha384").update(Buffer.concat([type, Buffer.from(":"), Buffer.from(e.event, "utf8"), Buffer.from(":"), Buffer.from(payload, "hex")])).digest();
     if (typeof e.digest === "string" && e.digest && e.digest.toLowerCase() !== digest.toString("hex")) throw new Error(`event ${e.event} does not match its digest`);
     rtmr3 = createHash("sha384").update(Buffer.concat([rtmr3, digest])).digest();
@@ -153,18 +156,18 @@ export async function checkGatewayReport(att: unknown, nonce: string, verify: Qu
 }
 
 /** After the completion: a `gateway` signature over exactly these bytes, by the preflight signer. */
-export async function checkResponseSignature(requestBody: string, responseText: string, sig: unknown, preflightSigner: string): Promise<Check> {
+export async function checkResponseSignature(requestBody: string | Uint8Array, responseBody: string | Uint8Array, sig: unknown, preflightSigner: string): Promise<Check> {
   if (!sig || typeof sig !== "object") return fail("no signature");
   const s = sig as Record<string, unknown>;
   if (s.error_code !== undefined) return fail(`signature unavailable: ${clean(s.error_code)}`);
   if (s.signature_kind !== "gateway") return fail(`signature kind ${s.signature_kind === undefined ? "missing" : clean(s.signature_kind, 30)} is not one Keel accepts`);
-  if (s.signing_algo !== undefined && s.signing_algo !== "ecdsa") return fail("signature is not ecdsa");
+  if (s.signing_algo !== "ecdsa") return fail("signature is not ecdsa");
   const { text, signature, signing_address } = s;
   if (typeof text !== "string" || text.length > 300) return fail("signature text missing or malformed");
   if (typeof signature !== "string" || !/^0x[0-9a-f]{130}$/i.test(signature)) return fail("signature malformed");
   if (typeof signing_address !== "string" || !/^0x[0-9a-f]{40}$/i.test(signing_address)) return fail("signer malformed");
   const reqHash = sha256Hex(requestBody);
-  const resHash = sha256Hex(responseText);
+  const resHash = sha256Hex(responseBody);
   if (text !== `${reqHash}:${resHash}`) {
     const parts = text.split(":");
     if (parts.length !== 2) return fail("signature text is not request_hash:response_hash");
@@ -182,9 +185,9 @@ export async function checkResponseSignature(requestBody: string, responseText: 
   return { ok: true, signer: recovered.toLowerCase() };
 }
 
-/** A response body as text, refusing anything over `max` bytes. */
-export async function readCapped(res: Response, max = MAX_BODY): Promise<string> {
-  if (!res.body) return "";
+/** A response body's exact bytes, refusing anything over `max` bytes. */
+export async function readCapped(res: Response, max = MAX_BODY): Promise<Buffer> {
+  if (!res.body) return Buffer.alloc(0);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -198,7 +201,7 @@ export async function readCapped(res: Response, max = MAX_BODY): Promise<string>
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
 }
 
 /** GET a JSON body, refusing anything over MAX_BODY. Returns the status too, for 404 retries. */
@@ -206,14 +209,14 @@ async function getJson(url: string, headers: Record<string, string>, signal: Abo
   const res = await fetch(url, { headers: { Accept: "application/json", ...headers }, signal });
   if (res.status === 404) return { status: 404, body: null };
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  return { status: res.status, body: JSON.parse(await readCapped(res)) };
+  return { status: res.status, body: JSON.parse((await readCapped(res)).toString("utf8")) };
 }
 
 // Preflight evidence: the gateway signer Keel verified, kept for EVIDENCE_FOR_MS.
 // A failed preflight is remembered for FAILED_FOR_MS, so an outage does not send
 // every bill back to NEAR AI and Intel (Intel's fetch cannot be cancelled).
-let evidence: { signer: string; tcb: string; until: number } | null = null;
-let failed: { reason: string; until: number } | null = null;
+let evidence: { url: string; signer: string; tcb: string; until: number } | null = null;
+let failed: { url: string; reason: string; until: number } | null = null;
 const FAILED_FOR_MS = 60_000;
 export const clearAttested = () => {
   evidence = null;
@@ -230,12 +233,12 @@ export interface PreflightInput {
 
 /** Before the completion: verified gateway evidence, fresh or at most 10 minutes old. Never throws. */
 export async function preflight(x: PreflightInput): Promise<Check> {
-  if (evidence && evidence.until > Date.now()) return { ok: true, signer: evidence.signer, tcb: evidence.tcb };
-  if (failed && failed.until > Date.now()) return fail(failed.reason);
+  if (evidence && evidence.url === x.baseUrl && evidence.until > Date.now()) return { ok: true, signer: evidence.signer, tcb: evidence.tcb };
+  if (failed && failed.url === x.baseUrl && failed.until > Date.now()) return fail(failed.reason);
   evidence = null;
   const c = await freshPreflight(x);
-  if (c.ok) evidence = { signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
-  else failed = { reason: c.reason, until: Date.now() + FAILED_FOR_MS };
+  if (c.ok) evidence = { url: x.baseUrl, signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
+  else failed = { url: x.baseUrl, reason: c.reason, until: Date.now() + FAILED_FOR_MS };
   return c;
 }
 
@@ -259,7 +262,7 @@ export interface ResponseInput {
   apiKey: string;
   chatId: string;
   requestBody: string; // the exact bytes Keel sent
-  responseText: string; // the exact bytes Keel got
+  responseBody: Uint8Array; // the exact bytes Keel got, before any decoding
   preflightSigner: string;
   timeoutMs: number;
   /** Pause before retrying a signature not recorded yet. */
@@ -285,7 +288,7 @@ export async function verifyResponse(x: ResponseInput): Promise<Check> {
         last = fail("signature not found");
         continue;
       }
-      last = await checkResponseSignature(x.requestBody, x.responseText, body, x.preflightSigner);
+      last = await checkResponseSignature(x.requestBody, x.responseBody, body, x.preflightSigner);
       // A valid signature by another key may be a key rotation: the next answer gets fresh preflight evidence.
       if (!last.ok && last.reason === "signer is not the gateway Keel verified before asking") evidence = null;
       if (last.ok || !last.reason.startsWith("signature unavailable")) return last;

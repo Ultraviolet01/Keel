@@ -83,6 +83,11 @@ test("each documented gateway check refuses what it should", async () => {
   const r = await check({ event_log: JSON.stringify(lying) });
   assert.ok(!r.ok && /^measurements unreadable: event .* does not match its digest/.test(r.reason));
   await no({ event_log: JSON.stringify(events.filter((e) => e.imr !== 3)) }, "event log does not match RTMR3");
+  for (const event_type of [2 ** 32 + 1, -1, 1.5, "1"]) {
+    const bad = events.map((e, i) => (i === last3 ? { ...e, event_type } : e));
+    const r2 = await check({ event_log: JSON.stringify(bad) });
+    assert.ok(!r2.ok && r2.reason === "measurements unreadable: malformed event", String(event_type));
+  }
   // Keel's TCB policy, and Intel's collateral edited or expired.
   const swHardening: QuoteVerifierFn = async (q) => ({ ...(await offlineIntel()(q)), tcb: "SWHardeningNeeded" });
   await no({}, "enclave platform TCB is SWHardeningNeeded", fx.nonce, swHardening);
@@ -130,6 +135,13 @@ test("a response signature counts only as a gateway signature over these exact b
   await no({ error_code: "x\nNEAR AI check: ok\u202e" }, "signature unavailable: x?NEAR AI check: ok?");
   await no({ ...ok, signature_kind: { toString: 1 } }, "signature kind object is not one Keel accepts");
   await no({ ...ok, signing_algo: "ed25519" }, "signature is not ecdsa");
+  await no({ ...ok, signing_algo: undefined }, "signature is not ecdsa");
+  // The response hash is over the exact bytes received, even ones that are not valid UTF-8.
+  const bytes = Buffer.concat([Buffer.from(response), Buffer.from([0xff, 0xfe])]);
+  const text = `${sha256Hex(request)}:${sha256Hex(bytes)}`;
+  const raw = { signature_kind: "gateway", signing_algo: "ecdsa", text, signature: await gatewayKey.signMessage({ message: text }), signing_address: gatewayKey.address };
+  assert.equal((await checkResponseSignature(request, bytes, raw, pre)).ok, true);
+  assert.equal((await checkResponseSignature(request, bytes.toString("utf8"), raw, pre)).ok, false); // decoding first would change the hash
   for (const bad of [null, "x", { ...ok, signature: "0x12" }, { ...ok, signing_address: "near.testnet" }, { ...ok, text: "x".repeat(400) }]) {
     assert.equal((await checkResponseSignature(request, response, bad, pre)).ok, false);
   }
@@ -275,7 +287,7 @@ test("signature retries stop at the deadline", async () => {
   const cloud = await fakeCloud({ verdict: "ok", sigNotFound: 99 });
   try {
     const started = Date.now();
-    const r = await verifyResponse({ baseUrl: cloud.cfg.nearAiUrl, apiKey: "k", chatId: "chat-1", requestBody: "a", responseText: "b", preflightSigner: gatewayKey.address, timeoutMs: 300 });
+    const r = await verifyResponse({ baseUrl: cloud.cfg.nearAiUrl, apiKey: "k", chatId: "chat-1", requestBody: "a", responseBody: Buffer.from("b"), preflightSigner: gatewayKey.address, timeoutMs: 300 });
     assert.ok(Date.now() - started < 450, `${Date.now() - started} ms`);
     assert.equal(r.ok, false);
   } finally {
@@ -308,5 +320,42 @@ test("a valid signature from a new gateway key drops the old evidence, so the ne
     assert.equal(cloud.calls.filter((c) => c === "report").length, 2);
   } finally {
     cloud.close();
+  }
+});
+
+test("preflight evidence counts only for the NEAR AI address it was verified at", async () => {
+  const a = await fakeCloud({ verdict: "ok" });
+  const b = await fakeCloud({ verdict: "ok" });
+  try {
+    for (const c of [a, a, b]) assert.equal((await preflight({ baseUrl: c.cfg.nearAiUrl, apiKey: "k", timeoutMs: 2000, verifyQuote: standIn() })).ok, true);
+    assert.deepEqual([a.calls.length, b.calls.length], [1, 1]);
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test("an ok NEAR AI cannot back with a signature is treated as no answer: Claude is asked", async () => {
+  const claudeApi = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "x", stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: "text", text: '{"verdict":"propose","reason":"lookalike of northwind-keel.testnet"}' }] }));
+    });
+  });
+  await new Promise<void>((r) => claudeApi.listen(0, "127.0.0.1", r));
+  const before = process.env.ANTHROPIC_BASE_URL;
+  process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(claudeApi.address() as AddressInfo).port}`;
+  const cloud = await fakeCloud({ verdict: "ok", sigStatus: 503 }); // an edited "ok" whose signature is suppressed
+  try {
+    clearAttested();
+    const v = await review({ ...cloud.cfg, anthropicKey: "test" }, input, 2000, { verifyQuote: standIn(), retryMs: 5 });
+    assert.equal(v?.by, "claude");
+    assert.equal(stricter(pay, v).kind, "propose");
+  } finally {
+    cloud.close();
+    claudeApi.close();
+    if (before === undefined) delete process.env.ANTHROPIC_BASE_URL;
+    else process.env.ANTHROPIC_BASE_URL = before;
   }
 });
