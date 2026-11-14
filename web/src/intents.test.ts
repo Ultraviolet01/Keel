@@ -4,12 +4,12 @@ import { assessDeposit, chainOfAsset, checkDeposit } from "./intents";
 
 const vault = "anchor.keel.near";
 const proposal = { amount: "101330000" };
-const bill = { payee: "0x00000000000000000000000000000000000000AA", chain: "base" };
+const bill = { payee: "0x00000000000000000000000000000000000000AA", chain: "base", amount: "100000000" };
 const reply = (over: Record<string, unknown> = {}) => ({
   status: "PENDING_DEPOSIT",
   quoteResponse: {
     quoteRequest: { recipient: "0x00000000000000000000000000000000000000aa", refundTo: vault, destinationAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", ...over },
-    quote: { amountIn: "101330000", amountOutFormatted: "100.0" },
+    quote: { amountIn: "101330000", amountOut: "100000000", amountOutFormatted: "100.0", ...((over as { quote?: object }).quote ?? {}) },
   },
 });
 
@@ -54,7 +54,20 @@ test("a real 1Click quote that pays someone other than the bill's payee, or on a
   const toAttacker = assessDeposit(200, reply({ recipient: "0x00000000000000000000000000000000000000ab" }), proposal, vault, bill);
   assert.ok(toAttacker.kind === "known" && toAttacker.problems.some((x) => x.includes("but the bill pays")), JSON.stringify(toAttacker));
   const otherChain = assessDeposit(200, reply({ destinationAsset: "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near" }), proposal, vault, bill);
-  assert.ok(otherChain.kind === "known" && otherChain.problems.some((x) => x.includes("but the bill is on base")));
+  assert.ok(otherChain.kind === "known" && otherChain.problems.some((x) => x.includes("but the bill is USDC on base")));
   const noBill = assessDeposit(200, reply(), proposal, vault, null);
   assert.ok(noBill.kind === "known" && noBill.problems.some((x) => x.includes("names no bill")));
+});
+
+test("1Click must deliver the bill's amount of USDC: another token, or less, blocks approval", () => {
+  const junk = assessDeposit(200, reply({ destinationAsset: "nep141:base-0x1111111111111111111111111111111111111111.omft.near" }), proposal, vault, bill);
+  assert.ok(junk.kind === "known" && junk.problems.some((x) => x.includes("but the bill is USDC on base")), JSON.stringify(junk));
+  const less = assessDeposit(200, { ...reply(), quoteResponse: { ...reply().quoteResponse, quote: { amountIn: "101330000", amountOut: "1000", amountOutFormatted: "0.001" } } }, proposal, vault, bill);
+  assert.ok(less.kind === "known" && less.problems.some((x) => x.includes("less than the bill")), JSON.stringify(less));
+});
+
+test("Optimism's USDC, in 1Click's other asset format, is recognised", () => {
+  const opBill = { ...bill, chain: "op" };
+  const d = assessDeposit(200, reply({ destinationAsset: "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ" }), proposal, vault, opBill);
+  assert.ok(d.kind === "known" && d.chain === "op" && d.problems.length === 0, JSON.stringify(d));
 });
