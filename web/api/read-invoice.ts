@@ -3,7 +3,9 @@
 // environment. Stores nothing: the file goes to Claude and the draft comes back.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { MAX_BASE64, MEDIA_TYPES, readInvoice, type MediaType } from "./_invoice.js";
+import { createHash } from "node:crypto";
+import { MAX_BASE64, MEDIA_TYPES, emptyInvoiceDay, invoiceDayPath, readInvoice, takeInvoice, type InvoiceDay, type MediaType } from "./_invoice.js";
+import { readJson, writeJson } from "./_notify.js";
 
 // Best effort per running instance: 10 invoices per visitor per hour.
 const LIMIT = 10;
@@ -39,6 +41,16 @@ export default {
     if (!process.env.ANTHROPIC_API_KEY) return fail(503, "Invoice reading is not set up on this deployment (no ANTHROPIC_API_KEY).");
     const ip = (request.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
     if (!allowed(ip)) return fail(429, "Too many invoices this hour. Try again later or fill in the bill by hand.");
+    // The daily limit, shared by every instance. Without storage on the deployment, the hourly one above still applies.
+    try {
+      const path = invoiceDayPath();
+      const day = (await readJson<InvoiceDay>(path)) ?? emptyInvoiceDay();
+      const limited = takeInvoice(day, ip, (x) => createHash("sha256").update(x).digest("hex"));
+      if (limited) return fail(429, limited);
+      await writeJson(path, day);
+    } catch {
+      /* storage not configured: the per-instance limit stands */
+    }
 
     let body: { data?: unknown; media_type?: unknown };
     try {

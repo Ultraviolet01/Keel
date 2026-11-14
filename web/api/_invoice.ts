@@ -86,3 +86,20 @@ export async function readInvoice(client: Anthropic, data: string, mediaType: Me
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
   return clean(JSON.parse(text) as Record<string, unknown>);
 }
+
+// Invoice reading spends the deployment's Claude credits. Besides the per-instance hourly limit,
+// a durable daily one: per visitor (IP, counted by hash) and in total, across every instance.
+export const INVOICE_LIMITS = { perIpDay: 30, totalDay: 300 };
+export type InvoiceDay = { total: number; byIp: Record<string, number> };
+export const emptyInvoiceDay = (): InvoiceDay => ({ total: 0, byIp: {} });
+export const invoiceDayPath = (date = new Date()) => `limits/invoice-${date.toISOString().slice(0, 10)}.json`;
+
+/** The limit one more invoice would break, if any; counts it when none is broken. */
+export function takeInvoice(day: InvoiceDay, ip: string, hash: (s: string) => string): string | null {
+  const id = hash(ip).slice(0, 32);
+  if (day.total >= INVOICE_LIMITS.totalDay) return "Keel has read all the invoices it can today. Fill in the bill by hand, or try again tomorrow.";
+  if ((day.byIp[id] ?? 0) >= INVOICE_LIMITS.perIpDay) return "You have read enough invoices today. Fill in the bill by hand, or try again tomorrow.";
+  day.total++;
+  day.byIp[id] = (day.byIp[id] ?? 0) + 1;
+  return null;
+}
