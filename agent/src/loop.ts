@@ -110,6 +110,19 @@ export function rotate<T>(xs: T[], round: number): T[] {
   return [...xs.slice(k), ...xs.slice(0, k)];
 }
 
+/** Nonces handed out this round, per vault and chain (the round's proposal list predates them). */
+export const roundNonces = new Map<string, number[]>();
+
+/**
+ * Nonces a new transfer on this chain must not reuse: transfers waiting for the owner (unless their
+ * offer expired), being signed, or signed and maybe not yet mined (nextNonce skips any the chain has
+ * already passed), plus those handed out earlier in this round.
+ */
+export function reservedNonces(proposals: Proposal[], chainId: number, thisRound: number[], now = Date.now()): number[] {
+  const live = (p: Proposal) => p.status === "signing" || p.status === "signed" || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > now));
+  return [...proposals.filter((p) => p.evm && p.evm.chain_id === chainId && live(p)).map((p) => p.evm!.nonce), ...thisRound];
+}
+
 /** The AI review, or "later" when this vault's reviews or time for the round are used up. */
 export async function budgetedReview(cfg: Config, input: ReviewInput): Promise<Verdict | null | "later"> {
   if (budget.reviews >= REVIEWS_PER_VAULT || Date.now() > budget.deadline) return "later";
@@ -144,9 +157,21 @@ export function pruneHandled(handled: State["handled"][string], now = Date.now()
   for (const [id] of closed.slice(HANDLED_MAX_PER_VAULT)) delete handled[id];
 }
 
+/**
+ * Whether a proposal still stands for its bill. One waiting for the owner does, unless its offer
+ * expired. One being signed, signed or executing keeps its bill marked paid; if the bill is no
+ * longer marked paid, the owner released it (its transfer can never land), so it no longer stands
+ * and Keel proposes the bill again, as its message to the owner says.
+ */
+export function inFlight(p: Proposal, paidAt: number | null, now = Date.now()): boolean {
+  if (p.status === "pending") return !p.valid_until_ms || p.valid_until_ms > now;
+  return ["signing", "signed", "executing"].includes(p.status) && paidAt !== null;
+}
+
 export async function runVault(cfg: Config, chain: Chain, vaultId: string, state: State, o: RoundOptions) {
   budget.reviews = 0;
   budget.deadline = o.deadline ?? Infinity;
+  for (const k of [...roundNonces.keys()]) if (k.startsWith(`${vaultId}:`)) roundNonces.delete(k);
   const say = (step: string, text: string, tx?: string, notice?: Notice) => {
     const e: Event = { vault: vaultId, step, text, tx, notice };
     o.say(e);
@@ -393,6 +418,11 @@ async function reconcile(chain: Chain, vaultId: string, proposals: Proposal[], h
   // Signed EVM transfers Keel did not propose (owner withdrawals) are sent too.
   for (const p of proposals) {
     if (p.status === "signed" && p.evm && knownChain(p.evm.chain_id) && !Object.values(handled).some((h) => h.proposalId === p.id)) {
+      // A lost transfer the owner has dealt with: a newer proposal for the same bill superseded it, or
+      // the owner released the bill and it waits to be proposed again (see inFlight). Either way it no
+      // longer stands, and telling the owner to release it again would only mislead.
+      if (p.bill_ref && proposals.some((q) => q.bill_ref === p.bill_ref && q.id > p.id)) continue;
+      if (p.bill_ref && (await chain.view<number | null>(vaultId, "bill_paid_at", { bill_ref: p.bill_ref }).catch(() => 0)) === null) continue;
       handled[`evm-${p.id}`] = { action: "bridge", route: "chain-signatures", proposalId: p.id, at: new Date().toISOString() };
     }
   }
@@ -483,9 +513,7 @@ async function recall(
   say: (step: string, text: string, tx?: string) => void,
 ): Promise<boolean> {
   const paidAt = await chain.view<number | null>(vaultId, "bill_paid_at", { bill_ref: bill.id });
-  const open = proposals.find(
-    (p) => p.bill_ref === bill.id && (["signing", "signed", "executing"].includes(p.status) || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > Date.now()))),
-  );
+  const open = proposals.find((p) => p.bill_ref === bill.id && inFlight(p, paidAt));
   if (!paidAt && !open) return false;
   const at = new Date(paidAt ?? open!.created_at_ms).toISOString();
   if (!dryRun) {
@@ -618,10 +646,10 @@ const viaChainSignatures: Route = async (cfg, chain, vaultId, bill, _tokenId, pr
   const { usdc: onChain, eth } = await balances(route.chain_id, route.token, from);
   if (onChain < units) throw new Error(`the vault's ${bill.chain} address ${from} holds ${usdc(onChain, route.decimals)}, needs ${usdc(units, route.decimals)}; top it up`);
   if (eth === 0n) throw new Error(`the vault's ${bill.chain} address ${from} has no ${gasToken} for gas`);
-  // Earlier transfers on this chain that can still be signed keep their nonces; expired offers never will.
-  const live = (p: Proposal) => p.status === "signing" || (p.status === "pending" && (!p.valid_until_ms || p.valid_until_ms > Date.now()));
-  const reserved = proposals.filter((p) => p.evm && p.evm.chain_id === route.chain_id && live(p)).map((p) => p.evm!.nonce);
-  const evm = await prepareTransfer(route, from, bill.payee, units, reserved);
+  const key = `${vaultId}:${route.chain_id}`;
+  const evm = await prepareTransfer(route, from, bill.payee, units, reservedNonces(proposals, route.chain_id, roundNonces.get(key) ?? []));
+  // Reserved for the rest of the round, so a second bill on this chain never gets the same nonce.
+  roundNonces.set(key, [...(roundNonces.get(key) ?? []), evm.nonce]);
   const where = `from the vault's own ${bill.chain} address ${from.slice(0, 8)}… via NEAR Chain Signatures`;
   // Routine bills: an allowlisted 0x payee, under the chain's auto cap and the vault's caps, is paid
   // without waiting for the owner. The vault checks all of it again; the AI check may still stop it.
