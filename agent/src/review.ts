@@ -33,7 +33,8 @@ export interface ReviewInput {
 export type Verdict = {
   verdict: "ok" | "propose" | "refuse";
   reason: string;
-  by: "near-ai" | "claude";
+  /** "keel": Keel's own check, made without a model. */
+  by: "near-ai" | "claude" | "keel";
   /** NEAR AI only: whether the answer passed the signature and attestation check. */
   attested?: boolean;
   /** NEAR AI only: why the check failed. */
@@ -131,7 +132,7 @@ export type Decision = { kind: "pay" | "propose" | "refuse" | "wait" | "defer"; 
  */
 export function stricter(action: Decision, v: Verdict | null): Decision {
   if (action.kind !== "pay" || !v) return action;
-  const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
+  const who = v.by === "near-ai" ? "NEAR AI" : v.by === "keel" ? "Keel" : "Claude";
   // Someone changed the answer on its way, so even an "ok" cannot be trusted: the owner decides.
   if (v.tampered) return { kind: "propose", reason: `${who}'s answer failed its signature check (${v.check}); the owner decides` };
   if (v.verdict === "ok") return action;
@@ -144,12 +145,42 @@ export function stricter(action: Decision, v: Verdict | null): Decision {
 
 /** One log line for a verdict, saying whether NEAR AI's answer was verified. */
 export function describe(v: Verdict): string {
-  const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
+  const who = v.by === "near-ai" ? "NEAR AI" : v.by === "keel" ? "Keel" : "Claude";
   const proof = v.attested === true ? " (signed for this request by NEAR AI's gateway, attested in an Intel TDX enclave before Keel asked)" : v.attested === false ? ` (not verified: ${v.check})` : "";
   return `${who} check${proof}: ${v.verdict}. ${v.reason}`;
 }
 
+// Invoice text written to steer a reviewer rather than to bill anyone. Checked by plain code before any
+// model sees it, so no model can be talked past it. Ordinary invoice wording does not match.
+const STEERING = [
+  /\bverdicts?\b/i,
+  /\{\s*"/,
+  /\b(ignore|disregard|forget|override|bypass)\b.{0,40}\b(instructions?|rules?|checks?|prompts?|above|previous|system|guidelines?)\b/i,
+  /\b(system prompt|as an ai|language model|you are (an?|the) (ai|assistant|model|reviewer|agent))\b/i,
+  /(^|\s)(system|assistant|user)\s*:/i,
+  /\b(say|answer|respond|reply|return|output|classify)\b.{0,25}\b(ok|okay|approve[ds]?|safe|legitimate|"ok")\b/i,
+  /\b(do not|don't|never)\b.{0,25}\b(flag|propose|refuse|report|question|check|escalate)\b/i,
+  /\b(treasury|payment) (agent|bot|ai|reviewer)\b/i,
+];
+
+// Cyrillic and Greek letters that look Latin, folded so "Іgnore" (Cyrillic І) reads as "Ignore".
+const LOOKALIKE: Record<string, string> = {
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q", "ԝ": "w", "ɡ": "g",
+  "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S",
+  "α": "a", "ε": "e", "ο": "o", "ρ": "p", "ν": "v", "τ": "t", "ι": "i", "κ": "k",
+  "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+};
+
+/** Whether an invoice memo tries to give instructions to whoever reviews it. */
+export function steersReviewer(memo: string | undefined): boolean {
+  if (!memo) return false;
+  // Fold lookalikes first: fullwidth and other compatibility forms (NFKC), then Cyrillic and Greek letters.
+  const text = [...printable(memo).normalize("NFKC")].map((c) => LOOKALIKE[c] ?? c).join("").replace(/[‘’]/g, "'");
+  return STEERING.some((r) => r.test(text));
+}
+
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
+  if (steersReviewer(x.memo)) return { verdict: "propose", reason: "the invoice text tries to give instructions to Keel's reviewer", by: "keel" };
   // The review is a second look, never a reason to stop a round: any failure is "no verdict".
   try {
     return await reviewOnce(cfg, x, timeoutMs, opts);
@@ -163,6 +194,11 @@ async function reviewOnce(cfg: Config, x: ReviewInput, timeoutMs: number, opts: 
   if (cfg.nearAiKey) {
     const r = await askNearAi(cfg, { system: SYSTEM, user, maxTokens: 200, temperature: 0 }, timeoutMs, opts);
     const v = r ? parseVerdict(r.text, "near-ai") : null;
+    if (r && !v) {
+      // An answer with no usable verdict may be one someone garbled on its way: its signature tells.
+      const c = await r.verify();
+      if (!c.ok && c.tampered) return { verdict: "propose", reason: "NEAR AI's answer was unreadable", by: "near-ai", attested: false, check: c.reason, tampered: true };
+    }
     if (v && r) {
       const c = await r.verify();
       if (c.ok) return { ...v, attested: true };
