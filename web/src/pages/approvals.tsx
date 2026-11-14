@@ -65,11 +65,13 @@ export function Approvals(p: PageProps) {
     if (!selected || selected.status !== "pending" || routeOf(selected).kind !== "intents") return;
     let live = true;
     setDeposit({ kind: "loading" });
-    checkDeposit(selected.receiver_id, selected, p.vaultId).then((d) => live && setDeposit(d));
+    const billId = (selected.bill_ref ?? "").split(":")[0];
+    const bill = p.data.bills?.find((b) => b.id === billId) ?? null;
+    checkDeposit(selected.receiver_id, selected, p.vaultId, bill).then((d) => live && setDeposit(d));
     return () => {
       live = false;
     };
-  }, [selected, p.vaultId]);
+  }, [selected, p.vaultId, p.data.bills]);
   const depositBlocks = deposit?.kind === "loading" || deposit?.kind === "unknown" || (deposit?.kind === "known" && deposit.problems.length > 0);
 
   useEffect(() => {

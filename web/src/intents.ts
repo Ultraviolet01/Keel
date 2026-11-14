@@ -36,6 +36,8 @@ export function assessDeposit(
   body: unknown,
   proposal: { amount: string },
   vaultId: string,
+  /** The bill this proposal says it pays; 1Click must pay that bill's payee, on its chain. */
+  bill?: { payee: string; chain?: string | null } | null,
 ): DepositCheck {
   if (httpStatus === 404) return { kind: "unknown" };
   if (httpStatus < 200 || httpStatus >= 300 || !body || typeof body !== "object") {
@@ -49,6 +51,13 @@ export function assessDeposit(
   const refundTo = String(req.refundTo ?? "");
   const problems: string[] = [];
   if (!recipient) problems.push("1Click's record has no recipient");
+  // A stolen agent key could file a real 1Click quote that pays its own address: compare, not just show.
+  if (!bill) problems.push("this proposal names no bill Keel can find, so where 1Click pays cannot be checked");
+  else {
+    if (recipient && recipient.toLowerCase() !== bill.payee.toLowerCase()) problems.push(`1Click would pay ${recipient}, but the bill pays ${bill.payee}`);
+    const chain = chainOfAsset(String(req.destinationAsset ?? ""));
+    if (bill.chain && chain !== bill.chain) problems.push(`1Click would pay on ${chain}, but the bill is on ${bill.chain}`);
+  }
   if (refundTo !== vaultId) problems.push(`refunds would go to ${refundTo || "nobody"}, not this vault`);
   if (quote.amountIn !== undefined && String(quote.amountIn) !== String(proposal.amount)) {
     problems.push(`the quote expects ${quote.amountIn} units in, but this proposal pays ${proposal.amount}`);
@@ -65,13 +74,13 @@ export function assessDeposit(
   };
 }
 
-export async function checkDeposit(depositAddress: string, proposal: { amount: string }, vaultId: string): Promise<DepositCheck> {
+export async function checkDeposit(depositAddress: string, proposal: { amount: string }, vaultId: string, bill?: { payee: string; chain?: string | null } | null): Promise<DepositCheck> {
   try {
     const res = await fetch(`${ONECLICK_URL}/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, {
       signal: AbortSignal.timeout(15_000),
     });
     const body = await res.json().catch(() => null);
-    return assessDeposit(res.status, body, proposal, vaultId);
+    return assessDeposit(res.status, body, proposal, vaultId, bill);
   } catch (e) {
     return { kind: "unreachable", detail: String(e instanceof Error ? e.message : e).slice(0, 120) };
   }
