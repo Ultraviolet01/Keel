@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
 import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
-import { CONFIRM_LIMITS, emptyDay, isDao, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
+import { CONFIRM_LIMITS, emptyDay, isDao, limitDaily, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({
@@ -186,4 +186,20 @@ test("confirmation emails are limited per address, per account and in total each
   const all = Array.from({ length: 500 }, (_, i) => takeConfirmation(day3, `u${i}@example.com`, `u${i}.testnet`)).filter((x) => x === null).length;
   assert.equal(all, CONFIRM_LIMITS.total);
   assert.doesNotMatch(JSON.stringify(day), /victim/i); // addresses are kept only as hashes
+});
+
+test("a parallel burst cannot get past a daily limit", async () => {
+  let stored: string | null = null;
+  const io = {
+    read: async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return stored ? JSON.parse(stored) : null;
+    },
+    write: async (_: string, d: ReturnType<typeof emptyDay>) => {
+      await new Promise((r) => setTimeout(r, 5));
+      stored = JSON.stringify(d);
+    },
+  };
+  const results = await Promise.all(Array.from({ length: 50 }, (_, i) => limitDaily("limits/test.json", emptyDay, (day) => takeConfirmation(day, "victim@example.com", `spam${i}.testnet`), io)));
+  assert.equal(results.filter((r) => r === null).length, CONFIRM_LIMITS.perEmail);
 });

@@ -5,7 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { MAX_BASE64, MEDIA_TYPES, emptyInvoiceDay, invoiceDayPath, readInvoice, takeInvoice, type InvoiceDay, type MediaType } from "./_invoice.js";
-import { readJson, writeJson } from "./_notify.js";
+import { limitDaily } from "./_notify.js";
 
 // Best effort per running instance: 10 invoices per visitor per hour.
 const LIMIT = 10;
@@ -43,11 +43,8 @@ export default {
     if (!allowed(ip)) return fail(429, "Too many invoices this hour. Try again later or fill in the bill by hand.");
     // The daily limit, shared by every instance. Without storage on the deployment, the hourly one above still applies.
     try {
-      const path = invoiceDayPath();
-      const day = (await readJson<InvoiceDay>(path)) ?? emptyInvoiceDay();
-      const limited = takeInvoice(day, ip, (x) => createHash("sha256").update(x).digest("hex"));
+      const limited = await limitDaily<InvoiceDay>(invoiceDayPath(), emptyInvoiceDay, (day) => takeInvoice(day, ip, (x) => createHash("sha256").update(x).digest("hex")));
       if (limited) return fail(429, limited);
-      await writeJson(path, day);
     } catch {
       /* storage not configured: the per-instance limit stands */
     }

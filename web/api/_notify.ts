@@ -192,6 +192,31 @@ export function takeConfirmation(day: Day, email: string, account: string): stri
   return null;
 }
 
+// Read, count and write back strictly one after another per path, so a burst of parallel requests
+// cannot all read the same old count and all pass. (Separate instances each hold their own lock,
+// so the worst case is the limit times the number of running instances, not unlimited.)
+const locks = new Map<string, Promise<unknown>>();
+export async function limitDaily<D>(
+  path: string,
+  empty: () => D,
+  take: (day: D) => string | null,
+  io: { read: (p: string) => Promise<D | null>; write: (p: string, d: D) => Promise<void> } = { read: (p) => readJson<D>(p), write: (p, d) => writeJson(p, d) },
+): Promise<string | null> {
+  const prev = locks.get(path) ?? Promise.resolve();
+  const run = prev.then(async () => {
+    const day = (await io.read(path)) ?? empty();
+    const refused = take(day);
+    if (!refused) await io.write(path, day);
+    return refused;
+  });
+  const settled = run.catch(() => null);
+  locks.set(path, settled);
+  settled.then(() => {
+    if (locks.get(path) === settled) locks.delete(path);
+  });
+  return run;
+}
+
 export const confirmDayPath = (date = new Date()) => `limits/confirm-${date.toISOString().slice(0, 10)}.json`;
 export const emptyDay = (): Day => ({ total: 0, byEmail: {}, byAccount: {} });
 

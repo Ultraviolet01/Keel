@@ -12,7 +12,7 @@
 // GMAIL_APP_PASSWORD (a Gmail app password) in the Vercel project.
 
 import { SPAM_HINT, alertSubject, companyOf, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
-import { confirmDayPath, emptyDay, mapLimit, ownersNeedingTeams, takeConfirmation,
+import { confirmDayPath, emptyDay, limitDaily, mapLimit, ownersNeedingTeams, takeConfirmation,
   APP_URL,
   allSubs,
   getSub,
@@ -59,11 +59,8 @@ async function subscribe(req: SignedRequest & { email?: string }): Promise<Respo
   if (!EMAIL.test(email) || email.length > 200) return fail(400, "That email address does not look right.");
   const old = await getSub(req.accountId);
   if (old && !old.confirmed && Date.now() - old.createdAt < 60_000) return fail(429, "A confirmation email was just sent. Wait a minute before asking again.");
-  const dayPath = confirmDayPath();
-  const day = (await readJson<ReturnType<typeof emptyDay>>(dayPath)) ?? emptyDay();
-  const limited = takeConfirmation(day, email, req.accountId);
+  const limited = await limitDaily(confirmDayPath(), emptyDay, (day) => takeConfirmation(day, email, req.accountId));
   if (limited) return fail(429, limited);
-  await writeJson(dayPath, day);
   if (old) await Promise.all([removeJson(tokenPath(old.confirmToken)), removeJson(tokenPath(old.unsubToken))]);
   const sub: Subscriber = { account: req.accountId, email, confirmed: false, confirmToken: newToken(), unsubToken: newToken(), createdAt: Date.now() };
   await Promise.all([
