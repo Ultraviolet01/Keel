@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
 import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
-import { CONFIRM_LIMITS, emptyDay, isDao, limitDaily, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
+import { BUSY, CONFIRM_LIMITS, emptyDay, isDao, limitDaily, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({
@@ -202,4 +202,30 @@ test("a parallel burst cannot get past a daily limit", async () => {
   };
   const results = await Promise.all(Array.from({ length: 50 }, (_, i) => limitDaily("limits/test.json", emptyDay, (day) => takeConfirmation(day, "victim@example.com", `spam${i}.testnet`), io)));
   assert.equal(results.filter((r) => r === null).length, CONFIRM_LIMITS.perEmail);
+});
+
+test("a hung storage call cannot freeze the limit: it is refused as busy and the next request goes ahead", async () => {
+  let first = true;
+  let writes = 0;
+  const io = {
+    read: async () => {
+      if (first) {
+        first = false;
+        return new Promise<null>(() => {});
+      }
+      return null;
+    },
+    write: async () => {
+      writes++;
+    },
+  };
+  const started = Date.now();
+  const [a, b] = await Promise.all([
+    limitDaily("limits/hang.json", emptyDay, (d) => takeConfirmation(d, "a@b.co", "x.testnet"), io),
+    limitDaily("limits/hang.json", emptyDay, (d) => takeConfirmation(d, "c@d.co", "y.testnet"), io),
+  ]);
+  assert.equal(a, BUSY);
+  assert.equal(b, null);
+  assert.equal(writes, 1);
+  assert.ok(Date.now() - started < 8000);
 });

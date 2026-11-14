@@ -196,6 +196,8 @@ export function takeConfirmation(day: Day, email: string, account: string): stri
 // cannot all read the same old count and all pass. (Separate instances each hold their own lock,
 // so the worst case is the limit times the number of running instances, not unlimited.)
 const locks = new Map<string, Promise<unknown>>();
+const STEP_MS = 5_000;
+export const BUSY = "Keel is busy. Try again in a minute.";
 export async function limitDaily<D>(
   path: string,
   empty: () => D,
@@ -203,11 +205,20 @@ export async function limitDaily<D>(
   io: { read: (p: string) => Promise<D | null>; write: (p: string, d: D) => Promise<void> } = { read: (p) => readJson<D>(p), write: (p, d) => writeJson(p, d) },
 ): Promise<string | null> {
   const prev = locks.get(path) ?? Promise.resolve();
-  const run = prev.then(async () => {
-    const day = (await io.read(path)) ?? empty();
-    const refused = take(day);
-    if (!refused) await io.write(path, day);
-    return refused;
+  // A hung storage call must not hold the lock forever: each step gets STEP_MS, then the next
+  // request goes ahead. A step that ran out of time is abandoned and never writes a stale count.
+  const run = prev.then(() => {
+    let abandoned = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const step = (async () => {
+      const day = (await io.read(path)) ?? empty();
+      if (abandoned) return BUSY;
+      const refused = take(day);
+      if (!refused && !abandoned) await io.write(path, day);
+      return refused;
+    })();
+    const late = new Promise<string>((resolve) => (timer = setTimeout(() => ((abandoned = true), resolve(BUSY)), STEP_MS)));
+    return Promise.race([step, late]).finally(() => clearTimeout(timer));
   });
   const settled = run.catch(() => null);
   locks.set(path, settled);
