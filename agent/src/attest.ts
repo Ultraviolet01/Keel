@@ -25,7 +25,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { INTEL_PCS_URL, QuoteVerifier, getCollateral, type Collateral, type TDReport10, type TDReport15, type TDReport15Ex } from "@phala/dcap-qvl";
 import { recoverMessageAddress, type Hex } from "viem";
 
-export type Check = { ok: true; signer: string; tcb?: string } | { ok: false; reason: string };
+/** `tampered`: the answer came with a signature that does not match it, which is evidence of tampering, not an outage. */
+export type Check = { ok: true; signer: string; tcb?: string } | { ok: false; reason: string; tampered?: true };
 
 const MAX_BODY = 1_000_000; // the real report is about 180 kB
 const HEX = /^[0-9a-f]*$/i;
@@ -34,6 +35,9 @@ const EVIDENCE_FOR_MS = 10 * 60_000; // maximum age of preflight evidence
 export const sha256Hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 const fail = (reason: string): Check => ({ ok: false, reason });
+const tampered = (reason: string): Check => ({ ok: false, reason, tampered: true });
+/** Server-supplied text, safe to put in a reason or a log line. */
+const clean = (v: unknown, max = 40) => (typeof v === "string" || typeof v === "number" ? String(v) : typeof v).replace(/[^\x20-\x7e]/g, "?").slice(0, max);
 
 // Intel SGX Root CA, as published at
 // certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer.
@@ -134,7 +138,7 @@ export async function checkGatewayReport(att: unknown, nonce: string, verify: Qu
   const expected = Buffer.concat([Buffer.from(signer.slice(2), "hex"), Buffer.alloc(12), Buffer.from(nonce, "hex")]);
   if (q.reportData.length !== 64 || !q.reportData.subarray(0, 32).equals(expected.subarray(0, 32))) return fail("TDX quote does not bind the signer");
   if (!q.reportData.subarray(32).equals(expected.subarray(32))) return fail("TDX quote is not for Keel's nonce");
-  if (typeof a.report_data === "string" && a.report_data.toLowerCase().replace(/^0x/, "") !== q.reportData.toString("hex")) return fail("echoed report data differs from the quote");
+  if (typeof a.report_data !== "string" || a.report_data.toLowerCase().replace(/^0x/, "") !== q.reportData.toString("hex")) return fail("echoed report data missing or differs from the quote");
   try {
     const info = asJson(a.info) as { tcb_info?: unknown } | undefined;
     const appCompose = (asJson(info?.tcb_info) as { app_compose?: unknown } | undefined)?.app_compose;
@@ -152,8 +156,8 @@ export async function checkGatewayReport(att: unknown, nonce: string, verify: Qu
 export async function checkResponseSignature(requestBody: string, responseText: string, sig: unknown, preflightSigner: string): Promise<Check> {
   if (!sig || typeof sig !== "object") return fail("no signature");
   const s = sig as Record<string, unknown>;
-  if (s.error_code !== undefined) return fail(`signature unavailable: ${String(s.error_code).slice(0, 40)}`);
-  if (s.signature_kind !== "gateway") return fail(`signature kind ${typeof s.signature_kind === "string" ? s.signature_kind.slice(0, 30) : "missing"} is not one Keel accepts`);
+  if (s.error_code !== undefined) return fail(`signature unavailable: ${clean(s.error_code)}`);
+  if (s.signature_kind !== "gateway") return fail(`signature kind ${s.signature_kind === undefined ? "missing" : clean(s.signature_kind, 30)} is not one Keel accepts`);
   if (s.signing_algo !== undefined && s.signing_algo !== "ecdsa") return fail("signature is not ecdsa");
   const { text, signature, signing_address } = s;
   if (typeof text !== "string" || text.length > 300) return fail("signature text missing or malformed");
@@ -164,25 +168,23 @@ export async function checkResponseSignature(requestBody: string, responseText: 
   if (text !== `${reqHash}:${resHash}`) {
     const parts = text.split(":");
     if (parts.length !== 2) return fail("signature text is not request_hash:response_hash");
-    if (parts[0] !== reqHash) return fail("signed request is not the one Keel sent");
-    return fail("response changed after it was signed");
+    if (parts[0] !== reqHash) return tampered("signed request is not the one Keel sent");
+    return tampered("response changed after it was signed");
   }
   let recovered: string;
   try {
     recovered = await recoverMessageAddress({ message: text, signature: signature as Hex });
   } catch {
-    return fail("signature does not recover");
+    return tampered("signature does not recover");
   }
-  if (recovered.toLowerCase() !== signing_address.toLowerCase()) return fail("signed by another key than the one named");
-  if (recovered.toLowerCase() !== preflightSigner.toLowerCase()) return fail("signer is not the gateway Keel verified before asking");
+  if (recovered.toLowerCase() !== signing_address.toLowerCase()) return tampered("signed by another key than the one named");
+  if (recovered.toLowerCase() !== preflightSigner.toLowerCase()) return tampered("signer is not the gateway Keel verified before asking");
   return { ok: true, signer: recovered.toLowerCase() };
 }
 
-/** GET a JSON body, refusing anything over MAX_BODY. Returns the status too, for 404 retries. */
-async function getJson(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(url, { headers: { Accept: "application/json", ...headers }, signal });
-  if (res.status === 404) return { status: 404, body: null };
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+/** A response body as text, refusing anything over `max` bytes. */
+export async function readCapped(res: Response, max = MAX_BODY): Promise<string> {
+  if (!res.body) return "";
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -190,19 +192,32 @@ async function getJson(url: string, headers: Record<string, string>, signal: Abo
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > MAX_BODY) {
+    if (size > max) {
       await reader.cancel();
       throw new Error("response too large");
     }
     chunks.push(value);
   }
-  return { status: res.status, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** GET a JSON body, refusing anything over MAX_BODY. Returns the status too, for 404 retries. */
+async function getJson(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(url, { headers: { Accept: "application/json", ...headers }, signal });
+  if (res.status === 404) return { status: 404, body: null };
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+  return { status: res.status, body: JSON.parse(await readCapped(res)) };
 }
 
 // Preflight evidence: the gateway signer Keel verified, kept for EVIDENCE_FOR_MS.
+// A failed preflight is remembered for FAILED_FOR_MS, so an outage does not send
+// every bill back to NEAR AI and Intel (Intel's fetch cannot be cancelled).
 let evidence: { signer: string; tcb: string; until: number } | null = null;
+let failed: { reason: string; until: number } | null = null;
+const FAILED_FOR_MS = 60_000;
 export const clearAttested = () => {
   evidence = null;
+  failed = null;
 };
 
 export interface PreflightInput {
@@ -216,7 +231,15 @@ export interface PreflightInput {
 /** Before the completion: verified gateway evidence, fresh or at most 10 minutes old. Never throws. */
 export async function preflight(x: PreflightInput): Promise<Check> {
   if (evidence && evidence.until > Date.now()) return { ok: true, signer: evidence.signer, tcb: evidence.tcb };
+  if (failed && failed.until > Date.now()) return fail(failed.reason);
   evidence = null;
+  const c = await freshPreflight(x);
+  if (c.ok) evidence = { signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
+  else failed = { reason: c.reason, until: Date.now() + FAILED_FOR_MS };
+  return c;
+}
+
+async function freshPreflight(x: PreflightInput): Promise<Check> {
   try {
     const deadline = Date.now() + x.timeoutMs;
     const nonce = randomBytes(32).toString("hex");
@@ -225,9 +248,7 @@ export async function preflight(x: PreflightInput): Promise<Check> {
     const { body } = await getJson(`${x.baseUrl}/attestation/report?signing_algo=ecdsa&nonce=${nonce}`, auth, AbortSignal.timeout(x.timeoutMs));
     const report = body as { gateway_attestation?: unknown } | null;
     const verify = x.verifyQuote ?? intelVerifier(Math.max(1, deadline - Date.now()));
-    const c = await within(checkGatewayReport(report?.gateway_attestation, nonce, verify), Math.max(1, deadline - Date.now()), "attestation check");
-    if (c.ok) evidence = { signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
-    return c;
+    return await within(checkGatewayReport(report?.gateway_attestation, nonce, verify), Math.max(1, deadline - Date.now()), "attestation check");
   } catch (e) {
     return fail(`check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
   }
@@ -249,17 +270,24 @@ export interface ResponseInput {
 export async function verifyResponse(x: ResponseInput): Promise<Check> {
   try {
     if (!/^[\w.:-]{1,128}$/.test(x.chatId)) return fail("no usable chat id");
+    const deadline = Date.now() + x.timeoutMs;
     const signal = AbortSignal.timeout(x.timeoutMs);
     const url = `${x.baseUrl}/signature/${encodeURIComponent(x.chatId)}?signing_algo=ecdsa`;
     let last: Check = fail("signature not found");
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await new Promise((r) => setTimeout(r, x.retryMs ?? 700));
+      if (attempt) {
+        const pause = Math.min(x.retryMs ?? 700, deadline - Date.now());
+        if (pause <= 0) break;
+        await new Promise((r) => setTimeout(r, pause));
+      }
       const { status, body } = await getJson(url, { Authorization: `Bearer ${x.apiKey}` }, signal);
       if (status === 404) {
         last = fail("signature not found");
         continue;
       }
       last = await checkResponseSignature(x.requestBody, x.responseText, body, x.preflightSigner);
+      // A valid signature by another key may be a key rotation: the next answer gets fresh preflight evidence.
+      if (!last.ok && last.reason === "signer is not the gateway Keel verified before asking") evidence = null;
       if (last.ok || !last.reason.startsWith("signature unavailable")) return last;
     }
     return last;

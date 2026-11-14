@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { privateKeyToAccount } from "viem/accounts";
-import { checkGatewayReport, checkResponseSignature, clearAttested, replayRtmr3, sha256Hex, verifyQuote, type QuoteVerifierFn } from "./attest";
+import { checkGatewayReport, checkResponseSignature, clearAttested, preflight, replayRtmr3, sha256Hex, verifyQuote, verifyResponse, type QuoteVerifierFn } from "./attest";
 import { review, stricter } from "./review";
 import type { Config } from "./chain";
 
@@ -67,7 +67,8 @@ test("each documented gateway check refuses what it should", async () => {
   debug[TD + 120] |= 1;
   assert.equal((await check({ intel_quote: debug.toString("hex") })).ok, false);
   // HTTP copies that differ from the verified quote.
-  await no({ report_data: "00" + ga.report_data.slice(2) }, "echoed report data differs from the quote");
+  await no({ report_data: "00" + ga.report_data.slice(2) }, "echoed report data missing or differs from the quote");
+  for (const report_data of [undefined, null, 7, [], {}]) await no({ report_data } as never, "echoed report data missing or differs from the quote");
   // The configuration and the event log.
   await no({ info: { tcb_info: { app_compose: ga.info.tcb_info.app_compose + " " } } }, "MRCONFIGID does not match app_compose");
   // tcb_info may come as JSON text; it is decoded, not rejected.
@@ -103,21 +104,31 @@ const signed = async (req = request, res = response, key = gatewayKey, extra: Re
 
 test("a response signature counts only as a gateway signature over these exact bytes, by the preflight signer", async () => {
   const pre = gatewayKey.address;
-  const no = async (sig: unknown, reason: string, req = request, res = response) => assert.deepEqual(await checkResponseSignature(req, res, sig, pre), { ok: false, reason });
+  const no = async (sig: unknown, reason: string, req = request, res = response) => {
+    const r = await checkResponseSignature(req, res, sig, pre);
+    assert.ok(!r.ok && r.reason === reason, `${reason}: ${JSON.stringify(r)}`);
+    return r;
+  };
+  const tamper = async (sig: unknown, reason: string, req = request, res = response) => assert.equal(((await no(sig, reason, req, res)) as { tampered?: true }).tampered, true, reason);
   assert.deepEqual(await checkResponseSignature(request, response, await signed(), pre), { ok: true, signer: pre.toLowerCase() });
-  await no(await signed(request, response.replace("propose", "ok")), "response changed after it was signed");
-  await no(await signed(), "response changed after it was signed", request, response.replace("propose", "ok"));
-  await no(await signed(), "signed request is not the one Keel sent", request.replace("bill A", "bill B"));
+  // Mismatches between a present signature and the answer are evidence of tampering.
+  await tamper(await signed(request, response.replace("propose", "ok")), "response changed after it was signed");
+  await tamper(await signed(), "response changed after it was signed", request, response.replace("propose", "ok"));
+  await tamper(await signed(), "signed request is not the one Keel sent", request.replace("bill A", "bill B"));
   // The gateway's key changed since Keel verified it: a valid signature, but not by the attested signer.
-  await no(await signed(request, response, otherKey), "signer is not the gateway Keel verified before asking");
+  await tamper(await signed(request, response, otherKey), "signer is not the gateway Keel verified before asking");
   const s = await signed(request, response, otherKey);
-  await no({ ...s, signing_address: gatewayKey.address }, "signed by another key than the one named");
+  await tamper({ ...s, signing_address: gatewayKey.address }, "signed by another key than the one named");
   // signature_kind decides the expected text; an unknown or missing kind is not guessed from the text.
   await no(await signed(request, response, gatewayKey, { signature_kind: "provider_tee" }), "signature kind provider_tee is not one Keel accepts");
   await no(await signed(request, response, gatewayKey, { signature_kind: undefined }), "signature kind missing is not one Keel accepts");
   const ok = await signed();
   await no({ ...ok, text: `m:${ok.text}` }, "signature text is not request_hash:response_hash");
   await no({ error_code: "stream_disconnected", message: "unavailable" }, "signature unavailable: stream_disconnected");
+  // Hostile server text: no throw, and nothing unprintable reaches a reason or a log line.
+  await no({ error_code: { toString: 1 } }, "signature unavailable: object");
+  await no({ error_code: "x\nNEAR AI check: ok\u202e" }, "signature unavailable: x?NEAR AI check: ok?");
+  await no({ ...ok, signature_kind: { toString: 1 } }, "signature kind object is not one Keel accepts");
   await no({ ...ok, signing_algo: "ed25519" }, "signature is not ecdsa");
   for (const bad of [null, "x", { ...ok, signature: "0x12" }, { ...ok, signing_address: "near.testnet" }, { ...ok, text: "x".repeat(400) }]) {
     assert.equal((await checkResponseSignature(request, response, bad, pre)).ok, false);
@@ -161,7 +172,9 @@ async function fakeCloud(s: Scenario) {
         if (s.report === "huge") return res.end(JSON.stringify({ pad: "x".repeat(1_200_000) }));
         if (s.report === "junk") return res.end("<html>not json");
         const nonce = s.report === "stale-nonce" ? fx.nonce : (url.searchParams.get("nonce") ?? "");
-        return res.end(JSON.stringify({ gateway_attestation: { ...ga, report_data: undefined, signing_address: gatewayKey.address, request_nonce: url.searchParams.get("nonce"), intel_quote: forged(gatewayKey.address, nonce) } }));
+        const quote = forged(gatewayKey.address, nonce);
+        const report_data = Buffer.from(quote, "hex").subarray(TD + 520, TD + 584).toString("hex");
+        return res.end(JSON.stringify({ gateway_attestation: { ...ga, report_data, signing_address: gatewayKey.address, request_nonce: url.searchParams.get("nonce"), intel_quote: quote } }));
       }
       if (url.pathname.endsWith("/chat/completions")) {
         calls.push("chat");
@@ -216,6 +229,7 @@ test("a signature not recorded yet is retried briefly", async () => {
 test("attacks on the answer never make Keel pay more than its rules allow", async () => {
   const cases: [string, Scenario, string][] = [
     ["verdict edited after signing (refuse to ok)", { verdict: "refuse", tamper: (r) => r.replace("refuse", "ok") }, "response changed after it was signed"],
+    ["verdict edited after signing (propose to ok)", { verdict: "propose", tamper: (r) => r.replace("propose", "ok") }, "response changed after it was signed"],
     ["signed by a key other than the attested gateway", { verdict: "refuse", signer: otherKey }, "signer is not the gateway Keel verified before asking"],
     ["old signature replayed for another request", { verdict: "refuse", signFor: "other-request" }, "signed request is not the one Keel sent"],
     ["signature of an unknown kind", { verdict: "refuse", sigExtra: { signature_kind: "provider_tee" } }, "signature kind provider_tee is not one Keel accepts"],
@@ -232,8 +246,11 @@ test("attacks on the answer never make Keel pay more than its rules allow", asyn
     const { v, decision } = await run(s, name.startsWith("Intel's service") ? 300 : 2000);
     assert.equal(v?.attested, false, `${name}: ${v?.check}`);
     assert.ok(v?.check?.startsWith(why), `${name}: ${v?.check}`);
-    if (v?.verdict === "ok") assert.deepEqual(decision, pay, name); // same as no review: the vault's rules decide
-    else assert.equal(decision.kind, "propose", name); // an unproven refusal goes to the owner, never straight to refuse
+    // An unproven refusal goes to the owner, never straight to refuse; an answer someone edited goes
+    // to the owner even if it now says "ok"; an unverified "ok" leaves the vault's rules to decide.
+    if (v?.verdict === "ok" && !v.tampered) assert.deepEqual(decision, pay, name);
+    else assert.equal(decision.kind, "propose", name);
+    if (s.tamper) assert.equal(v?.tampered, true, name);
   }
 });
 
@@ -244,4 +261,52 @@ test("a slow signature endpoint is given up within the timeout and the round goe
   assert.equal(v?.attested, false);
   assert.match(v?.check ?? "", /^check failed/);
   assert.equal(decision.kind, "propose");
+});
+
+test("a man in the middle who turns NEAR AI's warning into an ok does not get a payment", async () => {
+  const { v, decision } = await run({ verdict: "propose", tamper: (r) => r.replace("propose", "ok") });
+  assert.equal(v?.verdict, "ok");
+  assert.equal(v?.tampered, true);
+  assert.equal(decision.kind, "propose");
+  assert.match(decision.reason, /failed its signature check \(response changed after it was signed\); the owner decides/);
+});
+
+test("signature retries stop at the deadline", async () => {
+  const cloud = await fakeCloud({ verdict: "ok", sigNotFound: 99 });
+  try {
+    const started = Date.now();
+    const r = await verifyResponse({ baseUrl: cloud.cfg.nearAiUrl, apiKey: "k", chatId: "chat-1", requestBody: "a", responseText: "b", preflightSigner: gatewayKey.address, timeoutMs: 300 });
+    assert.ok(Date.now() - started < 450, `${Date.now() - started} ms`);
+    assert.equal(r.ok, false);
+  } finally {
+    cloud.close();
+  }
+});
+
+test("a failed preflight is remembered for a minute, so an outage does not hit Intel for every bill", async () => {
+  const cloud = await fakeCloud({ verdict: "ok" });
+  let intelCalls = 0;
+  const down: QuoteVerifierFn = async () => {
+    intelCalls++;
+    throw new Error("Intel down");
+  };
+  try {
+    for (let i = 0; i < 5; i++) assert.equal((await preflight({ baseUrl: cloud.cfg.nearAiUrl, apiKey: "k", timeoutMs: 2000, verifyQuote: down })).ok, false);
+    assert.equal(intelCalls, 1);
+    assert.deepEqual(cloud.calls, ["report"]);
+  } finally {
+    cloud.close();
+  }
+});
+
+test("a valid signature from a new gateway key drops the old evidence, so the next answer is checked afresh", async () => {
+  const cloud = await fakeCloud({ verdict: "ok", signer: otherKey });
+  try {
+    const first = await review(cloud.cfg, input, 2000, { verifyQuote: standIn(), retryMs: 20 });
+    assert.equal(first?.check, "signer is not the gateway Keel verified before asking");
+    await review(cloud.cfg, input, 2000, { verifyQuote: standIn(), retryMs: 20 });
+    assert.equal(cloud.calls.filter((c) => c === "report").length, 2);
+  } finally {
+    cloud.close();
+  }
 });

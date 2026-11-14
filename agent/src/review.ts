@@ -10,7 +10,7 @@
 // but no more than a proposal: the owner decides instead of an unproven refusal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { preflight, verifyResponse, type Check, type QuoteVerifierFn } from "./attest";
+import { preflight, readCapped, verifyResponse, type Check, type QuoteVerifierFn } from "./attest";
 import type { Config } from "./chain";
 
 export interface ReviewInput {
@@ -36,6 +36,8 @@ export type Verdict = {
   attested?: boolean;
   /** NEAR AI only: why the check failed. */
   check?: string;
+  /** NEAR AI only: the answer's signature did not match it (evidence of tampering, not an outage). */
+  tampered?: boolean;
 };
 
 const SYSTEM = `You check one outgoing payment for a company's treasury agent before it is paid without a human.
@@ -82,8 +84,11 @@ export type Decision = { kind: "pay" | "propose" | "refuse" | "wait" | "defer"; 
  * toward caution; every other decision, and a missing verdict, stays as it was.
  */
 export function stricter(action: Decision, v: Verdict | null): Decision {
-  if (action.kind !== "pay" || !v || v.verdict === "ok") return action;
+  if (action.kind !== "pay" || !v) return action;
   const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
+  // Someone changed the answer on its way, so even an "ok" cannot be trusted: the owner decides.
+  if (v.tampered) return { kind: "propose", reason: `${who}'s answer failed its signature check (${v.check}); the owner decides` };
+  if (v.verdict === "ok") return action;
   // An answer that failed the attestation check could have been altered on its
   // way: it may still stop Keel paying alone, but only the owner can refuse.
   if (v.attested === false) return { kind: "propose", reason: `${who} check (answer not verified): ${v.reason}` };
@@ -105,7 +110,8 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, op
     const v = r ? parseVerdict(r.text, "near-ai") : null;
     if (v && r) {
       const c = await r.verify();
-      return c.ok ? { ...v, attested: true } : { ...v, attested: false, check: c.reason };
+      if (c.ok) return { ...v, attested: true };
+      return c.tampered ? { ...v, attested: false, check: c.reason, tampered: true } : { ...v, attested: false, check: c.reason };
     }
   }
   if (cfg.anthropicKey) {
@@ -141,7 +147,7 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: Attest
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return undefined;
-    const raw = await res.text();
+    const raw = await readCapped(res, 200_000);
     const parsed = JSON.parse(raw) as { id?: unknown; choices?: { message?: { content?: string } }[] };
     const text = parsed.choices?.[0]?.message?.content;
     if (!text) return undefined;
