@@ -158,6 +158,10 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, op
   if ([x.payeeName, ...x.knownPayees].some((n) => steersReviewer(n))) return { verdict: "propose", reason: "a payee name tries to give instructions to Keel's reviewer", by: "keel" };
   // The payee's account name is chosen by whoever created it, and the model reads it too.
   if (steersReviewer(x.payee.replace(/[-_.]/g, " "))) return { verdict: "propose", reason: "the payee's account name tries to give instructions to Keel's reviewer", by: "keel" };
+  // An instruction can be split across fields that each look harmless; the model reads them together.
+  const fields = [x.payeeName ?? "", x.payee.replace(/[-_.]/g, " "), x.memo ?? ""].filter(Boolean);
+  if (fields.some((a, i) => fields.some((b, j) => i !== j && steersReviewer(`${a} ${b}`))))
+    return { verdict: "propose", reason: "the payee's name and invoice text together try to give instructions to Keel's reviewer", by: "keel" };
   // The review is a second look, never a reason to stop a round: any failure is "no verdict".
   try {
     return await reviewOnce(cfg, x, timeoutMs, opts);
