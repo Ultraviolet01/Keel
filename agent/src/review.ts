@@ -10,7 +10,7 @@
 // but no more than a proposal: the owner decides instead of an unproven refusal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { verifyChat, type Check } from "./attest";
+import { verifyChat, type Check, type QuoteVerifierFn } from "./attest";
 import type { Config } from "./chain";
 
 export interface ReviewInput {
@@ -94,14 +94,14 @@ export function stricter(action: Decision, v: Verdict | null): Decision {
 /** One log line for a verdict, saying whether NEAR AI's answer was verified. */
 export function describe(v: Verdict): string {
   const who = v.by === "near-ai" ? "NEAR AI" : "Claude";
-  const proof = v.attested === true ? " (signed by NEAR AI's attested key, for this request)" : v.attested === false ? ` (not verified: ${v.check})` : "";
+  const proof = v.attested === true ? " (signed for this request by NEAR AI's key, in an Intel TDX enclave Intel's certificates verify)" : v.attested === false ? ` (not verified: ${v.check})` : "";
   return `${who} check${proof}: ${v.verdict}. ${v.reason}`;
 }
 
-export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000): Promise<Verdict | null> {
+export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: { verifyQuote?: QuoteVerifierFn } = {}): Promise<Verdict | null> {
   const user = prompt(x);
   if (cfg.nearAiKey) {
-    const r = await nearAi(cfg, user, timeoutMs);
+    const r = await nearAi(cfg, user, timeoutMs, opts.verifyQuote);
     const v = r ? parseVerdict(r.text, "near-ai") : null;
     if (v && r) {
       const c = await r.verify();
@@ -116,7 +116,7 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000): P
 }
 
 /** The model's text, and a check of NEAR AI's signature over the exact bytes sent and received. */
-async function nearAi(cfg: Config, user: string, timeoutMs: number): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
+async function nearAi(cfg: Config, user: string, timeoutMs: number, verifyQuote?: QuoteVerifierFn): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
   try {
     // Kept as the exact string sent: NEAR AI signs its hash.
     const body = JSON.stringify({
@@ -142,7 +142,7 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number): Promise<{ t
     const chatId = typeof parsed.id === "string" ? parsed.id : "";
     return {
       text,
-      verify: () => verifyChat({ baseUrl: cfg.nearAiUrl, apiKey: cfg.nearAiKey ?? "", model: cfg.nearAiModel, chatId, requestBody: body, responseText: raw, timeoutMs }),
+      verify: () => verifyChat({ baseUrl: cfg.nearAiUrl, apiKey: cfg.nearAiKey ?? "", model: cfg.nearAiModel, chatId, requestBody: body, responseText: raw, timeoutMs, verifyQuote }),
     };
   } catch {
     return undefined;

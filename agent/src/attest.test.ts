@@ -1,63 +1,77 @@
-// Offline tests of the NEAR AI attestation check. No network: the attestation
-// report is a real one NEAR AI published (fixtures/nearai-attestation.json),
-// and the signatures come from a throwaway test key standing in for NEAR AI's.
+// Offline tests of the NEAR AI attestation check. No network:
+// - fixtures/nearai-attestation.json is a real attestation report NEAR AI published,
+// - fixtures/intel-collateral.json is Intel's real collateral for its quote,
+//   verified at the moment it was fetched,
+// - chat signatures come from a throwaway test key standing in for NEAR AI's.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { privateKeyToAccount } from "viem/accounts";
-import { checkAttestation, checkSignature, clearAttested, readQuote, sha256Hex } from "./attest";
+import { checkAttestation, checkSignature, clearAttested, sha256Hex, verifyQuote, type QuoteVerifierFn } from "./attest";
 import { review, stricter } from "./review";
 import type { Config } from "./chain";
 
-const fx = JSON.parse(readFileSync(new URL("./fixtures/nearai-attestation.json", import.meta.url), "utf8")) as {
-  nonce: string;
-  gateway_attestation: { signing_address: string; signing_algo: string; intel_quote: string; report_data: string };
-};
+const read = (f: string) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8"));
+const fx = read("nearai-attestation.json") as { nonce: string; gateway_attestation: { signing_address: string; signing_algo: string; intel_quote: string; report_data: string } };
+const intel = read("intel-collateral.json") as { fetched_at_secs: number; collateral: Record<string, string> };
 const real = { gateway_attestation: fx.gateway_attestation };
 const realSigner = fx.gateway_attestation.signing_address;
+const realQuote = Buffer.from(fx.gateway_attestation.intel_quote, "hex");
+const T = intel.fetched_at_secs;
+
+/** Intel's real check, offline: the saved collateral, at the time it was fetched. */
+const offlineIntel =
+  (collateral = intel.collateral, now = T): QuoteVerifierFn =>
+  async (q) =>
+    verifyQuote(q, collateral as never, now);
 
 // Throwaway keys for tests only; they hold nothing.
 const nearAiKey = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
 const otherKey = privateKeyToAccount("0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a");
 
-const REPORT_DATA = 48 + 520; // byte offset in a version 4 TDX quote
+const REPORT_DATA = 48 + 520; // byte offset of report_data in a version 4 TDX quote
 const nonceHex = (n: number) => n.toString(16).padStart(2, "0").repeat(32);
 
-/** The real quote with its report_data rewritten. Shows what the light check cannot catch: Intel's signature is not checked. */
-function quoteFor(addr: string, nonce: string, debug = false): string {
-  const q = Buffer.from(fx.gateway_attestation.intel_quote, "hex");
+/** The real quote with its report_data rewritten: a forgery, since Intel's signature no longer matches. */
+function forged(addr: string, nonce: string): string {
+  const q = Buffer.from(realQuote);
   Buffer.concat([Buffer.from(addr.slice(2), "hex"), Buffer.alloc(12), Buffer.from(nonce, "hex")]).copy(q, REPORT_DATA);
-  if (debug) q[48 + 120] |= 1;
   return q.toString("hex");
 }
 
 beforeEach(() => clearAttested());
 
-test("the real NEAR AI quote binds its signer and Keel's nonce", () => {
-  const q = readQuote(fx.gateway_attestation.intel_quote);
-  assert.ok(q);
-  assert.equal(q.reportData.toString("hex"), fx.gateway_attestation.report_data);
-  assert.equal(q.debug, false);
-  assert.deepEqual(checkAttestation(real, realSigner, fx.nonce), { ok: true, signer: realSigner.toLowerCase() });
+test("NEAR AI's real quote verifies up to Intel's root, and binds its signer and Keel's nonce", async () => {
+  const proof = verifyQuote(realQuote, intel.collateral as never, T);
+  assert.equal(proof.tcb, "UpToDate");
+  assert.equal(proof.reportData.toString("hex"), fx.gateway_attestation.report_data);
+  assert.deepEqual(await checkAttestation(real, realSigner, fx.nonce, offlineIntel()), { ok: true, signer: realSigner.toLowerCase(), tcb: "UpToDate" });
 });
 
-test("an attestation for another nonce, another signer, a debug enclave or junk is refused", () => {
-  assert.deepEqual(checkAttestation(real, realSigner, nonceHex(7)), { ok: false, reason: "TDX quote is not for Keel's nonce" });
-  assert.deepEqual(checkAttestation(real, nearAiKey.address, fx.nonce), { ok: false, reason: "attestation does not name the signer" });
-  const debug = { gateway_attestation: { ...fx.gateway_attestation, intel_quote: quoteFor(realSigner, fx.nonce, true) } };
-  assert.deepEqual(checkAttestation(debug, realSigner, fx.nonce), { ok: false, reason: "attestation is from a debug enclave" });
-  // The report names the signer, but the quote inside binds someone else.
-  const swapped = { gateway_attestation: { ...fx.gateway_attestation, intel_quote: quoteFor(otherKey.address, fx.nonce) } };
-  assert.deepEqual(checkAttestation(swapped, realSigner, fx.nonce), { ok: false, reason: "TDX quote does not bind the signer" });
-  for (const intel_quote of ["", "zz", fx.gateway_attestation.intel_quote.slice(0, 600), "05" + fx.gateway_attestation.intel_quote.slice(2)]) {
-    const r = checkAttestation({ gateway_attestation: { ...fx.gateway_attestation, intel_quote } }, realSigner, fx.nonce);
-    assert.equal(r.ok, false, intel_quote.slice(0, 10));
-  }
-  for (const junk of [null, 1, "x", [], {}, { gateway_attestation: { signing_address: realSigner, signing_algo: "ed25519", intel_quote: fx.gateway_attestation.intel_quote } }]) {
-    assert.equal(checkAttestation(junk, realSigner, fx.nonce).ok, false);
-  }
+test("a forged, edited or stale quote fails Intel's check", async () => {
+  const check = (att: object, signer = realSigner, nonce = fx.nonce, v = offlineIntel()) => checkAttestation({ gateway_attestation: { ...fx.gateway_attestation, ...att } }, signer, nonce, v);
+  // A quote rewritten to bind another key: what the light check alone could not catch.
+  assert.deepEqual(await check({ signing_address: otherKey.address, intel_quote: forged(otherKey.address, fx.nonce) }, otherKey.address), {
+    ok: false,
+    reason: "Intel check failed: ISV enclave report signature is invalid",
+  });
+  // One flipped bit anywhere in the signed part, here the TD's debug attribute.
+  const debug = Buffer.from(realQuote);
+  debug[48 + 120] |= 1;
+  assert.equal((await check({ intel_quote: debug.toString("hex") })).ok, false);
+  // A genuine quote, but made for another request's nonce.
+  assert.deepEqual(await check({}, realSigner, nonceHex(7)), { ok: false, reason: "TDX quote is not for Keel's nonce" });
+  // Intel's collateral edited (a TCB level relabelled), or used after it expired.
+  const edited = { ...intel.collateral, tcb_info: intel.collateral.tcb_info.replace("OutOfDate", "UpToDate") };
+  assert.equal((await check({}, realSigner, fx.nonce, offlineIntel(edited))).ok, false);
+  assert.deepEqual(await check({}, realSigner, fx.nonce, offlineIntel(intel.collateral, T + 40 * 86400)), { ok: false, reason: "Intel check failed: TCBInfo expired" });
+  // Missing or junk quotes and reports.
+  for (const intel_quote of ["", "zz", fx.gateway_attestation.intel_quote.slice(0, 600)]) assert.equal((await check({ intel_quote })).ok, false, intel_quote.slice(0, 8));
+  assert.deepEqual(await checkAttestation(real, nearAiKey.address, fx.nonce, offlineIntel()), { ok: false, reason: "attestation does not name the signer" });
+  for (const junk of [null, 1, "x", [], {}]) assert.equal((await checkAttestation(junk, realSigner, fx.nonce, offlineIntel())).ok, false);
+  assert.equal((await check({ signing_algo: "ed25519" })).ok, false);
 });
 
 const request = '{"model":"m","messages":[{"role":"user","content":"bill A"}]}';
@@ -82,17 +96,23 @@ test("a signature counts only for this request, this response and its own key", 
   }
 });
 
+// End to end through review(). A test key cannot get a quote Intel signed, so these runs use a
+// stand-in for Intel's check that only reads report_data; the tests above run Intel's real check.
+const standIn =
+  (tcb = "UpToDate"): QuoteVerifierFn =>
+  async (q) => ({ reportData: q.subarray(REPORT_DATA, REPORT_DATA + 64), tcb });
+const never: QuoteVerifierFn = () => new Promise(() => {});
+
 type Scenario = {
   verdict: "ok" | "propose" | "refuse";
   /** What a man in the middle does to the answer after NEAR AI signed it. */
   tamper?: (raw: string) => string;
   signFor?: "this" | "other-request";
   signer?: typeof nearAiKey;
-  /** Whose address the attestation's quote binds. */
-  attested?: typeof nearAiKey;
   sigStatus?: number;
   sigDelayMs?: number;
   report?: "good" | "huge" | "junk" | "stale-nonce";
+  verifyQuote?: QuoteVerifierFn;
 };
 
 /** A local stand-in for NEAR AI Cloud: chat, signature and attestation report. */
@@ -118,8 +138,7 @@ async function fakeCloud(s: Scenario) {
         if (s.report === "huge") return res.end(JSON.stringify({ pad: "x".repeat(1_200_000) }));
         if (s.report === "junk") return res.end("<html>not json");
         const nonce = s.report === "stale-nonce" ? fx.nonce : (url.searchParams.get("nonce") ?? "");
-        const who = s.attested ?? nearAiKey;
-        return res.end(JSON.stringify({ gateway_attestation: { signing_address: who.address, signing_algo: "ecdsa", intel_quote: quoteFor(who.address, nonce) } }));
+        return res.end(JSON.stringify({ gateway_attestation: { signing_address: nearAiKey.address, signing_algo: "ecdsa", intel_quote: forged(nearAiKey.address, nonce) } }));
       }
       res.writeHead(404).end();
     });
@@ -135,7 +154,7 @@ const pay = { kind: "pay" as const, reason: "allowlisted payee within the per-pa
 async function run(s: Scenario, timeoutMs = 2000) {
   const cloud = await fakeCloud(s);
   try {
-    const v = await review(cloud.cfg, input, timeoutMs);
+    const v = await review(cloud.cfg, input, timeoutMs, { verifyQuote: s.verifyQuote ?? standIn() });
     return { v, decision: stricter(pay, v) };
   } finally {
     cloud.close();
@@ -154,12 +173,15 @@ test("attacks on the answer never make Keel pay more than its rules allow", asyn
     ["forged refusal, signed by a key the attestation does not name", { verdict: "refuse", signer: otherKey }, "attestation does not name the signer"],
     ["old signature replayed for another request", { verdict: "refuse", signFor: "other-request" }, "signed request is not the one Keel sent"],
     ["attestation quote for an old nonce", { verdict: "refuse", report: "stale-nonce" }, "TDX quote is not for Keel's nonce"],
+    ["forged quote, run through Intel's real check", { verdict: "refuse", verifyQuote: offlineIntel() }, "Intel check failed: ISV enclave report signature is invalid"],
+    ["enclave platform behind on security patches", { verdict: "refuse", verifyQuote: standIn("OutOfDate") }, "enclave platform TCB is OutOfDate"],
+    ["Intel's service never answers", { verdict: "refuse", verifyQuote: never }, "check failed: attestation check timed out"],
     ["signature endpoint down", { verdict: "refuse", sigStatus: 503 }, "check failed: HTTP 503"],
     ["attestation report too large", { verdict: "refuse", report: "huge" }, "check failed: response too large"],
     ["attestation report is junk", { verdict: "refuse", report: "junk" }, "check failed:"],
   ];
   for (const [name, s, why] of cases) {
-    const { v, decision } = await run(s);
+    const { v, decision } = await run(s, name.startsWith("Intel's service") ? 300 : 2000);
     assert.equal(v?.attested, false, name);
     assert.ok(v?.check?.startsWith(why), `${name}: ${v?.check}`);
     if (v?.verdict === "ok") assert.deepEqual(decision, pay, name); // same as no review: the vault's rules decide

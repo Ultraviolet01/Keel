@@ -210,7 +210,8 @@ The full list is in [docs/SETUP.md](docs/SETUP.md#known-issues).
 - [@anthropic-ai/sdk 1.3](https://www.npmjs.com/package/@anthropic-ai/sdk) for proposal reasons (agent) and invoice reading (`web/api/`); optional [NEAR AI Cloud](https://cloud.near.ai) for proposal reasons
 - [nodemailer 10.4](https://www.npmjs.com/package/nodemailer) and [@vercel/blob 2.8](https://www.npmjs.com/package/@vercel/blob) for email notifications; [@noble/curves 1.9](https://www.npmjs.com/package/@noble/curves) and [@scure/base 1.2](https://www.npmjs.com/package/@scure/base) to check wallet-signed messages
 - [ExcelJS 4.4](https://www.npmjs.com/package/exceljs) for the Excel treasury report, built in the browser
-- [viem 2.57](https://viem.sh) for the agent's EVM reads and broadcasts; [@noble/hashes 1.8](https://www.npmjs.com/package/@noble/hashes) for keccak in the app
+- [viem 2.57](https://viem.sh) for the agent's EVM reads and broadcasts, and to recover NEAR AI's answer signatures; [@noble/hashes 1.8](https://www.npmjs.com/package/@noble/hashes) for keccak in the app
+- [@phala/dcap-qvl 0.7.0](https://www.npmjs.com/package/@phala/dcap-qvl) to verify NEAR AI's Intel TDX quotes against Intel's collateral (the library NEAR AI's own verifier uses); Keel pins Intel's root certificate itself
 - [NEAR Connect 0.11](https://www.npmjs.com/package/@hot-labs/near-connect) for wallet sign-in, with [React 19](https://react.dev), [Vite 8](https://vite.dev) and TypeScript 5.9 for the app
 
 Parts of this project are written with AI coding agents (Claude Code).
