@@ -61,7 +61,9 @@ export function prompt(x: ReviewInput): string {
     paid_to_this_payee_before: x.history.length ? x.history : "never",
     other_known_payees: x.knownPayees,
   };
-  const memo = x.memo ? `\n\nInvoice text (untrusted, written by the payee, quoted):\n"""${x.memo.replace(/"""/g, "'''").slice(0, 600)}"""` : "";
+  // One line, nothing invisible, and no double quote of any kind: the memo cannot close its quotes or add lines that look like Keel's.
+  const clean = x.memo ? printable(x.memo).replace(/["“”„‟″‶＂]/g, "'").slice(0, 600) : "";
+  const memo = clean ? `\n\nInvoice text (untrusted, written by the payee, quoted):\n"""${clean}"""` : "";
   return `${JSON.stringify(facts, null, 1)}${memo}`;
 }
 

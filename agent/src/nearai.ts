@@ -19,6 +19,8 @@ export interface Ask {
 
 /** The model's text, and a check of NEAR AI's signature against gateway evidence verified before asking. Never throws. */
 export async function askNearAi(cfg: Config, ask: Ask, timeoutMs: number, opts: AttestOptions = {}): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
+  // The API key never travels in clear: https only, or plain http to this machine (tests, a local proxy).
+  if (!/^https:\/\//.test(cfg.nearAiUrl) && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//.test(cfg.nearAiUrl)) return undefined;
   try {
     const apiKey = cfg.nearAiKey ?? "";
     // One deadline for the whole call: preflight (at most half of it), completion and signature.
