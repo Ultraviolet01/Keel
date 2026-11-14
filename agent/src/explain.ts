@@ -18,6 +18,13 @@ export interface ExplainInput {
 const MAX = 270; // the vault caps reasons at 280 characters
 
 /**
+ * Text safe for logs and for a proposal reason on chain: control characters, terminal
+ * escapes and bidi or zero-width marks become spaces, and runs of whitespace one space.
+ */
+export const printable = (s: string) =>
+  s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+
+/**
  * Keel's own facts come first. The bill's memo is text from the invoice, which
  * the payee may have written, so it goes last, quoted and labelled, and is cut
  * before it can push Keel's facts out of the 270 characters.
@@ -26,7 +33,7 @@ export function template(x: ExplainInput): string {
   const facts = `Pay ${x.amount} to ${x.payee}, due ${x.due}. Needs you because ${x.rule.replace(/[.\s]+$/, "")}.`;
   if (!x.memo) return facts.slice(0, MAX);
   const room = MAX - facts.length - ' Invoice text (unverified): ""'.length;
-  const memo = room > 8 ? x.memo.replace(/["\s]+/g, " ").trim() : "";
+  const memo = room > 8 ? printable(x.memo.replace(/"+/g, " ")) : "";
   const quoted = memo.length > room ? `${memo.slice(0, Math.max(0, room - 1))}…` : memo;
   return (quoted ? `${facts} Invoice text (unverified): "${quoted}"` : facts).slice(0, MAX);
 }
@@ -40,8 +47,9 @@ export async function explain(cfg: Config, x: ExplainInput): Promise<{ text: str
   // The memo is invoice text the payee may have written; it never reaches a model.
   const facts = JSON.stringify({ ...x, memo: undefined });
   const text = cfg.nearAiKey ? await nearAi(cfg, facts) : cfg.anthropicKey ? await claude(cfg, facts) : undefined;
-  if (!text) return { text: template(x), by: "template" };
-  return { text: text.slice(0, MAX), by: cfg.nearAiKey ? "near-ai" : "claude" };
+  const clean = text ? printable(text) : "";
+  if (!clean) return { text: template(x), by: "template" };
+  return { text: clean.slice(0, MAX), by: cfg.nearAiKey ? "near-ai" : "claude" };
 }
 
 async function nearAi(cfg: Config, facts: string): Promise<string | undefined> {
@@ -61,7 +69,8 @@ async function nearAi(cfg: Config, facts: string): Promise<string | undefined> {
       signal: AbortSignal.timeout(15_000),
     });
     const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return body.choices?.[0]?.message?.content?.trim().replace(/\s+/g, " ") || undefined;
+    const content = body.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : undefined;
   } catch {
     return undefined;
   }

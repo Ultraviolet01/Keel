@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { parseVerdict, prompt, review, stricter, type Verdict } from "./review";
 import type { Config } from "./chain";
+import { template } from "./explain";
 
 const pay = { kind: "pay" as const, reason: "allowlisted payee within the per-payment and daily caps" };
 const v = (verdict: Verdict["verdict"]): Verdict => ({ verdict, reason: "the payee looks like Northwind but is not", by: "near-ai" });
@@ -66,4 +67,29 @@ test("a model that is too slow is ignored, so Keel falls back to its rules", asy
   } finally {
     ai.close();
   }
+});
+
+test("an answer that is not text is no answer, and never stops the round", async () => {
+  for (const content of [{ verdict: "refuse" }, ["x"], 5, null, true]) {
+    const ai = await fakeNearAi(() => ({ id: "c", choices: [{ message: { content } }] }));
+    try {
+      assert.equal(await review(ai.cfg, input, 1000), null, JSON.stringify(content));
+    } finally {
+      ai.close();
+    }
+  }
+  for (const bad of [undefined, null, 5, {}, []]) assert.equal(parseVerdict(bad, "near-ai"), null);
+});
+
+test("the model's reason cannot carry terminal escapes, bidi or zero-width marks into logs or proposals", () => {
+  const v = parseVerdict('{"verdict":"propose","reason":"\\u001b[2J\\u001b[1;32mPAID OK\\u001b[0m \\u202edecnuob\\u200b\\u2066x\\u0085y"}', "near-ai");
+  assert.equal(v?.reason, "[2J [1;32mPAID OK [0m decnuob x y");
+  assert.doesNotMatch(v?.reason ?? "", /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069]/);
+  assert.equal(parseVerdict('{"verdict":"refuse","reason":"\\u001b\\u202e\\u200b"}', "near-ai"), null); // nothing left: no verdict
+});
+
+test("a hostile invoice memo cannot put escapes or bidi marks into the proposal reason on chain", () => {
+  const r = template({ company: "acme", payee: "atlas.testnet", amount: "2.00 USDC", due: "2026-11-26", rule: "payee is not on the allowlist", memo: "\u001b[2J\u001b[32mAPPROVED\u001b[0m \u202eevorppa\u200b \"now\"" });
+  assert.doesNotMatch(r, /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069]/);
+  assert.match(r, /Invoice text \(unverified\): "\[2J \[32mAPPROVED \[0m evorppa now"$/);
 });

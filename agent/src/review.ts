@@ -12,6 +12,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { preflight, readCapped, verifyResponse, type Check, type QuoteVerifierFn } from "./attest";
 import type { Config } from "./chain";
+import { printable } from "./explain";
 
 export interface ReviewInput {
   company: string;
@@ -64,14 +65,18 @@ export function prompt(x: ReviewInput): string {
 }
 
 /** The model's answer, if it is exactly the JSON asked for. Anything else is ignored. */
-export function parseVerdict(text: string, by: Verdict["by"]): Verdict | null {
+export function parseVerdict(text: unknown, by: Verdict["by"]): Verdict | null {
+  if (typeof text !== "string") return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try {
     const v = JSON.parse(m[0]) as { verdict?: unknown; reason?: unknown };
     if (v.verdict !== "ok" && v.verdict !== "propose" && v.verdict !== "refuse") return null;
     if (typeof v.reason !== "string" || !v.reason.trim()) return null;
-    return { verdict: v.verdict, reason: v.reason.replace(/\s+/g, " ").trim().slice(0, 200), by };
+    // Control characters, terminal escapes and bidi or zero-width marks become spaces: the reason goes to logs and on chain.
+    const reason = printable(v.reason).slice(0, 200);
+    if (!reason) return null;
+    return { verdict: v.verdict, reason, by };
   } catch {
     return null;
   }
@@ -104,6 +109,15 @@ export function describe(v: Verdict): string {
 }
 
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
+  // The review is a second look, never a reason to stop a round: any failure is "no verdict".
+  try {
+    return await reviewOnce(cfg, x, timeoutMs, opts);
+  } catch {
+    return null;
+  }
+}
+
+async function reviewOnce(cfg: Config, x: ReviewInput, timeoutMs: number, opts: AttestOptions): Promise<Verdict | null> {
   const user = prompt(x);
   if (cfg.nearAiKey) {
     const r = await nearAi(cfg, user, timeoutMs, opts);
@@ -160,7 +174,7 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: Attest
     const raw = await readCapped(res, 200_000); // exact bytes: NEAR AI signs their hash
     const parsed = JSON.parse(raw.toString("utf8")) as { id?: unknown; choices?: { message?: { content?: string } }[] };
     const text = parsed.choices?.[0]?.message?.content;
-    if (!text) return undefined;
+    if (typeof text !== "string" || !text) return undefined; // anything but text is no answer
     const chatId = typeof parsed.id === "string" ? parsed.id : "";
     return {
       text,
