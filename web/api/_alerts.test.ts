@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
 import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
-import { isDao, mapLimit, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
+import { CONFIRM_LIMITS, emptyDay, isDao, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({
@@ -170,4 +170,20 @@ test("lookups run a few at a time and stop at the deadline", async () => {
   assert.deepEqual(out, Array.from({ length: 40 }, (_, i) => i * 2));
   const late = await mapLimit([1, 2, 3], 2, async (x) => x, Date.now() - 1);
   assert.deepEqual(late, [undefined, undefined, undefined]);
+});
+
+test("confirmation emails are limited per address, per account and in total each day", () => {
+  const day = emptyDay();
+  // One victim address, many throwaway accounts: only perEmail mails reach it.
+  const toVictim = Array.from({ length: 50 }, (_, i) => takeConfirmation(day, "Victim@Example.com ", `spam${i}.testnet`)).filter((x) => x === null).length;
+  assert.equal(toVictim, CONFIRM_LIMITS.perEmail);
+  // One account, many addresses: only perAccount mails.
+  const day2 = emptyDay();
+  const fromOne = Array.from({ length: 50 }, (_, i) => takeConfirmation(day2, `a${i}@example.com`, "spam.testnet")).filter((x) => x === null).length;
+  assert.equal(fromOne, CONFIRM_LIMITS.perAccount);
+  // Everyone together: the daily total.
+  const day3 = emptyDay();
+  const all = Array.from({ length: 500 }, (_, i) => takeConfirmation(day3, `u${i}@example.com`, `u${i}.testnet`)).filter((x) => x === null).length;
+  assert.equal(all, CONFIRM_LIMITS.total);
+  assert.doesNotMatch(JSON.stringify(day), /victim/i); // addresses are kept only as hashes
 });

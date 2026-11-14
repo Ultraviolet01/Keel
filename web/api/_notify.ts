@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Email notifications: who signed up (kept private in Vercel Blob), proof
 // that a wallet is theirs (NEP-413 signed messages), sending mail through
 // Gmail, and reading each vault from NEAR. Used by api/notify.ts.
@@ -172,6 +173,27 @@ const subPath = (account: string) => `subs/${account}.json`;
 export const getSub = (account: string) => readJson<Subscriber>(subPath(account));
 export const saveSub = (s: Subscriber) => writeJson(subPath(s.account), s);
 export const tokenPath = (token: string) => `tokens/${token}.json`;
+
+// Confirmation emails go to whatever address a subscriber types, so they are limited per day:
+// per address (no one is flooded through Keel), per account, and in total (the sender's daily
+// quota stays for real alerts). Addresses are counted by hash, never stored in the clear here.
+export const CONFIRM_LIMITS = { perEmail: 3, perAccount: 5, total: 100 };
+type Day = { total: number; byEmail: Record<string, number>; byAccount: Record<string, number> };
+
+/** The limit a new confirmation email would break, if any; counts it when none is broken. */
+export function takeConfirmation(day: Day, email: string, account: string): string | null {
+  const id = createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 32);
+  if (day.total >= CONFIRM_LIMITS.total) return "Keel has sent all the confirmation emails it can today. Try again tomorrow.";
+  if ((day.byEmail[id] ?? 0) >= CONFIRM_LIMITS.perEmail) return "This address was sent enough confirmation emails today. Try again tomorrow.";
+  if ((day.byAccount[account] ?? 0) >= CONFIRM_LIMITS.perAccount) return "This account asked for enough confirmation emails today. Try again tomorrow.";
+  day.total++;
+  day.byEmail[id] = (day.byEmail[id] ?? 0) + 1;
+  day.byAccount[account] = (day.byAccount[account] ?? 0) + 1;
+  return null;
+}
+
+export const confirmDayPath = (date = new Date()) => `limits/confirm-${date.toISOString().slice(0, 10)}.json`;
+export const emptyDay = (): Day => ({ total: 0, byEmail: {}, byAccount: {} });
 
 export async function allSubs(): Promise<Subscriber[]> {
   const out: Subscriber[] = [];
