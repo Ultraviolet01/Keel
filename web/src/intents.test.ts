@@ -8,7 +8,7 @@ const bill = { payee: "0x00000000000000000000000000000000000000AA", chain: "base
 const reply = (over: Record<string, unknown> = {}) => ({
   status: "PENDING_DEPOSIT",
   quoteResponse: {
-    quoteRequest: { recipient: "0x00000000000000000000000000000000000000aa", refundTo: vault, destinationAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", ...over },
+    quoteRequest: { recipient: "0x00000000000000000000000000000000000000aa", refundTo: vault, destinationAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", depositType: "ORIGIN_CHAIN", refundType: "ORIGIN_CHAIN", recipientType: "DESTINATION_CHAIN", swapType: "EXACT_OUTPUT", appFees: [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 1 }], virtualChainRecipient: null, virtualChainRefundRecipient: null, ...over },
     quote: { amountIn: "101330000", amountOut: "100000000", amountOutFormatted: "100.0", ...((over as { quote?: object }).quote ?? {}) },
   },
 });
@@ -70,4 +70,22 @@ test("Optimism's USDC, in 1Click's other asset format, is recognised", () => {
   const opBill = { ...bill, chain: "op" };
   const d = assessDeposit(200, reply({ destinationAsset: "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ" }), proposal, vault, opBill);
   assert.ok(d.kind === "known" && d.chain === "op" && d.problems.length === 0, JSON.stringify(d));
+});
+
+test("a quote that strands refunds, redirects delivery or takes a cut blocks approval", () => {
+  const cases: [Record<string, unknown>, string][] = [
+    [{ refundType: "INTENTS" }, "refundType is INTENTS"],
+    [{ recipientType: "INTENTS" }, "recipientType is INTENTS"],
+    [{ swapType: "EXACT_INPUT" }, "swapType is EXACT_INPUT"],
+    [{ virtualChainRecipient: "attacker.near" }, "redirects funds"],
+    [{ appFees: [{ recipient: "attacker.near", fee: 250 }] }, "2.50% in fees for attacker.near"],
+    [{ depositType: undefined }, "depositType is missing"],
+  ];
+  for (const [over, why] of cases) {
+    const d = assessDeposit(200, reply(over), proposal, vault, bill);
+    assert.ok(d.kind === "known" && d.problems.some((x) => x.includes(why)), `${why}: ${JSON.stringify(d.kind === "known" ? d.problems : d)}`);
+  }
+  // A genuine quote, with 1Click's own 0.01% fee, passes.
+  const ok = assessDeposit(200, reply(), proposal, vault, bill);
+  assert.ok(ok.kind === "known" && ok.problems.length === 0, JSON.stringify(ok));
 });

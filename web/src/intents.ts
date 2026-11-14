@@ -24,6 +24,9 @@ export type DepositCheck =
  * USDC on each chain a bill can be on, as 1Click names it (GET /v0/tokens, 14 Nov 2026). Keel's agent
  * always asks 1Click for exactly the bill's amount of this asset, so an approval needs nothing else.
  */
+/** 1Click's own fee on a genuine quote is 1 basis point (0.01%); more is someone else's cut. */
+export const MAX_FEE_BPS = 10;
+
 export const USDC_ASSET: Record<string, string> = {
   eth: "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
   arb: "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
@@ -72,6 +75,15 @@ export function assessDeposit(
     const want = bill.chain ? USDC_ASSET[bill.chain] : undefined;
     if (!want) problems.push(`Keel does not know USDC on ${bill.chain ?? "this bill's chain"}, so what 1Click pays cannot be checked`);
     else if (asset !== want) problems.push(`1Click would pay ${asset.replace(/^nep\d+:/, "") || "an unknown token"} on ${chainOfAsset(asset)}, but the bill is USDC on ${bill.chain}`);
+    // How the quote moves money, as Keel's agent always asks for it: deposit and refund on the vault's
+    // own chain account (an INTENTS refund would strand money the vault cannot withdraw), delivery on
+    // the payee's chain, exact output, no redirection, and no fee beyond 1Click's own small one.
+    const expect: [string, string][] = [["depositType", "ORIGIN_CHAIN"], ["refundType", "ORIGIN_CHAIN"], ["recipientType", "DESTINATION_CHAIN"], ["swapType", "EXACT_OUTPUT"]];
+    for (const [k, v] of expect) if (req[k] !== v) problems.push(`the quote's ${k} is ${String(req[k] ?? "missing")}, not ${v} as Keel asks`);
+    for (const k of ["virtualChainRecipient", "virtualChainRefundRecipient"]) if (req[k]) problems.push(`the quote redirects funds through ${k}`);
+    const fees = Array.isArray(req.appFees) ? req.appFees : [];
+    const bps = fees.reduce((t: number, f: { fee?: unknown }) => t + (Number(f?.fee) || 0), 0);
+    if (bps > MAX_FEE_BPS) problems.push(`the quote takes ${(bps / 100).toFixed(2)}% in fees for ${fees.map((f: { recipient?: unknown }) => String(f?.recipient ?? "?")).join(", ")}`);
     // Keel asks for exactly the bill's amount out; less means the payee would be short-changed.
     const out = String(quote.amountOut ?? "");
     if (bill.amount && !(/^\d+$/.test(out) && BigInt(out) >= BigInt(bill.amount))) problems.push(`1Click would deliver ${quote.amountOutFormatted ?? (out || "an unknown amount")}, less than the bill`);
