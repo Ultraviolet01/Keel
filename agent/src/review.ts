@@ -10,7 +10,8 @@
 // but no more than a proposal: the owner decides instead of an unproven refusal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { preflight, readCapped, verifyResponse, type Check, type QuoteVerifierFn } from "./attest";
+import { askNearAi, type AttestOptions } from "./nearai";
+export type { AttestOptions } from "./nearai";
 import type { Config } from "./chain";
 import { printable } from "./explain";
 
@@ -64,22 +65,60 @@ export function prompt(x: ReviewInput): string {
   return `${JSON.stringify(facts, null, 1)}${memo}`;
 }
 
-/** The model's answer, if it is exactly the JSON asked for. Anything else is ignored. */
+/** The JSON objects in a model's answer (at most 10, from its first 4,000 characters). */
+function jsonObjects(text: string): unknown[] {
+  // Bounded: a long run of "{" would otherwise make this scan quadratic.
+  const t = text.slice(0, 4000);
+  const out: unknown[] = [];
+  for (let i = 0; i < t.length && out.length < 10; i++) {
+    if (t[i] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let j = i; j < t.length; j++) {
+      const c = t[j];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') inString = false;
+      } else if (c === '"') inString = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        try {
+          out.push(JSON.parse(t.slice(i, j + 1)));
+          i = j;
+        } catch {
+          // not JSON: keep scanning from the next "{"
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+const RANK = { ok: 0, propose: 1, refuse: 2 } as const;
+
+/**
+ * The model's verdict. Every JSON object in the answer is read; when it gives
+ * more than one verdict, the strictest counts, so a second "ok" (a chatty model,
+ * or one an invoice talked into it) cannot cancel a refusal. Anything else is ignored.
+ */
 export function parseVerdict(text: unknown, by: Verdict["by"]): Verdict | null {
   if (typeof text !== "string") return null;
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    const v = JSON.parse(m[0]) as { verdict?: unknown; reason?: unknown };
-    if (v.verdict !== "ok" && v.verdict !== "propose" && v.verdict !== "refuse") return null;
-    if (typeof v.reason !== "string" || !v.reason.trim()) return null;
+  let best: Verdict | null = null;
+  for (const o of jsonObjects(text)) {
+    if (!o || typeof o !== "object") continue;
+    const v = o as { verdict?: unknown; reason?: unknown };
+    const verdict = typeof v.verdict === "string" ? v.verdict.trim().toLowerCase() : "";
+    if (verdict !== "ok" && verdict !== "propose" && verdict !== "refuse") continue;
+    if (typeof v.reason !== "string") continue;
     // Control characters, terminal escapes and bidi or zero-width marks become spaces: the reason goes to logs and on chain.
     const reason = printable(v.reason).slice(0, 200);
-    if (!reason) return null;
-    return { verdict: v.verdict, reason, by };
-  } catch {
-    return null;
+    if (!reason) continue;
+    if (!best || RANK[verdict] > RANK[best.verdict]) best = { verdict, reason, by };
   }
+  return best;
 }
 
 export type Decision = { kind: "pay" | "propose" | "refuse" | "wait" | "defer"; reason: string };
@@ -120,7 +159,7 @@ export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, op
 async function reviewOnce(cfg: Config, x: ReviewInput, timeoutMs: number, opts: AttestOptions): Promise<Verdict | null> {
   const user = prompt(x);
   if (cfg.nearAiKey) {
-    const r = await nearAi(cfg, user, timeoutMs, opts);
+    const r = await askNearAi(cfg, { system: SYSTEM, user, maxTokens: 200, temperature: 0 }, timeoutMs, opts);
     const v = r ? parseVerdict(r.text, "near-ai") : null;
     if (v && r) {
       const c = await r.verify();
@@ -140,50 +179,6 @@ async function reviewOnce(cfg: Config, x: ReviewInput, timeoutMs: number, opts: 
     return text ? parseVerdict(text, "claude") : null;
   }
   return null;
-}
-
-/** Tests only: verify quotes and wait for signatures without the network. */
-export type AttestOptions = { verifyQuote?: QuoteVerifierFn; retryMs?: number };
-
-/** The model's text, and a check of NEAR AI's signature against gateway evidence verified before asking. */
-async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: AttestOptions): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
-  try {
-    const apiKey = cfg.nearAiKey ?? "";
-    // One deadline for the whole review: preflight (at most half of it), completion and signature.
-    const deadline = Date.now() + timeoutMs;
-    const left = () => Math.max(1, deadline - Date.now());
-    // Preflight: the gateway's attestation, verified before the completion is sent.
-    const pre = await preflight({ baseUrl: cfg.nearAiUrl, apiKey, timeoutMs: Math.ceil(timeoutMs / 2), verifyQuote: opts.verifyQuote });
-    // Kept as the exact string sent: NEAR AI signs its hash.
-    const body = JSON.stringify({
-      model: cfg.nearAiModel,
-      max_tokens: 200,
-      temperature: 0,
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: user },
-      ],
-    });
-    const res = await fetch(`${cfg.nearAiUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.nearAiKey}` },
-      body,
-      signal: AbortSignal.timeout(left()),
-    });
-    if (!res.ok) return undefined;
-    const raw = await readCapped(res, 200_000); // exact bytes: NEAR AI signs their hash
-    const parsed = JSON.parse(raw.toString("utf8")) as { id?: unknown; choices?: { message?: { content?: string } }[] };
-    const text = parsed.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || !text) return undefined; // anything but text is no answer
-    const chatId = typeof parsed.id === "string" ? parsed.id : "";
-    return {
-      text,
-      verify: async () =>
-        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseBody: raw, preflightSigner: pre.signer, timeoutMs: left(), retryMs: opts.retryMs }) : pre,
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 async function claude(cfg: Config, user: string, timeoutMs: number): Promise<string | undefined> {

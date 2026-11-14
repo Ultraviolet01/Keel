@@ -12,6 +12,7 @@ import type { AddressInfo } from "node:net";
 import { privateKeyToAccount } from "viem/accounts";
 import { checkGatewayReport, checkResponseSignature, clearAttested, preflight, replayRtmr3, sha256Hex, verifyQuote, verifyResponse, type QuoteVerifierFn } from "./attest";
 import { review, stricter } from "./review";
+import { explain } from "./explain";
 import type { Config } from "./chain";
 
 type Att = { signing_address: string; signing_algo: string; intel_quote: string; report_data: string; request_nonce: string; event_log: string; info: { tcb_info: { app_compose: string } } };
@@ -401,5 +402,18 @@ test("server text never reaches a reason raw", async () => {
     assert.equal(v?.check, "check failed: response is not JSON");
   } finally {
     cloud.close();
+  }
+});
+
+test("a verified NEAR AI proposal reason is used; an edited one is not", async () => {
+  const x = { company: "acme", payee: "atlas.testnet", amount: "9.00 USDC", due: "2026-11-26", rule: "payee is not on the allowlist" };
+  for (const [s, by] of [[{ verdict: "propose" }, "near-ai"], [{ verdict: "propose", tamper: (r: string) => r.replace("Northwind", "a supplier you know") }, "template"]] as const) {
+    clearAttested();
+    const cloud = await fakeCloud(s as Scenario);
+    try {
+      assert.equal((await explain(cloud.cfg, x, { verifyQuote: standIn(), retryMs: 5 })).by, by);
+    } finally {
+      cloud.close();
+    }
   }
 });

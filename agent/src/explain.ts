@@ -5,6 +5,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./chain";
+import { askNearAi, type AttestOptions } from "./nearai";
 
 export interface ExplainInput {
   company: string;
@@ -43,37 +44,21 @@ const SYSTEM =
 
 export type Writer = "near-ai" | "claude" | "template";
 
-export async function explain(cfg: Config, x: ExplainInput): Promise<{ text: string; by: Writer }> {
+/** The proposal reason. A NEAR AI reason counts only when its signature checks out; otherwise Keel writes its own. */
+export async function explain(cfg: Config, x: ExplainInput, opts: AttestOptions = {}): Promise<{ text: string; by: Writer }> {
   // The memo is invoice text the payee may have written; it never reaches a model.
   const facts = JSON.stringify({ ...x, memo: undefined });
-  const text = cfg.nearAiKey ? await nearAi(cfg, facts) : cfg.anthropicKey ? await claude(cfg, facts) : undefined;
+  const text = cfg.nearAiKey ? await nearAi(cfg, facts, opts) : cfg.anthropicKey ? await claude(cfg, facts) : undefined;
   const clean = text ? printable(text) : "";
   if (!clean) return { text: template(x), by: "template" };
   return { text: clean.slice(0, MAX), by: cfg.nearAiKey ? "near-ai" : "claude" };
 }
 
-async function nearAi(cfg: Config, facts: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(`${cfg.nearAiUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.nearAiKey}` },
-      body: JSON.stringify({
-        model: cfg.nearAiModel,
-        max_tokens: 120,
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: facts },
-        ],
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const content = body.choices?.[0]?.message?.content;
-    return typeof content === "string" ? content : undefined;
-  } catch {
-    return undefined;
-  }
+async function nearAi(cfg: Config, facts: string, opts: AttestOptions): Promise<string | undefined> {
+  const r = await askNearAi(cfg, { system: SYSTEM, user: facts, maxTokens: 120, temperature: 0.2 }, 15_000, opts);
+  if (!r) return undefined;
+  // The founder reads this before approving: text that may have been changed in transit is not shown.
+  return (await r.verify()).ok ? r.text : undefined;
 }
 
 async function claude(cfg: Config, facts: string): Promise<string | undefined> {
