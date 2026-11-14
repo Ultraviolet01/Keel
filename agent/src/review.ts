@@ -161,7 +161,23 @@ const STEERING = [
   /\b(say|answer|respond|reply|return|output|classify)\b.{0,25}\b(ok|okay|approve[ds]?|safe|legitimate|"ok")\b/i,
   /\b(do not|don't|never)\b.{0,25}\b(flag|propose|refuse|report|question|check|escalate)\b/i,
   /\b(treasury|payment) (agent|bot|ai|reviewer)\b/i,
+  // Text addressed to whoever, or whatever, checks the payment.
+  /\b(whoever|anyone|the (automated )?(checker|reviewer|system|bot|ai))\b.{0,30}\b(checks?|reviews?|reads?|reading|checking)\b/i,
+  /\b(automated|ai|bot)\s+(checker|check|review|reviewer|system|agent)\b/i,
+  // Claims that no review is needed.
+  /\bno (further |human |manual )?(review|check|approval|sign-?off)s? (is |are )?(needed|required|necessary)\b/i,
+  /\bpre-?(cleared|approved|authori[sz]ed|verified)\b/i,
+  // Requests to relabel the payment.
+  /\b(mark|treat|consider|label|flag|classify)\b.{0,25}\b(fine|ok|okay|acceptable|safe|routine|normal|legit(imate)?|approved|clean)\b/i,
+  /\bgreen ?light\b|\bnothing to see\b/i,
+  /\b(prior|previous|earlier|above) (guidance|instructions?|rules?|directions?|prompt)\b/i,
 ];
+
+/** The same text with obfuscation undone: "I.g.n.o.r.e" and "Ign0re" both read "ignore". */
+const deobfuscate = (t: string) =>
+  t
+    .replace(/\b(\w)(?:[.\-_*·•]\w\b)+/g, (m) => m.replace(/[.\-_*·•]/g, ""))
+    .replace(/[0134578@$]/g, (c) => ({ "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "@": "a", $: "s" })[c] ?? c);
 
 // Cyrillic and Greek letters that look Latin, folded so "Іgnore" (Cyrillic І) reads as "Ignore".
 const LOOKALIKE: Record<string, string> = {
@@ -176,7 +192,8 @@ export function steersReviewer(memo: string | undefined): boolean {
   if (!memo) return false;
   // Fold lookalikes first: fullwidth and other compatibility forms (NFKC), then Cyrillic and Greek letters.
   const text = [...printable(memo).normalize("NFKC")].map((c) => LOOKALIKE[c] ?? c).join("").replace(/[‘’]/g, "'");
-  return STEERING.some((r) => r.test(text));
+  const plain = deobfuscate(text);
+  return STEERING.some((r) => r.test(text) || r.test(plain));
 }
 
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
