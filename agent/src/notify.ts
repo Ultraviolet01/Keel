@@ -19,11 +19,41 @@ export function notable(e: Event): AgentEvent | null {
   return null;
 }
 
+export const REPORT_PER_VAULT = 5;
+export const REPORT_MAX_BYTES = 90_000; // the server refuses a report over 100 kB
+
+/**
+ * The round's report, within the server's size limit however many vaults (anyone can create one)
+ * produce events: at most REPORT_PER_VAULT each, taken in turns (every vault's first, then every
+ * vault's second...), so a crowd of noisy vaults cannot push another vault's alert out.
+ */
+export function reportBody(all: AgentEvent[], at = Date.now()): string {
+  const byVault = new Map<string, AgentEvent[]>();
+  for (const e of all) {
+    const list = byVault.get(e.vault) ?? [];
+    if (list.length < REPORT_PER_VAULT) list.push(e);
+    byVault.set(e.vault, list);
+  }
+  const picked: AgentEvent[] = [];
+  let size = JSON.stringify({ at, events: [] }).length;
+  for (let turn = 0; turn < REPORT_PER_VAULT; turn++) {
+    for (const list of byVault.values()) {
+      const e = list[turn];
+      if (!e) continue;
+      const add = JSON.stringify(e).length + 1;
+      if (size + add > REPORT_MAX_BYTES) continue;
+      picked.push(e);
+      size += add;
+    }
+  }
+  return JSON.stringify({ at, events: picked });
+}
+
 /** Sends the round's report; never fails the round. Returns a line for the log. */
 export async function report(cfg: Config, chain: Chain, events: Event[]): Promise<string> {
   const url = cfg.notifyUrl;
   if (!url) return "notifications off (KEEL_NOTIFY_URL=off)";
-  const body = JSON.stringify({ at: Date.now(), events: events.map(notable).filter((x): x is AgentEvent => !!x) });
+  const body = reportBody(events.map(notable).filter((x): x is AgentEvent => !!x));
   try {
     const res = await fetch(url, {
       method: "POST",
