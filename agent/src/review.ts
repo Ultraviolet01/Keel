@@ -166,7 +166,7 @@ const STEERING = [
   /\b(automated|ai|bot)\s+(checker|check|review|reviewer|system|agent)\b/i,
   // Claims that no review is needed.
   /\bno (further |human |manual )?(review|check|approval|sign-?off)s? (is |are )?(needed|required|necessary)\b/i,
-  /\bpre-?(cleared|approved|authori[sz]ed|verified)\b/i,
+  /\bpre[- ]?(cleared|approved|authori[sz]ed|verified)\b/i,
   // Requests to relabel the payment.
   /\b(mark|treat|consider|label|flag|classify)\b.{0,25}\b(fine|ok|okay|acceptable|safe|routine|normal|legit(imate)?|approved|clean)\b/i,
   /\bgreen ?light\b|\bnothing to see\b/i,
@@ -198,6 +198,8 @@ export function steersReviewer(memo: string | undefined): boolean {
 
 export async function review(cfg: Config, x: ReviewInput, timeoutMs = 20_000, opts: AttestOptions = {}): Promise<Verdict | null> {
   if (steersReviewer(x.memo)) return { verdict: "propose", reason: "the invoice text tries to give instructions to Keel's reviewer", by: "keel" };
+  // The payee's account name is chosen by whoever created it, and the model reads it too.
+  if (steersReviewer(x.payee.replace(/[-_.]/g, " "))) return { verdict: "propose", reason: "the payee's account name tries to give instructions to Keel's reviewer", by: "keel" };
   // The review is a second look, never a reason to stop a round: any failure is "no verdict".
   try {
     return await reviewOnce(cfg, x, timeoutMs, opts);
