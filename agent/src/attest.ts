@@ -133,7 +133,7 @@ export async function checkGatewayReport(att: unknown, nonce: string, verify: Qu
   try {
     q = await verify(Buffer.from(hex, "hex"));
   } catch (e) {
-    return fail(`Intel check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
+    return fail(`Intel check failed: ${clean(e instanceof Error ? e.message : "unknown error", 100)}`);
   }
   if (!GOOD_TCB.has(q.tcb)) return fail(`enclave platform TCB is ${q.tcb}`);
   if (q.debug) return fail("attestation is from a debug enclave");
@@ -150,7 +150,7 @@ export async function checkGatewayReport(att: unknown, nonce: string, verify: Qu
     if (!q.mrConfigId.equals(config)) return fail("MRCONFIGID does not match app_compose");
     if (!replayRtmr3(a.event_log).equals(q.rtMr3)) return fail("event log does not match RTMR3");
   } catch (e) {
-    return fail(`measurements unreadable: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
+    return fail(`measurements unreadable: ${clean(e instanceof Error ? e.message : "unknown error", 100)}`);
   }
   return { ok: true, signer: signer.toLowerCase(), tcb: q.tcb };
 }
@@ -209,7 +209,12 @@ async function getJson(url: string, headers: Record<string, string>, signal: Abo
   const res = await fetch(url, { headers: { Accept: "application/json", ...headers }, signal });
   if (res.status === 404) return { status: 404, body: null };
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  return { status: res.status, body: JSON.parse((await readCapped(res)).toString("utf8")) };
+  const text = (await readCapped(res)).toString("utf8");
+  try {
+    return { status: res.status, body: JSON.parse(text) };
+  } catch {
+    throw new Error("response is not JSON");
+  }
 }
 
 // Preflight evidence: the gateway signer Keel verified, kept for EVIDENCE_FOR_MS.
@@ -221,6 +226,7 @@ const FAILED_FOR_MS = 60_000;
 export const clearAttested = () => {
   evidence = null;
   failed = null;
+  inFlight.clear();
 };
 
 export interface PreflightInput {
@@ -235,6 +241,17 @@ export interface PreflightInput {
 export async function preflight(x: PreflightInput): Promise<Check> {
   if (evidence && evidence.url === x.baseUrl && evidence.until > Date.now()) return { ok: true, signer: evidence.signer, tcb: evidence.tcb };
   if (failed && failed.url === x.baseUrl && failed.until > Date.now()) return fail(failed.reason);
+  // Concurrent reviews share one preflight instead of each fetching the report and Intel's collateral.
+  const running = inFlight.get(x.baseUrl);
+  if (running) return running;
+  const p = runPreflight(x).finally(() => inFlight.delete(x.baseUrl));
+  inFlight.set(x.baseUrl, p);
+  return p;
+}
+
+const inFlight = new Map<string, Promise<Check>>();
+
+async function runPreflight(x: PreflightInput): Promise<Check> {
   evidence = null;
   const c = await freshPreflight(x);
   if (c.ok) evidence = { url: x.baseUrl, signer: c.signer, tcb: c.tcb ?? "", until: Date.now() + EVIDENCE_FOR_MS };
@@ -253,7 +270,7 @@ async function freshPreflight(x: PreflightInput): Promise<Check> {
     const verify = x.verifyQuote ?? intelVerifier(Math.max(1, deadline - Date.now()));
     return await within(checkGatewayReport(report?.gateway_attestation, nonce, verify), Math.max(1, deadline - Date.now()), "attestation check");
   } catch (e) {
-    return fail(`check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
+    return fail(`check failed: ${clean(e instanceof Error ? e.message : "unknown error", 100)}`);
   }
 }
 
@@ -295,6 +312,6 @@ export async function verifyResponse(x: ResponseInput): Promise<Check> {
     }
     return last;
   } catch (e) {
-    return fail(`check failed: ${e instanceof Error ? e.message : "unknown error"}`.slice(0, 120));
+    return fail(`check failed: ${clean(e instanceof Error ? e.message : "unknown error", 100)}`);
   }
 }

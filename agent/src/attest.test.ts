@@ -359,3 +359,47 @@ test("an ok NEAR AI cannot back with a signature is treated as no answer: Claude
     else process.env.ANTHROPIC_BASE_URL = before;
   }
 });
+
+test("concurrent reviews share one preflight", async () => {
+  const cloud = await fakeCloud({ verdict: "ok" });
+  let intelCalls = 0;
+  const counted: QuoteVerifierFn = async (q) => {
+    intelCalls++;
+    return standIn()(q);
+  };
+  try {
+    const all = await Promise.all(Array.from({ length: 8 }, () => preflight({ baseUrl: cloud.cfg.nearAiUrl, apiKey: "k", timeoutMs: 2000, verifyQuote: counted })));
+    assert.ok(all.every((c) => c.ok));
+    assert.deepEqual([cloud.calls.length, intelCalls], [1, 1]);
+  } finally {
+    cloud.close();
+  }
+});
+
+test("one deadline covers the whole review, however slow each step is", async () => {
+  const slow = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => setTimeout(() => res.end(req.url?.includes("chat") ? JSON.stringify({ id: "c", choices: [{ message: { content: '{"verdict":"refuse","reason":"r"}' } }] }) : "{}"), 900));
+  });
+  await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+  const cfg = { nearAiKey: "k", nearAiUrl: `http://127.0.0.1:${(slow.address() as AddressInfo).port}/v1`, nearAiModel: "m", anthropicModel: "x" } as Config;
+  try {
+    clearAttested();
+    const started = Date.now();
+    await review(cfg, input, 1500, { verifyQuote: standIn(), retryMs: 5 });
+    assert.ok(Date.now() - started < 1650, `${Date.now() - started} ms`);
+  } finally {
+    slow.close();
+  }
+});
+
+test("server text never reaches a reason raw", async () => {
+  const cloud = await fakeCloud({ verdict: "propose", report: "junk" });
+  try {
+    clearAttested();
+    const v = await review(cloud.cfg, input, 2000, { verifyQuote: standIn(), retryMs: 5 });
+    assert.equal(v?.check, "check failed: response is not JSON");
+  } finally {
+    cloud.close();
+  }
+});

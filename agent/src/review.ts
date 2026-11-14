@@ -135,8 +135,11 @@ export type AttestOptions = { verifyQuote?: QuoteVerifierFn; retryMs?: number };
 async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: AttestOptions): Promise<{ text: string; verify: () => Promise<Check> } | undefined> {
   try {
     const apiKey = cfg.nearAiKey ?? "";
+    // One deadline for the whole review: preflight (at most half of it), completion and signature.
+    const deadline = Date.now() + timeoutMs;
+    const left = () => Math.max(1, deadline - Date.now());
     // Preflight: the gateway's attestation, verified before the completion is sent.
-    const pre = await preflight({ baseUrl: cfg.nearAiUrl, apiKey, timeoutMs, verifyQuote: opts.verifyQuote });
+    const pre = await preflight({ baseUrl: cfg.nearAiUrl, apiKey, timeoutMs: Math.ceil(timeoutMs / 2), verifyQuote: opts.verifyQuote });
     // Kept as the exact string sent: NEAR AI signs its hash.
     const body = JSON.stringify({
       model: cfg.nearAiModel,
@@ -151,7 +154,7 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: Attest
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.nearAiKey}` },
       body,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(left()),
     });
     if (!res.ok) return undefined;
     const raw = await readCapped(res, 200_000); // exact bytes: NEAR AI signs their hash
@@ -162,7 +165,7 @@ async function nearAi(cfg: Config, user: string, timeoutMs: number, opts: Attest
     return {
       text,
       verify: async () =>
-        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseBody: raw, preflightSigner: pre.signer, timeoutMs, retryMs: opts.retryMs }) : pre,
+        pre.ok ? verifyResponse({ baseUrl: cfg.nearAiUrl, apiKey, chatId, requestBody: body, responseBody: raw, preflightSigner: pre.signer, timeoutMs: left(), retryMs: opts.retryMs }) : pre,
     };
   } catch {
     return undefined;
