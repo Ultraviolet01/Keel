@@ -208,9 +208,13 @@ const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
  */
 export const defang = (t: string) =>
   t
+    .normalize("NFKC") // fullwidth letters and dots become plain ones
+    .replace(/[。｡․⸳⸴܁܂﹒]/g, ".") // other characters that read as a dot
     .replace(/\b(h(?:tt|xx)ps?|ftp)\s*:\s*\/\//gi, "$1[:]//")
-    .replace(/\bwww\./gi, "www[.]")
-    .replace(/\b([a-z0-9-]+)\.(com|net|org|io|co|app|xyz|info|biz|me|link|site|online|top|click|dev|ai|us|uk|ng|ru|cn|example|page|ly|gl|to|cc|tk|live|shop|store|support|help|login|cloud|vercel)\b/gi, "$1[.]$2");
+    // Every dotted name with a letter after a dot (a host: any ending, any depth), except NEAR accounts.
+    .replace(/[a-z0-9_-]+(?:\.[a-z0-9_-]+)+/gi, (host) =>
+      /\.(near|testnet)$/i.test(host) || !/\.[a-z]/i.test(host) ? host : host.replace(/\.(?=[a-z])/gi, "[.]"),
+    );
 
 /** A plain email: a heading, sections of lines, a button and an unsubscribe link. */
 export function renderEmail(o: { heading: string; sections: { title: string; lines: string[] }[]; link: string; linkText: string; unsubscribe?: string }) {

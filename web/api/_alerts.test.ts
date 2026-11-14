@@ -145,3 +145,8 @@ test("web addresses a payee wrote are never clickable in a Keel email; NEAR acco
   assert.match(r.html, /href="https:\/\/keel-treasury\.vercel\.app\/app"/);
   assert.equal(defang("Pay 2.00 USDC to northwind-keel.testnet, due 2026-11-26"), "Pay 2.00 USDC to northwind-keel.testnet, due 2026-11-26");
 });
+
+test("defang covers any domain ending and lookalike dots", () => {
+  for (const t of ["keel-login.finance", "keel-pay.rocks/verify", "keel\uff0elogin\uff0ecom", "keel-login\u3002com", "keel-verify.pw", "a.b.c.d.example"]) assert.doesNotMatch(defang(t), /[a-z0-9-]\.[a-z]/i, t);
+  for (const t of ["northwind-keel.testnet", "keel.near", "berth.keel.testnet", "2.00 USDC", "Invoice 3107"]) assert.equal(defang(t), t, t);
+});
