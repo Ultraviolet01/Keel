@@ -1,7 +1,7 @@
 // One round of Keel's loop for one vault:
 // observe -> forecast -> check -> decide -> act -> learn.
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   addDays,
@@ -42,13 +42,31 @@ export interface State {
   drafts: Record<string, RuleDraft[]>;
 }
 
-export function loadState(): State {
-  if (!existsSync(STATE_FILE)) return { handled: {}, codeHashes: {}, drafts: {} };
-  return JSON.parse(readFileSync(STATE_FILE, "utf8"), (_k, v) => (typeof v === "string" && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v));
+/**
+ * Keel's local notes. The chain is the authority (the vault never pays a bill twice, and Keel reads
+ * waiting proposals before filing one), so a file that cannot be read is set aside and Keel starts
+ * fresh rather than stopping every company's payments until someone repairs it.
+ */
+export function loadState(file = STATE_FILE): State {
+  const fresh = (): State => ({ handled: {}, codeHashes: {}, drafts: {} });
+  if (!existsSync(file)) return fresh();
+  try {
+    const s = JSON.parse(readFileSync(file, "utf8"), (_k, v) => (typeof v === "string" && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v)) as State;
+    if (!s || typeof s !== "object" || Array.isArray(s) || typeof s.handled !== "object" || s.handled === null) throw new Error("not Keel's state");
+    return { ...fresh(), ...s };
+  } catch (e) {
+    const aside = `${file}.unreadable-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    renameSync(file, aside);
+    console.error(`Keel's state file could not be read (${String(e).slice(0, 80)}); kept as ${aside}, starting fresh from the chain.`);
+    return fresh();
+  }
 }
 
-export function saveState(s: State) {
-  writeFileSync(STATE_FILE, JSON.stringify(s, (_k, v) => (typeof v === "bigint" ? `${v}n` : v), 2));
+/** Written to a temporary file and renamed into place, so a run killed mid-write never leaves half a file. */
+export function saveState(s: State, file = STATE_FILE) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(s, (_k, v) => (typeof v === "bigint" ? `${v}n` : v), 2));
+  renameSync(tmp, file);
 }
 
 /** "1,234.50" to smallest units. Rejects signs, exponents and anything else. */
