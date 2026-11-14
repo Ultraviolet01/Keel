@@ -95,7 +95,7 @@ Keel integrates with Trezu at the contract level: every Trezu treasury is a Sput
 2. **Set the rules.** Caps per payment and per rolling 24 hours, a cash buffer, approved payees, a blocklist, and per-chain auto caps for other chains.
 3. **List bills.** One-off, monthly or yearly, typed in or imported from invoice PDFs. Only the owner can list a bill; Keel can only pay what is listed.
 4. **Fund.** Deposit USDC into the vault (and into its EVM address for bills on other chains).
-5. **Keel runs.** On each round (the hosted agent is scheduled every 15 minutes; GitHub's scheduler starts it every few hours in practice) the hosted agent observes, forecasts, decides, asks the AI check, acts and reconciles; see [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
+5. **Keel runs.** On each round (every few hours since 11 Nov; it ran every 15 minutes until the owner paused that trigger to stay within the free Vercel Blob quota) the hosted agent observes, forecasts, decides, asks the AI check, acts and reconciles; see [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 6. **The owner decides what Keel may not.** Approve or reject proposals under **Approvals**; email alerts say when something waits.
 7. **Optionally hand over to a team.** Offer the vault to a Sputnik DAO multisig; it takes over once the members vote to accept.
 8. **Stay in control.** Pause, withdraw, or fire Keel (`revoke_agent`) at any time; `set_agent_key` hires it back.
@@ -143,7 +143,7 @@ All code in this repository was written during the hackathon: the first commit i
 2. Open https://keel-treasury.vercel.app/app?view=keel-founder5-39175.testnet and pick **Mooring** in the company card. You see the demo company read-only with live testnet data: balance chart, bills, Keel's decisions and the rules. Under **Approvals**, proposal #10 is a lookalike payee (`northwlnd-keel.testnet`) that NEAR AI held for the owner instead of paying. Pick **Lantern** and open **Wallets** to see the vault's address on four other chains, where routine bills were paid alone inside each chain's auto cap ([docs/VERIFIED.md](docs/VERIFIED.md), item 17).
 3. On the same page, click **Export**. You get an Excel workbook with five sheets: **Summary** (balances, counts, rules), **Activity** (every decision, who made it and why), **Payments** (the bill schedule and each bill's status), **Ledger** (every transfer, labelled from the transaction that made it, with links) and **Wallets** (the vault on NEAR, the yield investment and the vault's address on each other chain).
 4. Open https://keel-treasury.vercel.app/app?view=keelteam85369.sputnikv2.testnet, pick **Deck85369** in the company card, then open **Rules**. You see a company owned by a 2-member Sputnik DAO multisig: its members and what each may do, the votes a change needs, and any open proposals with their exact calls and arguments.
-5. Open https://github.com/Ultraviolet01/Keel/actions/workflows/agent.yml. You see the hosted agent's runs: scheduled every 15 minutes, started by GitHub every few hours in practice; each log lists what Keel did in every vault, with transaction links.
+5. Open https://github.com/Ultraviolet01/Keel/actions/workflows/agent.yml. You see the hosted agent's runs: every 15 minutes until 10 Nov, every few hours since, after that trigger was paused to stay within the free Vercel Blob quota; each log lists what Keel did in every vault, with transaction links.
 
 ## Try it
 
