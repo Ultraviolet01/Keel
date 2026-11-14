@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
-import { alertSubject, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
+import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
 import { nep413Hash, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
@@ -133,4 +133,15 @@ test("emails name the company: in the subject and each section", () => {
     ]),
     "Keel: 3 things need you in Compass, Harvest",
   );
+});
+
+test("web addresses a payee wrote are never clickable in a Keel email; NEAR accounts and Keel's own link stay", () => {
+  const line = 'Keel\'s reason: Pay 9.00 USDC to atlas.testnet. Invoice text (unverified): "confirm at https://keel-verify.example.com/login, www.keel-login.com or keel-support.net, HTTP : // x.io"';
+  const r = renderEmail({ heading: "h", sections: [{ title: "Acme", lines: [line] }], link: "https://keel-treasury.vercel.app/app", linkText: "Open Keel" });
+  for (const body of [r.text, r.html]) {
+    assert.doesNotMatch(body, /https:\/\/keel-verify|www\.keel-login|keel-support\.net|x\.io/i);
+    assert.match(body, /atlas\.testnet/);
+  }
+  assert.match(r.html, /href="https:\/\/keel-treasury\.vercel\.app\/app"/);
+  assert.equal(defang("Pay 2.00 USDC to northwind-keel.testnet, due 2026-11-26"), "Pay 2.00 USDC to northwind-keel.testnet, due 2026-11-26");
 });

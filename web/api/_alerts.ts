@@ -201,19 +201,30 @@ export const SPAM_HINT = "If this email was in Spam or Promotions, mark it Not s
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/**
+ * Lines can quote text a payee wrote (an invoice memo inside a proposal reason). Web addresses in
+ * them are defanged so no mail client turns them into links inside a genuine Keel email:
+ * "https://x.com" reads "https[:]//x[.]com". NEAR accounts (".near", ".testnet") are left as they are.
+ */
+export const defang = (t: string) =>
+  t
+    .replace(/\b(h(?:tt|xx)ps?|ftp)\s*:\s*\/\//gi, "$1[:]//")
+    .replace(/\bwww\./gi, "www[.]")
+    .replace(/\b([a-z0-9-]+)\.(com|net|org|io|co|app|xyz|info|biz|me|link|site|online|top|click|dev|ai|us|uk|ng|ru|cn|example|page|ly|gl|to|cc|tk|live|shop|store|support|help|login|cloud|vercel)\b/gi, "$1[.]$2");
+
 /** A plain email: a heading, sections of lines, a button and an unsubscribe link. */
 export function renderEmail(o: { heading: string; sections: { title: string; lines: string[] }[]; link: string; linkText: string; unsubscribe?: string }) {
   const text = [
     o.heading,
     "",
-    ...o.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${l}`), ""]),
+    ...o.sections.flatMap((s) => [s.title, ...s.lines.map((l) => `- ${defang(l)}`), ""]),
     `${o.linkText}: ${o.link}`,
     ...(o.unsubscribe ? ["", `Stop these emails: ${o.unsubscribe}`] : []),
   ].join("\n");
   const html = `<div style="font-family:system-ui,sans-serif;max-width:560px;color:#12313b">
 <h2 style="color:#0b5c55;margin:0 0 16px">${esc(o.heading)}</h2>
 ${o.sections
-  .map((s) => `<h3 style="margin:18px 0 6px;font-size:15px">${esc(s.title)}</h3><ul style="margin:0;padding-left:18px">${s.lines.map((l) => `<li style="margin:4px 0">${esc(l)}</li>`).join("")}</ul>`)
+  .map((s) => `<h3 style="margin:18px 0 6px;font-size:15px">${esc(s.title)}</h3><ul style="margin:0;padding-left:18px">${s.lines.map((l) => `<li style="margin:4px 0">${esc(defang(l))}</li>`).join("")}</ul>`)
   .join("\n")}
 <p style="margin:22px 0"><a href="${esc(o.link)}" style="background:#0b5c55;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">${esc(o.linkText)}</a></p>
 <p style="font-size:12px;color:#6b7c80">Keel runs on NEAR testnet with test tokens.${o.unsubscribe ? ` <a href="${esc(o.unsubscribe)}" style="color:#6b7c80">Stop these emails</a>.` : ""}</p>
