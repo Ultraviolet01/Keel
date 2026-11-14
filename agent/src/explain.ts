@@ -6,6 +6,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./chain";
 import { askNearAi, type AttestOptions } from "./nearai";
+import { printable, steersReviewer } from "./steer";
+export { printable } from "./steer";
 
 export interface ExplainInput {
   company: string;
@@ -17,13 +19,6 @@ export interface ExplainInput {
 }
 
 const MAX = 270; // the vault caps reasons at 280 characters
-
-/**
- * Text safe for logs and for a proposal reason on chain: control characters, terminal
- * escapes and bidi or zero-width marks become spaces, and runs of whitespace one space.
- */
-export const printable = (s: string) =>
-  s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ").replace(/\s+/g, " ").trim();
 
 /**
  * Keel's own facts come first. The bill's memo is text from the invoice, which
@@ -47,6 +42,8 @@ export type Writer = "near-ai" | "claude" | "template";
 /** The proposal reason. A NEAR AI reason counts only when its signature checks out; otherwise Keel writes its own. */
 export async function explain(cfg: Config, x: ExplainInput, opts: AttestOptions = {}): Promise<{ text: string; by: Writer }> {
   // The memo is invoice text the payee may have written; it never reaches a model.
+  // A payee name chosen to steer the writer (it is shown to the founder as the reason) gets Keel's own text instead.
+  if (steersReviewer(x.payee.replace(/[-_.]/g, " "))) return { text: template(x), by: "template" };
   const facts = JSON.stringify({ ...x, memo: undefined });
   const text = cfg.nearAiKey ? await nearAi(cfg, facts, opts) : cfg.anthropicKey ? await claude(cfg, facts) : undefined;
   const clean = text ? printable(text) : "";
