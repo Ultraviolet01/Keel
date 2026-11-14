@@ -48,6 +48,9 @@ export interface VaultState {
   sent: string[];
 }
 
+/** Whether a vault's alert state needs writing back: new, or different from what is stored. */
+export const stateChanged = (prev: VaultState | null, next: VaultState) => !prev || JSON.stringify(prev) !== JSON.stringify(next);
+
 /** One thing to tell people about. `who` picks the recipients among the vault's people. */
 export interface Alert {
   vault: string;

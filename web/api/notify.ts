@@ -11,7 +11,7 @@
 // Needs BLOB_STORE_ID (the private Blob store, reached with Vercel OIDC) or BLOB_READ_WRITE_TOKEN, GMAIL_USER and
 // GMAIL_APP_PASSWORD (a Gmail app password) in the Vercel project.
 
-import { SPAM_HINT, alertSubject, companyOf, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
+import { SPAM_HINT, alertSubject, stateChanged, companyOf, companyTitle, digestLines, recipients, renderEmail, vaultAlerts, type AgentEvent, type Alert, type VaultState } from "./_alerts.js";
 import { confirmDayPath, emptyDay, limitDaily, mapLimit, ownersNeedingTeams, takeConfirmation,
   APP_URL,
   allSubs,
@@ -156,7 +156,8 @@ async function run(events: AgentEvent[]): Promise<Response> {
       prev,
     );
     for (const al of alerts) for (const a of recipients(al, owner, team?.members ?? null)) if (byAccount.has(a)) inbox.set(a, [...(inbox.get(a) ?? []), al]);
-    await writeJson(statePath, next);
+    // Written only when it changed: most rounds change nothing, and every write counts against the Blob quota.
+    if (stateChanged(prev, next)) await writeJson(statePath, next);
   }
 
   let emails = 0;

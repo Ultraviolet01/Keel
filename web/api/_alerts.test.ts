@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { base58, base64 } from "@scure/base";
-import { alertSubject, companyTitle, defang, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
+import { alertSubject, companyTitle, defang, stateChanged, digestLines, recipients, renderEmail, vaultAlerts, type Snapshot, type VaultState } from "./_alerts.js";
 import { BUSY, CONFIRM_LIMITS, emptyDay, isDao, limitDaily, mapLimit, takeConfirmation, nep413Hash, ownersNeedingTeams, RECIPIENT, verifySigned } from "./_notify.js";
 
 const U = 1_000_000n;
@@ -228,4 +228,13 @@ test("a hung storage call cannot freeze the limit: it is refused as busy and the
   assert.equal(b, null);
   assert.equal(writes, 1);
   assert.ok(Date.now() - started < 8000);
+});
+
+test("a quiet round writes no vault state; a change, or a first round, does", () => {
+  const prev: VaultState = { lastProposal: 4, daoSeen: [1, 2], paused: false, pendingOwner: null, belowBuffer: false, sent: ["a"] };
+  const same = JSON.parse(JSON.stringify(prev)) as VaultState; // as read back from storage
+  assert.equal(stateChanged(same, { ...prev }), false);
+  assert.equal(stateChanged(prev, { ...prev, lastProposal: 5 }), true);
+  assert.equal(stateChanged(prev, { ...prev, sent: ["a", "b"] }), true);
+  assert.equal(stateChanged(null, prev), true);
 });
