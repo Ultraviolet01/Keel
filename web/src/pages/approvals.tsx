@@ -67,11 +67,11 @@ export function Approvals(p: PageProps) {
     setDeposit({ kind: "loading" });
     const billId = (selected.bill_ref ?? "").split(":")[0];
     const bill = p.data.bills?.find((b) => b.id === billId) ?? null;
-    checkDeposit(selected.receiver_id, selected, p.vaultId, bill).then((d) => live && setDeposit(d));
+    checkDeposit(selected.receiver_id, selected, p.vaultId, bill, p.data.policy.token_id).then((d) => live && setDeposit(d));
     return () => {
       live = false;
     };
-  }, [selected, p.vaultId, p.data.bills]);
+  }, [selected, p.vaultId, p.data.bills, p.data.policy.token_id]);
   const depositBlocks = deposit?.kind === "loading" || deposit?.kind === "unknown" || (deposit?.kind === "known" && deposit.problems.length > 0);
 
   useEffect(() => {

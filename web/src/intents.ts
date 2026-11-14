@@ -54,6 +54,8 @@ export function assessDeposit(
   vaultId: string,
   /** The bill this proposal says it pays; 1Click must pay that bill's payee, its amount of USDC, on its chain. */
   bill?: { payee: string; chain?: string | null; amount?: string } | null,
+  /** The vault's own token: the quote must expect exactly that as its deposit. */
+  tokenId?: string,
 ): DepositCheck {
   if (httpStatus === 404) return { kind: "unknown" };
   if (httpStatus < 200 || httpStatus >= 300 || !body || typeof body !== "object") {
@@ -80,6 +82,10 @@ export function assessDeposit(
     // the payee's chain, exact output, no redirection, and no fee beyond 1Click's own small one.
     const expect: [string, string][] = [["depositType", "ORIGIN_CHAIN"], ["refundType", "ORIGIN_CHAIN"], ["recipientType", "DESTINATION_CHAIN"], ["swapType", "EXACT_OUTPUT"]];
     for (const [k, v] of expect) if (req[k] !== v) problems.push(`the quote's ${k} is ${String(req[k] ?? "missing")}, not ${v} as Keel asks`);
+    // The deposit side: the vault's own token, a plain deposit, to an address still waiting for one.
+    if (tokenId && req.originAsset !== `nep141:${tokenId}`) problems.push(`the quote expects ${String(req.originAsset ?? "an unknown token")}, but the vault pays ${tokenId}`);
+    if (req.depositMode !== undefined && req.depositMode !== "SIMPLE") problems.push(`the quote needs a ${String(req.depositMode)} deposit, which the vault cannot make`);
+    if (b.status !== "PENDING_DEPOSIT") problems.push(`this deposit address is ${String(b.status ?? "in an unknown state")}, not waiting for a deposit`);
     for (const k of ["virtualChainRecipient", "virtualChainRefundRecipient"]) if (req[k]) problems.push(`the quote redirects funds through ${k}`);
     const fees = Array.isArray(req.appFees) ? req.appFees : [];
     const bps = fees.reduce((t: number, f: { fee?: unknown }) => t + (Number(f?.fee) || 0), 0);
@@ -104,13 +110,13 @@ export function assessDeposit(
   };
 }
 
-export async function checkDeposit(depositAddress: string, proposal: { amount: string }, vaultId: string, bill?: { payee: string; chain?: string | null; amount?: string } | null): Promise<DepositCheck> {
+export async function checkDeposit(depositAddress: string, proposal: { amount: string }, vaultId: string, bill?: { payee: string; chain?: string | null; amount?: string } | null, tokenId?: string): Promise<DepositCheck> {
   try {
     const res = await fetch(`${ONECLICK_URL}/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, {
       signal: AbortSignal.timeout(15_000),
     });
     const body = await res.json().catch(() => null);
-    return assessDeposit(res.status, body, proposal, vaultId, bill);
+    return assessDeposit(res.status, body, proposal, vaultId, bill, tokenId);
   } catch (e) {
     return { kind: "unreachable", detail: String(e instanceof Error ? e.message : e).slice(0, 120) };
   }

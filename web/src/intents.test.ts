@@ -8,7 +8,7 @@ const bill = { payee: "0x00000000000000000000000000000000000000AA", chain: "base
 const reply = (over: Record<string, unknown> = {}) => ({
   status: "PENDING_DEPOSIT",
   quoteResponse: {
-    quoteRequest: { recipient: "0x00000000000000000000000000000000000000aa", refundTo: vault, destinationAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", depositType: "ORIGIN_CHAIN", refundType: "ORIGIN_CHAIN", recipientType: "DESTINATION_CHAIN", swapType: "EXACT_OUTPUT", appFees: [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 1 }], virtualChainRecipient: null, virtualChainRefundRecipient: null, ...over },
+    quoteRequest: { recipient: "0x00000000000000000000000000000000000000aa", refundTo: vault, destinationAsset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", originAsset: "nep141:usdc.vault.near", depositMode: "SIMPLE", depositType: "ORIGIN_CHAIN", refundType: "ORIGIN_CHAIN", recipientType: "DESTINATION_CHAIN", swapType: "EXACT_OUTPUT", appFees: [{ recipient: "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd", fee: 1 }], virtualChainRecipient: null, virtualChainRefundRecipient: null, ...over },
     quote: { amountIn: "101330000", amountOut: "100000000", amountOutFormatted: "100.0", ...((over as { quote?: object }).quote ?? {}) },
   },
 });
@@ -88,4 +88,22 @@ test("a quote that strands refunds, redirects delivery or takes a cut blocks app
   // A genuine quote, with 1Click's own 0.01% fee, passes.
   const ok = assessDeposit(200, reply(), proposal, vault, bill);
   assert.ok(ok.kind === "known" && ok.problems.length === 0, JSON.stringify(ok));
+});
+
+test("the quote must expect the vault's own token, a plain deposit, and still be waiting for it", () => {
+  const token = "usdc.vault.near";
+  const good = assessDeposit(200, reply(), proposal, vault, bill, token);
+  assert.ok(good.kind === "known" && good.problems.length === 0, JSON.stringify(good));
+  const cases: [Record<string, unknown>, string][] = [
+    [{ originAsset: "nep141:wrap.near" }, "but the vault pays usdc.vault.near"],
+    [{ depositMode: "MEMO" }, "needs a MEMO deposit"],
+  ];
+  for (const [over, why] of cases) {
+    const d = assessDeposit(200, reply(over), proposal, vault, bill, token);
+    assert.ok(d.kind === "known" && d.problems.some((x) => x.includes(why)), why);
+  }
+  for (const status of ["SUCCESS", "REFUNDED", "PROCESSING", "INCOMPLETE_DEPOSIT"]) {
+    const d = assessDeposit(200, { ...reply(), status }, proposal, vault, bill, token);
+    assert.ok(d.kind === "known" && d.problems.some((x) => x.includes(`is ${status}, not waiting`)), status);
+  }
 });
