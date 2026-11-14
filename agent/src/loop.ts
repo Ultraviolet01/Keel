@@ -131,6 +131,19 @@ export function refusedNotice(vaultId: string, bill: Bill, money: (u: bigint) =>
   };
 }
 
+// Keel's notes on handled bills would otherwise grow forever (anyone can list and cancel bills
+// under new names every round), and the file is rewritten after every vault. The chain stays the
+// authority on what was paid, so old notes can go; open cross-chain transfers are always kept.
+export const HANDLED_KEEP_DAYS = 45;
+export const HANDLED_MAX_PER_VAULT = 500;
+export function pruneHandled(handled: State["handled"][string], now = Date.now()) {
+  const open = (h: State["handled"][string][string]) => h.action === "bridge" && !(h.swap && FINAL.includes(h.swap as never)) && !h.evmTx;
+  const age = (h: State["handled"][string][string]) => now - (Date.parse(h.at) || 0);
+  for (const [id, h] of Object.entries(handled)) if (!open(h) && age(h) > HANDLED_KEEP_DAYS * 86_400_000) delete handled[id];
+  const closed = Object.entries(handled).filter(([, h]) => !open(h)).sort(([, a], [, b]) => age(a) - age(b));
+  for (const [id] of closed.slice(HANDLED_MAX_PER_VAULT)) delete handled[id];
+}
+
 export async function runVault(cfg: Config, chain: Chain, vaultId: string, state: State, o: RoundOptions) {
   budget.reviews = 0;
   budget.deadline = o.deadline ?? Infinity;
@@ -162,6 +175,7 @@ export async function runVault(cfg: Config, chain: Chain, vaultId: string, state
   const listed = [...vaultBills(await chain.bills(vaultId), o.today), ...topUps(payees, held, o.today)];
   const bills = listed;
   const handled = (state.handled[vaultId] ??= {});
+  pruneHandled(handled);
   // Vaults that remember paid bills refuse to pay one twice; tag every call with the bill's id.
   const remembers = await chain.view(vaultId, "bill_paid_at", { bill_ref: "probe" }).then(() => true, () => false);
   // A bill the vault already paid is not due, whatever this run remembers: the hosted agent starts every
